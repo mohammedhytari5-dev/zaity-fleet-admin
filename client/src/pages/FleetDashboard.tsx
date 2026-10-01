@@ -400,6 +400,7 @@ export default function FleetDashboard() {
   const paymentUpdate = trpc.payments.update.useMutation();
   const paymentArchive = trpc.payments.archive.useMutation();
   const contractUpdate = trpc.contracts.update.useMutation();
+  const contractStatusUpdate = trpc.contracts.updateStatus.useMutation();
   const contractArchive = trpc.contracts.archive.useMutation();
   const [active, setActive] = useState<ModuleKey>(() => { const path = window.location.pathname; if (path.includes("vehicle")) return "vehicles"; if (path.includes("maintenance")) return "maintenance"; if (path.includes("document")) return "documents"; if (path.includes("driver")) return "drivers"; if (path.includes("client")) return "clients"; if (path.includes("financial")) return "finance"; if (path.includes("setting")) return "settings"; return "dashboard"; });
   const [collapsed, setCollapsed] = useState(false); const [mobileOpen, setMobileOpen] = useState(false); const [commandOpen, setCommandOpen] = useState(false); const [modal, setModal] = useState<{ module: ModuleKey; row?: Row } | null>(null); const [detail, setDetail] = useState<{ module: ModuleKey; row: Row } | null>(null); const [driverDetail, setDriverDetail] = useState<Driver | null>(null); const [assignmentVehicle, setAssignmentVehicle] = useState<Vehicle | null>(null); const [assignmentDriver, setAssignmentDriver] = useState<Driver | null>(null); const [quickAction, setQuickAction] = useState<{ action: string; row: Row } | null>(null);
@@ -547,7 +548,7 @@ export default function FleetDashboard() {
     } else if (active === "drivers" && quickAction.action === "status") {
       driverUpdate.mutate({ id, data: { status: value } } as any, { onSuccess: () => finish("تم تحديث حالة السائق", () => utils.drivers.list.invalidate()), onError: e => toast.error(`تعذر تحديث السائق: ${e.message}`) });
     } else if (active === "finance" && quickAction.action === "status") {
-      contractUpdate.mutate({ id, data: { status: value } } as any, { onSuccess: () => finish("تم تحديث حالة العقد", () => utils.contracts.list.invalidate()), onError: e => toast.error(`تعذر تحديث العقد: ${e.message}`) });
+      contractStatusUpdate.mutate({ id, status: value as "قائم" | "مكتمل" | "عرض سعر" | "ملغي" }, { onSuccess: () => finish("تم تحديث حالة العقد", () => utils.contracts.list.invalidate()), onError: e => toast.error(`تعذر تحديث العقد: ${e.message}`) });
     }
   };
   const sidebarCounts: Partial<Record<ModuleKey, number>> = { vehicles: vehicles.length, maintenance: maintenance.length, documents: documents.length, drivers: drivers.length, clients: clients.length, finance: contracts.length + claims.length };
