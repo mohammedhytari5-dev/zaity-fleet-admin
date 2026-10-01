@@ -13,9 +13,12 @@ const vehicleInput = z.object({
   color: z.string().min(1).max(48),
   mileage: z.string().min(1).max(32),
   driver: z.string().max(120).default("—"),
+  driverId: z.number().int().positive().nullable().default(null),
   status: z.enum(["متاحة", "مؤجرة", "مشغولة", "في الصيانة", "قيد التجهيز"]),
   client: z.string().max(160).default("—"),
+  clientId: z.number().int().positive().nullable().default(null),
   contract: z.string().max(80).default("—"),
+  contractId: z.number().int().positive().nullable().default(null),
   notes: z.string().max(4000).optional(),
 });
 
@@ -38,12 +41,14 @@ const driverInput = z.object({
   idNo: z.string().max(64).default("—"),
   status: z.enum(["متاح", "مشغول", "موقوف"]).default("متاح"),
   vehicle: z.string().max(32).default("—"),
+  vehicleId: z.number().int().positive().nullable().default(null),
   license: z.string().max(80).default("خصوصي"),
   renewal: z.string().max(32).default("—"),
 });
 const maintenanceInput = z.object({
   ref: z.string().min(2).max(40),
   vehicle: z.string().min(2).max(80),
+  vehicleId: z.number().int().positive().nullable().default(null),
   type: z.string().min(2).max(160),
   manager: z.string().max(160).default("—"),
   start: z.string().max(32).default("—"),
@@ -54,6 +59,7 @@ const maintenanceInput = z.object({
 const documentInput = z.object({
   name: z.string().min(2).max(160),
   entity: z.string().max(160).default("—"),
+  entityId: z.number().int().positive().nullable().default(null),
   type: z.string().max(80).default("مركبة"),
   expiry: z.string().max(32).default("—"),
   status: z.enum(["ساري", "قريبًا", "متأخر", "منتهي"]).default("ساري"),
@@ -107,8 +113,7 @@ export const appRouter = router({
   }),
   vehicles: router({
     list: protectedProcedure.query(async () => {
-      const records = await listVehicles();
-      return records && records.length > 0 ? records : demoVehicles;
+      return (await listVehicles()) ?? [];
     }),
     create: adminProcedure.input(vehicleInput).mutation(async ({ input }) => (await createVehicle(input)) ?? { ...input, id: Date.now() }),
     update: adminProcedure.input(z.object({ id: z.number().int().positive(), data: vehicleInput.partial() })).mutation(async ({ input }) => (await updateVehicle(input.id, input.data)) ?? { ...input.data, id: input.id }),
