@@ -308,20 +308,16 @@ function SettingsPage({ settingsCount, auditLogs }: { settingsCount: number; aud
   const createSetting = trpc.settingsCatalog.create.useMutation();
 
   const cards = [
-    { key: "vehicle_brands", icon: CarFront, group: "المركبات", title: "شركات المركبات", text: "إضافة وتعديل الشركات والماركات" },
-    { key: "vehicle_models", icon: CarFront, group: "المركبات", title: "موديلات المركبات", text: "إضافة وتعديل موديلات المركبات" },
+    { key: "maintenance_rules", icon: Wrench, group: "المركبات", title: "الصيانات الدورية", text: "إضافة وتعديل قواعد الصيانة الدورية" },
     { key: "vehicle_colors", icon: CarFront, group: "المركبات", title: "ألوان المركبات", text: "إضافة وتعديل ألوان المركبات" },
-    { key: "maintenance_types", icon: Wrench, group: "المركبات", title: "أنواع الصيانة", text: "صيانة دورية، أعطال ميكانيكية..." },
-    { key: "maintenance_rules", icon: Wrench, group: "المركبات", title: "الصيانات الدورية", text: "قواعد توليد التنبيهات حسب الأشهر أو الكيلومترات" },
-    { key: "license_types", icon: FileText, group: "المركبات", title: "أنواع التراخيص", text: "إدارة أنواع تراخيص السائقين والمركبات" },
-    { key: "locations", icon: MapPin, group: "الموقع", title: "الأحياء والمدن والدول", text: "إدارة بيانات الموقع والقوائم الجغرافية" },
-    { key: "document_types", icon: FileText, group: "الوثائق", title: "أنواع الوثائق", text: "تأمين شامل، رخصة سير، فحص دوري..." },
-    { key: "contract_types", icon: FileCheck2, group: "المالية", title: "أنواع العقود", text: "تشغيل أسطول، تأجير يومي، صيانة..." },
-    { key: "payment_methods", icon: BookOpen, group: "العقود", title: "طرق الدفع", text: "إدارة طرق الدفع وقوالب العقود" },
-    { key: "cost_types", icon: BookOpen, group: "عام", title: "بنود التكلفة", text: "مصروفات إدارية، رسوم حكومية..." },
-    { key: "job_titles", icon: UsersRound, group: "عام", title: "المسميات الوظيفية", text: "سائق خاص، مدير تشغيل، مندوب..." },
-    { key: "roles", icon: UsersRound, group: "النظام", title: "المستخدمون والصلاحيات", text: "الأدوار والوصول وتفويض الإجراءات" },
-    { key: "activity_log", icon: Activity, group: "النظام", title: "سجل النشاط", text: "مراجعة التغييرات والتصديرات" },
+    { key: "vehicle_models", icon: CarFront, group: "المركبات", title: "موديلات المركبات", text: "إضافة وتعديل موديلات المركبات" },
+    { key: "vehicle_brands", icon: CarFront, group: "المركبات", title: "شركات المركبات", text: "إضافة وتعديل شركات المركبات" },
+    { key: "license_types", icon: FileText, group: "المركبات", title: "أنواع التراخيص", text: "إضافة وتعديل أنواع تراخيص السائقين والمركبات" },
+    { key: "neighborhood", icon: MapPin, group: "الموقع", title: "الأحياء", text: "إضافة وتعديل الأحياء" },
+    { key: "states", icon: MapPin, group: "الموقع", title: "المدن", text: "إضافة وتعديل المدن" },
+    { key: "countries", icon: MapPin, group: "الموقع", title: "الدول", text: "إضافة وتعديل الدول" },
+    { key: "attachment_names", icon: FileText, group: "المستندات", title: "أنواع المستندات", text: "إضافة وتعديل الوثائق" },
+    { key: "payment_methods", icon: BookOpen, group: "العقود", title: "طرق الدفع", text: "إضافة وتعديل طرق الدفع" },
   ];
 
   const handleAddSetting = async (e: React.FormEvent) => {
@@ -415,12 +411,12 @@ export default function FleetDashboard() {
   const [drivers, setDrivers] = useState<Driver[]>(initialDrivers);
   const [maintenance, setMaintenance] = useState<Maintenance[]>(initialMaintenance); const [documents, setDocuments] = useState<Document[]>(initialDocuments); const [clients, setClients] = useState<Client[]>(initialClients); const [contracts, setContracts] = useState<Contract[]>(initialContracts); const [claims, setClaims] = useState<Claim[]>(initialClaims);
   useEffect(() => { if (vehicleQuery.data) setVehicles(vehicleQuery.data as Vehicle[]); }, [vehicleQuery.data]);
-  useEffect(() => { if (driverQuery.data) setDrivers(driverQuery.data as Driver[]); }, [driverQuery.data]);
-  useEffect(() => { if (maintenanceQuery.data) setMaintenance(maintenanceQuery.data as Maintenance[]); }, [maintenanceQuery.data]);
-  useEffect(() => { if (documentQuery.data) setDocuments(documentQuery.data as Document[]); }, [documentQuery.data]);
-  useEffect(() => { if (clientQuery.data) setClients(clientQuery.data as Client[]); }, [clientQuery.data]);
-  useEffect(() => { if (claimQuery.data) setClaims(claimQuery.data as Claim[]); }, [claimQuery.data]);
-  useEffect(() => { if (contractsQuery.data) setContracts(contractsQuery.data as Contract[]); }, [contractsQuery.data]);
+  useEffect(() => { if (driverQuery.data?.length) setDrivers(driverQuery.data as Driver[]); }, [driverQuery.data]);
+  useEffect(() => { if (maintenanceQuery.data?.length) setMaintenance(maintenanceQuery.data as Maintenance[]); }, [maintenanceQuery.data]);
+  useEffect(() => { if (documentQuery.data?.length) setDocuments(documentQuery.data as Document[]); }, [documentQuery.data]);
+  useEffect(() => { if (clientQuery.data?.length) setClients(clientQuery.data as Client[]); }, [clientQuery.data]);
+  useEffect(() => { if (claimQuery.data?.length) setClaims(claimQuery.data as Claim[]); }, [claimQuery.data]);
+  useEffect(() => { if (contractsQuery.data?.length) setContracts(contractsQuery.data as Contract[]); }, [contractsQuery.data]);
   useEffect(() => { const handler = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setCommandOpen(true); } if (e.key === "Escape") { setCommandOpen(false); setMobileOpen(false); } }; window.addEventListener("keydown", handler); return () => window.removeEventListener("keydown", handler); }, []);
   const onNavigate = (key: ModuleKey) => { setActive(key); setMobileOpen(false); navigate(key === "dashboard" ? "/dashboard" : `/dashboard/${key === "finance" ? "financial/contracts" : key}`); };
   const onAction = (action: string, row: Row) => {
