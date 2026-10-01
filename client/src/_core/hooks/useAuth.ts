@@ -44,10 +44,14 @@ export function useAuth(options?: UseAuthOptions) {
       try {
         sessionStorage.removeItem("manus-cookie");
       } catch {}
+      try {
+        localStorage.removeItem("manus-runtime-user-info");
+      } catch {}
       utils.auth.me.setData(undefined, undefined);
       await utils.auth.me.invalidate();
+      if (typeof window !== "undefined") window.location.href = redirectPath || "/login";
     }
-  }, [logoutMutation, utils]);
+  }, [logoutMutation, redirectPath, utils]);
 
   const state = useMemo(() => {
     localStorage.setItem(
