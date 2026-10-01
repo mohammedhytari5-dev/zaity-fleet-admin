@@ -1,0 +1,83 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1790602576799,
+      "tag": "0000_flowery_the_stranger",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1790602950441,
+      "tag": "0001_polite_inhumans",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1790688329676,
+      "tag": "0002_black_moon_knight",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1790777721633,
+      "tag": "0003_add_drivers",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1790777803465,
+      "tag": "0004_add_maintenance_requests",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1790777925544,
+      "tag": "0005_add_documents",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1790778009469,
+      "tag": "0006_add_clients",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1790778101210,
+      "tag": "0007_link_contracts_clients",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "5",
+      "when": 1790778171395,
+      "tag": "0008_add_claims",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "5",
+      "when": 1790779013981,
+      "tag": "0009_operations_suite",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1790779258455,
+      "tag": "0010_document_file_storage",
+      "breakpoints": true
+    }
+  ]
+}
