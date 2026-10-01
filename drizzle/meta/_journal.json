@@ -99,6 +99,13 @@
       "when": 1790842000000,
       "tag": "0013_local_auth_users",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "5",
+      "when": 1790843000000,
+      "tag": "0014_usernames",
+      "breakpoints": true
     }
   ]
 }

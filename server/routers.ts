@@ -98,17 +98,17 @@ const claimInput = z.object({
 const taskInput = z.object({ title: z.string().min(2).max(200), description: z.string().max(4000).optional(), dueAt: z.string().max(32).default("—"), status: z.enum(["مفتوحة", "مكتملة", "ملغاة"]).default("مفتوحة"), assignee: z.string().max(160).default("—") });
 const paymentInput = z.object({ contractId: z.number().int().positive().nullable().default(null), claimId: z.number().int().positive().nullable().default(null), clientId: z.number().int().positive().nullable().default(null), amount: z.number().int().positive(), paidAt: z.string().min(2).max(32), method: z.string().min(2).max(80), reference: z.string().max(80).default("—"), notes: z.string().max(4000).optional() }).refine(value => Boolean(value.contractId || value.claimId || value.clientId), { message: "يجب ربط الدفعة بعقد أو مطالبة أو عميل" });
 const representativeInput = z.object({ clientId: z.number().int().positive(), name: z.string().min(2).max(160), phone: z.string().min(3).max(40) });
-const userCreateInput = z.object({ name: z.string().min(2).max(160), email: z.string().email().max(320), password: z.string().min(8).max(200), role: z.enum(["user", "admin"]).default("user"), permissions: z.array(z.string().max(80)).max(30).default([]) });
+const userCreateInput = z.object({ name: z.string().min(2).max(160), username: z.string().regex(/^[a-zA-Z0-9_.-]{3,40}$/).transform(value => value.toLowerCase()), password: z.string().min(8).max(200), role: z.enum(["user", "admin"]).default("user"), permissions: z.array(z.string().max(80)).max(30).default([]) });
 const settingInput = z.object({ category: z.string().min(2).max(80), key: z.string().min(2).max(80), label: z.string().min(2).max(160), value: z.string().min(1).max(255), active: z.number().int().min(0).max(1).default(1) });
 
 export const appRouter = router({
   system: systemRouter,
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user ? { ...opts.ctx.user, passwordHash: undefined } : undefined),
-    login: publicProcedure.input(z.object({ email: z.string().email(), password: z.string().min(1).max(200) })).mutation(async ({ ctx, input }) => {
-      const user = await authenticateLocalUser(input.email, input.password);
-      if (!user) throw new TRPCError({ code: "UNAUTHORIZED", message: "البريد الإلكتروني أو كلمة المرور غير صحيحة" });
-      const token = await sdk.createSessionToken(user.openId, { name: user.name || user.email || "", expiresInMs: ONE_YEAR_MS });
+    login: publicProcedure.input(z.object({ username: z.string().min(3).max(40), password: z.string().min(1).max(200) })).mutation(async ({ ctx, input }) => {
+      const user = await authenticateLocalUser(input.username, input.password);
+      if (!user) throw new TRPCError({ code: "UNAUTHORIZED", message: "اسم المستخدم أو كلمة المرور غير صحيحة" });
+      const token = await sdk.createSessionToken(user.openId, { name: user.name || user.username || "", expiresInMs: ONE_YEAR_MS });
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.cookie(COOKIE_NAME, token, { ...cookieOptions, maxAge: ONE_YEAR_MS, sameSite: "lax" });
       return { ...user, passwordHash: undefined };

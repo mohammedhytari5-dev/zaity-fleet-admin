@@ -279,7 +279,7 @@ function SettingsPage({ settingsCount, auditLogs }: { settingsCount: number; aud
   const [location, navigate] = useLocation();
   const [activeCategory, setActiveCategory] = useState<{ key: string; title: string } | null>(null);
   const [newValue, setNewValue] = useState("");
-  const [newUser, setNewUser] = useState({ name: "", email: "", password: "", role: "user" as "user" | "admin", permissions: ["dashboard", "vehicles", "maintenance", "documents", "drivers", "clients", "finance"] });
+  const [newUser, setNewUser] = useState({ name: "", username: "", password: "", role: "user" as "user" | "admin", permissions: ["dashboard", "vehicles", "maintenance", "documents", "drivers", "clients", "finance"] });
   const { data: settings = [], refetch } = trpc.settingsCatalog.list.useQuery(undefined, { staleTime: 30000 });
   const createSetting = trpc.settingsCatalog.create.useMutation();
   const updateSetting = trpc.settingsCatalog.update.useMutation();
@@ -321,24 +321,24 @@ function SettingsPage({ settingsCount, auditLogs }: { settingsCount: number; aud
     const accounts = users ?? [];
     const submitUser = (event: React.FormEvent) => {
       event.preventDefault();
-      if (!newUser.name.trim() || !newUser.email.trim() || newUser.password.length < 8) { toast.error("أدخل الاسم والبريد وكلمة مرور من 8 أحرف على الأقل"); return; }
-      createUser.mutate({ ...newUser, name: newUser.name.trim(), email: newUser.email.trim().toLowerCase() }, { onSuccess: () => { setNewUser({ name: "", email: "", password: "", role: "user", permissions: ["dashboard", "vehicles", "maintenance", "documents", "drivers", "clients", "finance"] }); refetchUsers(); toast.success("تم إنشاء المستخدم بنجاح"); }, onError: error => toast.error(error.message) });
+      if (!newUser.name.trim() || !newUser.username.trim() || newUser.password.length < 8) { toast.error("أدخل الاسم واسم المستخدم وكلمة مرور من 8 أحرف على الأقل"); return; }
+      createUser.mutate({ ...newUser, name: newUser.name.trim(), username: newUser.username.trim().toLowerCase() }, { onSuccess: () => { setNewUser({ name: "", username: "", password: "", role: "user", permissions: ["dashboard", "vehicles", "maintenance", "documents", "drivers", "clients", "finance"] }); refetchUsers(); toast.success("تم إنشاء المستخدم بنجاح"); }, onError: error => toast.error(error.message) });
     };
     return <>
       <PageHeader eyebrow="الإعدادات / الأمان" title="المستخدمون والصلاحيات" description="أنشئ حسابات دخول فعلية وحدد دور كل مستخدم والأقسام المسموح له بها." />
       <button className="btn ghost" onClick={() => navigate("/dashboard/settings")}><ChevronRight size={15} />العودة إلى إعدادات النظام</button>
       <section className="surface user-admin-form" style={{ marginTop: "1rem", padding: "1.25rem" }}>
-        <div className="section-head"><div><h2>إضافة مستخدم جديد</h2><span>سيتمكن المستخدم من الدخول بالبريد وكلمة المرور التي تحددها.</span></div></div>
+        <div className="section-head"><div><h2>إضافة مستخدم جديد</h2><span>سيتمكن المستخدم من الدخول باسم المستخدم وكلمة المرور التي تحددها.</span></div></div>
         <form onSubmit={submitUser} className="form-grid" style={{ marginTop: "1rem" }}>
           <Field label="الاسم الكامل" value={newUser.name} onChange={value => setNewUser(prev => ({ ...prev, name: value }))} />
-          <Field label="البريد الإلكتروني" value={newUser.email} onChange={value => setNewUser(prev => ({ ...prev, email: value }))} type="email" />
+          <Field label="اسم المستخدم" value={newUser.username} onChange={value => setNewUser(prev => ({ ...prev, username: value }))} />
           <Field label="كلمة المرور" value={newUser.password} onChange={value => setNewUser(prev => ({ ...prev, password: value }))} type="password" />
           <label className="field"><span>الدور</span><select value={newUser.role} onChange={event => setNewUser(prev => ({ ...prev, role: event.target.value as "user" | "admin" }))}><option value="user">مستخدم</option><option value="admin">مدير النظام</option></select></label>
           <div className="permission-picker"><span>الأقسام المسموح بها</span><div>{permissionOptions.map(([key, label]) => <label key={key}><input type="checkbox" checked={newUser.permissions.includes(key)} onChange={event => setNewUser(prev => ({ ...prev, permissions: event.target.checked ? [...prev.permissions, key] : prev.permissions.filter(permission => permission !== key) }))} />{label}</label>)}</div></div>
           <div><button className="btn primary" type="submit" disabled={createUser.isPending}><Plus size={15} />{createUser.isPending ? "جارٍ الإنشاء..." : "إنشاء المستخدم"}</button></div>
         </form>
       </section>
-      <section className="surface" style={{ marginTop: "1rem", padding: "1.25rem" }}><div className="section-head"><div><h2>الحسابات الحالية</h2><span>{accounts.length} مستخدم محفوظ</span></div></div><div className="compact-list">{accounts.length ? accounts.map(account => <div className="compact-row" key={account.id}><div className="compact-main"><strong>{account.name || "مستخدم بلا اسم"}</strong><small>{account.email || "بدون بريد"} · {account.isActive ? "نشط" : "موقوف"}</small></div><select value={account.role} onChange={event => updateUserRole.mutate({ id: account.id, role: event.target.value as "user" | "admin" }, { onSuccess: () => { refetchUsers(); toast.success("تم تحديث صلاحية المستخدم"); }, onError: error => toast.error(error.message) })}><option value="admin">مدير النظام</option><option value="user">مستخدم</option></select></div>) : <div className="empty-state" style={{ padding: "2rem" }}><strong>لا يوجد مستخدمون</strong><span>أنشئ أول حساب من النموذج أعلاه.</span></div>}</div></section>
+      <section className="surface" style={{ marginTop: "1rem", padding: "1.25rem" }}><div className="section-head"><div><h2>الحسابات الحالية</h2><span>{accounts.length} مستخدم محفوظ</span></div></div><div className="compact-list">{accounts.length ? accounts.map(account => <div className="compact-row" key={account.id}><div className="compact-main"><strong>{account.name || "مستخدم بلا اسم"}</strong><small>@{account.username || "بدون اسم مستخدم"} · {account.isActive ? "نشط" : "موقوف"}</small></div><select value={account.role} onChange={event => updateUserRole.mutate({ id: account.id, role: event.target.value as "user" | "admin" }, { onSuccess: () => { refetchUsers(); toast.success("تم تحديث صلاحية المستخدم"); }, onError: error => toast.error(error.message) })}><option value="admin">مدير النظام</option><option value="user">مستخدم</option></select></div>) : <div className="empty-state" style={{ padding: "2rem" }}><strong>لا يوجد مستخدمون</strong><span>أنشئ أول حساب من النموذج أعلاه.</span></div>}</div></section>
     </>;
   }
   if (selectedCard) {

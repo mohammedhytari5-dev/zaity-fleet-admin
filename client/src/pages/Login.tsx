@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { LockKeyhole, LogIn, Mail, ShieldCheck } from "lucide-react";
+import { LockKeyhole, LogIn, ShieldCheck, UserRound } from "lucide-react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
@@ -8,7 +8,7 @@ import { useAuth } from "@/_core/hooks/useAuth";
 export default function Login() {
   const [, navigate] = useLocation();
   const { user, loading: authLoading } = useAuth();
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const utils = trpc.useUtils();
   const login = trpc.auth.login.useMutation({
@@ -26,11 +26,11 @@ export default function Login() {
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
-    if (!email.trim() || !password) {
-      toast.error("أدخل البريد الإلكتروني وكلمة المرور");
+    if (!username.trim() || !password) {
+      toast.error("أدخل اسم المستخدم وكلمة المرور");
       return;
     }
-    login.mutate({ email: email.trim().toLowerCase(), password });
+    login.mutate({ username: username.trim().toLowerCase(), password });
   };
 
   return (
@@ -39,7 +39,7 @@ export default function Login() {
         <div className="login-brand"><span className="login-logo">ه</span><div><strong>الهتاري بلس</strong><small>إدارة الأسطول</small></div></div>
         <div className="login-heading"><span className="login-icon"><ShieldCheck size={22} /></span><h1>تسجيل الدخول</h1><p>أدخل بيانات حسابك للوصول إلى لوحة التحكم.</p></div>
         <form onSubmit={submit} className="login-form">
-          <label className="login-field"><span>البريد الإلكتروني</span><div><Mail size={17} /><input type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="name@example.com" autoComplete="username" autoFocus /></div></label>
+          <label className="login-field"><span>اسم المستخدم</span><div><UserRound size={17} /><input type="text" value={username} onChange={event => setUsername(event.target.value)} placeholder="username" autoComplete="username" autoFocus /></div></label>
           <label className="login-field"><span>كلمة المرور</span><div><LockKeyhole size={17} /><input type="password" value={password} onChange={event => setPassword(event.target.value)} placeholder="أدخل كلمة المرور" autoComplete="current-password" /></div></label>
           <button className="btn primary login-submit" type="submit" disabled={login.isPending}><LogIn size={17} />{login.isPending ? "جارٍ الدخول..." : "دخول إلى النظام"}</button>
         </form>
