@@ -62,59 +62,14 @@ type PaymentRow = Row & { amount: number; paidAt: string; method: string; refere
 const navGroups: { label: string; items: { key: ModuleKey; label: string; icon: any; count?: string }[] }[] = [
   { label: "نظرة عامة", items: [{ key: "dashboard", label: "الإحصائيات", icon: LayoutDashboard }] },
   { label: "التشغيل", items: [
-    { key: "vehicles", label: "المركبات", icon: CarFront, count: "42" },
-    { key: "maintenance", label: "الصيانة", icon: Wrench, count: "6" },
-    { key: "documents", label: "المستندات", icon: FileCheck2, count: "9" },
+    { key: "vehicles", label: "المركبات", icon: CarFront },
+    { key: "maintenance", label: "الصيانة", icon: Wrench },
+    { key: "documents", label: "المستندات", icon: FileCheck2 },
     { key: "drivers", label: "السائقون", icon: UserRound },
     { key: "clients", label: "العملاء", icon: UsersRound },
   ] },
   { label: "المالية", items: [{ key: "finance", label: "المالية", icon: CircleDollarSign }] },
   { label: "النظام", items: [{ key: "settings", label: "الإعدادات", icon: Settings2 }] },
-];
-
-const initialVehicles: Vehicle[] = [
-  { id: 1, plate: "أ ب ج 4821", brand: "تويوتا", model: "كامري 2024", year: "2024", color: "أبيض لؤلؤي", mileage: "38,240 كم", driver: "أحمد العتيبي", status: "متاحة", client: "شركة المدار", contract: "عقد #CN-24018" },
-  { id: 2, plate: "ر س د 7312", brand: "هيونداي", model: "سوناتا 2023", year: "2023", color: "رمادي", mileage: "64,890 كم", driver: "خالد الشهري", status: "مؤجرة", client: "مجموعة رواسي", contract: "عقد #CN-23997" },
-  { id: 3, plate: "ن و هـ 1098", brand: "مرسيدس", model: "E-Class 2024", year: "2024", color: "أسود", mileage: "21,450 كم", driver: "—", status: "في الصيانة", client: "—", contract: "—" },
-  { id: 4, plate: "ج ح خ 5560", brand: "كيا", model: "K5 2022", year: "2022", color: "أزرق ليلي", mileage: "92,210 كم", driver: "سعد الحربي", status: "مشغولة", client: "بنك الأمان", contract: "عقد #CN-23841" },
-  { id: 5, plate: "م ك ل 8843", brand: "فورد", model: "تورس 2023", year: "2023", color: "فضي", mileage: "47,680 كم", driver: "ناصر الزهراني", status: "متاحة", client: "—", contract: "—" },
-  { id: 6, plate: "ط ظ ع 2301", brand: "تويوتا", model: "راف فور 2024", year: "2024", color: "أخضر غامق", mileage: "12,750 كم", driver: "—", status: "قيد التجهيز", client: "—", contract: "—" },
-];
-const initialDrivers: Driver[] = [
-  { id: 1, name: "أحمد محمد العتيبي", phone: "+966 50 234 8712", idNo: "10•••••482", status: "متاح", vehicle: "أ ب ج 4821", license: "خصوصي", renewal: "2026/11/08" },
-  { id: 2, name: "خالد سعد الشهري", phone: "+966 55 982 1440", idNo: "10•••••019", status: "مشغول", vehicle: "ر س د 7312", license: "نقل خفيف", renewal: "2026/04/22" },
-  { id: 3, name: "سعد عبدالله الحربي", phone: "+966 54 310 2998", idNo: "10•••••634", status: "مشغول", vehicle: "ج ح خ 5560", license: "خصوصي", renewal: "2027/01/19" },
-  { id: 4, name: "ناصر علي الزهراني", phone: "+966 56 441 9227", idNo: "10•••••971", status: "متاح", vehicle: "م ك ل 8843", license: "خصوصي", renewal: "2026/08/30" },
-  { id: 5, name: "فيصل صالح القحطاني", phone: "+966 53 770 1452", idNo: "10•••••108", status: "متاح", vehicle: "—", license: "نقل ثقيل", renewal: "2026/12/15" },
-];
-const initialClients: Client[] = [
-  { id: 1, name: "شركة المدار للخدمات اللوجستية", location: "الرياض", vat: "310•••••901", commercial: "1010••••42", contact: "سارة الدوسري", phone: "+966 11 456 8821", contracts: 4 },
-  { id: 2, name: "مجموعة رواسي القابضة", location: "جدة", vat: "310•••••117", commercial: "4030••••88", contact: "محمد الغامدي", phone: "+966 12 612 0091", contracts: 2 },
-  { id: 3, name: "بنك الأمان الوطني", location: "الرياض", vat: "310•••••552", commercial: "1010••••17", contact: "خالد السالم", phone: "+966 11 299 1040", contracts: 8 },
-  { id: 4, name: "مستشفى الحياة التخصصي", location: "الدمام", vat: "310•••••734", commercial: "2050••••31", contact: "ريم القحطاني", phone: "+966 13 824 7110", contracts: 1 },
-];
-const initialMaintenance: Maintenance[] = [
-  { id: 1, ref: "MT-24061", vehicle: "ن و هـ 1098", type: "صيانة دورية — 20,000 كم", manager: "ورشة المركز الرئيسي", start: "18 سبتمبر 2026", due: "غدًا", status: "جاري العمل", cost: "2,840 ر.س" },
-  { id: 2, ref: "MT-24059", vehicle: "ط ظ ع 2301", type: "فحص ما قبل التسليم", manager: "ياسر الغامدي", start: "17 سبتمبر 2026", due: "اليوم", status: "جديد", cost: "640 ر.س" },
-  { id: 3, ref: "MT-24053", vehicle: "ر س د 7312", type: "تغيير إطارات", manager: "ورشة الشفاء", start: "14 سبتمبر 2026", due: "مكتمل", status: "مكتمل", cost: "4,250 ر.س" },
-  { id: 4, ref: "MT-24048", vehicle: "ج ح خ 5560", type: "إصلاح تكييف", manager: "ورشة المركز الرئيسي", start: "11 سبتمبر 2026", due: "متأخر 2 يوم", status: "متوقف", cost: "1,980 ر.س" },
-];
-const initialDocuments: Document[] = [
-  { id: 1, name: "استمارة المركبة", entity: "أ ب ج 4821", type: "مركبة", expiry: "22 سبتمبر 2026", status: "قريبًا", owner: "تويوتا كامري" },
-  { id: 2, name: "رخصة القيادة", entity: "خالد الشهري", type: "سائق", expiry: "26 سبتمبر 2026", status: "متأخر", owner: "نقل خفيف" },
-  { id: 3, name: "شهادة الزكاة والضريبة", entity: "شركة المدار", type: "عميل", expiry: "15 أكتوبر 2026", status: "ساري", owner: "ملف العميل" },
-  { id: 4, name: "وثيقة التأمين الشامل", entity: "ن و هـ 1098", type: "مركبة", expiry: "04 نوفمبر 2026", status: "ساري", owner: "مرسيدس E-Class" },
-  { id: 5, name: "السجل التجاري", entity: "مجموعة رواسي", type: "عميل", expiry: "01 يناير 2027", status: "ساري", owner: "ملف العميل" },
-];
-const initialContracts: Contract[] = [
-  { id: 1, ref: "CN-24018", client: "شركة المدار", type: "تشغيل أسطول", total: 248000, collected: 186000, expiry: "28 ديسمبر 2026", status: "قائم" },
-  { id: 2, ref: "CN-23997", client: "مجموعة رواسي", type: "تأجير شهري", total: 96000, collected: 96000, expiry: "14 نوفمبر 2026", status: "قائم" },
-  { id: 3, ref: "CN-23841", client: "بنك الأمان", type: "نقل موظفين", total: 412000, collected: 274000, expiry: "04 أكتوبر 2026", status: "قائم" },
-];
-const initialClaims: Claim[] = [
-  { id: 1, ref: "CL-10291", client: "شركة المدار", contract: "CN-24018", amount: 62000, due: "30 سبتمبر 2026", paid: 31000, status: "مستحقة" },
-  { id: 2, ref: "CL-10287", client: "بنك الأمان", contract: "CN-23841", amount: 85000, due: "15 سبتمبر 2026", paid: 0, status: "متأخرة" },
-  { id: 3, ref: "CL-10281", client: "مجموعة رواسي", contract: "CN-23997", amount: 32000, due: "01 سبتمبر 2026", paid: 32000, status: "مدفوعة" },
 ];
 
 const statusTone: Record<string, string> = {
@@ -447,16 +402,16 @@ export default function FleetDashboard() {
   const contractArchive = trpc.contracts.archive.useMutation();
   const [active, setActive] = useState<ModuleKey>(() => { const path = window.location.pathname; if (path.includes("vehicle")) return "vehicles"; if (path.includes("maintenance")) return "maintenance"; if (path.includes("document")) return "documents"; if (path.includes("driver")) return "drivers"; if (path.includes("client")) return "clients"; if (path.includes("financial")) return "finance"; if (path.includes("setting")) return "settings"; return "dashboard"; });
   const [collapsed, setCollapsed] = useState(false); const [mobileOpen, setMobileOpen] = useState(false); const [commandOpen, setCommandOpen] = useState(false); const [modal, setModal] = useState<{ module: ModuleKey; row?: Row } | null>(null); const [detail, setDetail] = useState<{ module: ModuleKey; row: Row } | null>(null); const [driverDetail, setDriverDetail] = useState<Driver | null>(null); const [assignmentVehicle, setAssignmentVehicle] = useState<Vehicle | null>(null); const [assignmentDriver, setAssignmentDriver] = useState<Driver | null>(null); const [quickAction, setQuickAction] = useState<{ action: string; row: Row } | null>(null);
-  const [vehicles, setVehicles] = useState<Vehicle[]>(initialVehicles);
-  const [drivers, setDrivers] = useState<Driver[]>(initialDrivers);
-  const [maintenance, setMaintenance] = useState<Maintenance[]>(initialMaintenance); const [documents, setDocuments] = useState<Document[]>(initialDocuments); const [clients, setClients] = useState<Client[]>(initialClients); const [contracts, setContracts] = useState<Contract[]>(initialContracts); const [claims, setClaims] = useState<Claim[]>(initialClaims);
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [drivers, setDrivers] = useState<Driver[]>([]);
+  const [maintenance, setMaintenance] = useState<Maintenance[]>([]); const [documents, setDocuments] = useState<Document[]>([]); const [clients, setClients] = useState<Client[]>([]); const [contracts, setContracts] = useState<Contract[]>([]); const [claims, setClaims] = useState<Claim[]>([]);
   useEffect(() => { if (vehicleQuery.data) setVehicles(vehicleQuery.data as Vehicle[]); }, [vehicleQuery.data]);
-  useEffect(() => { if (driverQuery.data?.length) setDrivers(driverQuery.data as Driver[]); }, [driverQuery.data]);
-  useEffect(() => { if (maintenanceQuery.data?.length) setMaintenance(maintenanceQuery.data as Maintenance[]); }, [maintenanceQuery.data]);
-  useEffect(() => { if (documentQuery.data?.length) setDocuments(documentQuery.data as Document[]); }, [documentQuery.data]);
-  useEffect(() => { if (clientQuery.data?.length) setClients(clientQuery.data as Client[]); }, [clientQuery.data]);
-  useEffect(() => { if (claimQuery.data?.length) setClaims(claimQuery.data as Claim[]); }, [claimQuery.data]);
-  useEffect(() => { if (contractsQuery.data?.length) setContracts(contractsQuery.data as Contract[]); }, [contractsQuery.data]);
+  useEffect(() => { if (driverQuery.data) setDrivers(driverQuery.data as Driver[]); }, [driverQuery.data]);
+  useEffect(() => { if (maintenanceQuery.data) setMaintenance(maintenanceQuery.data as Maintenance[]); }, [maintenanceQuery.data]);
+  useEffect(() => { if (documentQuery.data) setDocuments(documentQuery.data as Document[]); }, [documentQuery.data]);
+  useEffect(() => { if (clientQuery.data) setClients(clientQuery.data as Client[]); }, [clientQuery.data]);
+  useEffect(() => { if (claimQuery.data) setClaims(claimQuery.data as Claim[]); }, [claimQuery.data]);
+  useEffect(() => { if (contractsQuery.data) setContracts(contractsQuery.data as Contract[]); }, [contractsQuery.data]);
   useEffect(() => { const handler = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setCommandOpen(true); } if (e.key === "Escape") { setCommandOpen(false); setMobileOpen(false); } }; window.addEventListener("keydown", handler); return () => window.removeEventListener("keydown", handler); }, []);
   const onNavigate = (key: ModuleKey) => { setActive(key); setMobileOpen(false); navigate(key === "dashboard" ? "/dashboard" : `/dashboard/${key === "finance" ? "financial/contracts" : key}`); };
   const onAction = (action: string, row: Row) => {
@@ -477,7 +432,7 @@ export default function FleetDashboard() {
     const nextDriver = driver?.name || "—";
     setVehicles(prev => prev.map(vehicle => vehicle.id === assignmentVehicle.id ? { ...vehicle, driver: nextDriver } : vehicle));
     setDrivers(prev => prev.map(item => item.name === driver?.name ? { ...item, vehicle: assignmentVehicle.plate, status: "مشغول" } : item.name === previous || item.vehicle === assignmentVehicle.plate ? { ...item, vehicle: "—", status: "متاح" } : item));
-    vehicleUpdate.mutate({ id: assignmentVehicle.id, data: { driver: nextDriver } }, { onSuccess: () => utils.vehicles.list.invalidate() });
+    vehicleUpdate.mutate({ id: assignmentVehicle.id, data: { driver: nextDriver, driverId: driver?.id ?? null } }, { onSuccess: () => utils.vehicles.list.invalidate() });
     if (driver) driverUpdate.mutate({ id: driver.id, data: { vehicle: assignmentVehicle.plate, status: "مشغول" } }, { onSuccess: () => utils.drivers.list.invalidate() });
     setAssignmentVehicle(null); toast.success(driver ? `تم إسناد ${driver.name} إلى ${assignmentVehicle.plate}` : "تم إلغاء إسناد السائق");
   };
@@ -488,7 +443,7 @@ export default function FleetDashboard() {
     setDrivers(prev => prev.map(item => item.id === assignmentDriver.id ? { ...item, vehicle: nextPlate, status: vehicle ? "مشغول" : "متاح" } : item));
     setVehicles(prev => prev.map(item => item.plate === nextPlate ? { ...item, driver: assignmentDriver.name } : item.plate === previousVehicle ? { ...item, driver: "—" } : item));
     if (vehicle) {
-      vehicleUpdate.mutate({ id: vehicle.id, data: { driver: assignmentDriver.name } }, { onSuccess: () => utils.vehicles.list.invalidate() });
+      vehicleUpdate.mutate({ id: vehicle.id, data: { driver: assignmentDriver.name, driverId: assignmentDriver.id } }, { onSuccess: () => utils.vehicles.list.invalidate() });
       driverUpdate.mutate({ id: assignmentDriver.id, data: { vehicle: vehicle.plate, status: "مشغول" } }, { onSuccess: () => utils.drivers.list.invalidate() });
     } else {
       driverUpdate.mutate({ id: assignmentDriver.id, data: { vehicle: "—", status: "متاح" } }, { onSuccess: () => utils.drivers.list.invalidate() });
@@ -578,9 +533,9 @@ export default function FleetDashboard() {
   if (authLoading) return <div className="auth-state" dir="rtl">جارٍ التحقق من صلاحية الدخول...</div>;
   if (!user) return <div className="auth-state" dir="rtl">جارٍ تحويلك إلى صفحة تسجيل الدخول...</div>;
   return <div className="app-shell" dir="rtl">
-    <aside className={`sidebar ${collapsed ? "collapsed" : ""} ${mobileOpen ? "mobile-open" : ""}`}><div className="sidebar-top"><Logo compact={collapsed} /><button className="collapse-btn" onClick={() => setCollapsed(!collapsed)} aria-label="طي القائمة"><ChevronRight size={17} /></button></div><div className="workspace-switch"><span className="workspace-avatar">ز</span><div><strong>زيتي لإدارة الأسطول</strong><small>الحساب الرئيسي</small></div><ChevronDown size={15} /></div><nav>{navGroups.map(group => <div className="nav-group" key={group.label}><span className="nav-label">{group.label}</span>{group.items.map(item => <button key={item.key} className={`nav-item ${active === item.key ? "active" : ""}`} onClick={() => onNavigate(item.key as ModuleKey)}><item.icon size={18} /><span>{item.label}</span>{item.count && <em>{item.count}</em>}</button>)}</div>)}</nav><div className="sidebar-bottom"><button className="help-link" onClick={() => toast.success("فريق الدعم متاح لمساعدتك") }><Headphones size={17} /><span>مركز المساعدة</span></button><div className="sidebar-user"><span className="user-avatar">ع</span><div><strong>عبدالرحمن السالم</strong><small>مدير النظام</small></div><button onClick={() => toast.success("تم تسجيل الخروج من العرض التجريبي")} aria-label="تسجيل الخروج"><LogOut size={16} /></button></div></div></aside>
+    <aside className={`sidebar ${collapsed ? "collapsed" : ""} ${mobileOpen ? "mobile-open" : ""}`}><div className="sidebar-top"><Logo compact={collapsed} /><button className="collapse-btn" onClick={() => setCollapsed(!collapsed)} aria-label="طي القائمة"><ChevronRight size={17} /></button></div><div className="workspace-switch"><span className="workspace-avatar">ز</span><div><strong>زيتي لإدارة الأسطول</strong><small>الحساب الرئيسي</small></div><ChevronDown size={15} /></div><nav>{navGroups.map(group => <div className="nav-group" key={group.label}><span className="nav-label">{group.label}</span>{group.items.map(item => <button key={item.key} className={`nav-item ${active === item.key ? "active" : ""}`} onClick={() => onNavigate(item.key as ModuleKey)}><item.icon size={18} /><span>{item.label}</span>{item.count && <em>{item.count}</em>}</button>)}</div>)}</nav><div className="sidebar-bottom"><button className="help-link" onClick={() => toast.success("فريق الدعم متاح لمساعدتك") }><Headphones size={17} /><span>مركز المساعدة</span></button><div className="sidebar-user"><span className="user-avatar">ع</span><div><strong>{user?.name || "المستخدم"}</strong><small>{user?.role === "admin" ? "مدير النظام" : "مستخدم"}</small></div><button onClick={() => toast.success("تم تسجيل الخروج من العرض التجريبي")} aria-label="تسجيل الخروج"><LogOut size={16} /></button></div></div></aside>
     {mobileOpen && <div className="mobile-overlay" onClick={() => setMobileOpen(false)} />}
-    <main className="main-area"><header className="topbar"><div className="topbar-start"><button className="mobile-menu" onClick={() => setMobileOpen(true)}><Menu size={20} /></button><div className="breadcrumbs"><span>الرئيسية</span><ChevronLeft size={14} /><strong>{active === "dashboard" ? "الإحصائيات" : navGroups.flatMap(g => g.items).find(i => i.key === active)?.label}</strong></div></div><div className="topbar-actions"><button className="quick-search" onClick={() => setCommandOpen(true)}><Search size={16} /><span>بحث سريع</span><kbd>⌘ K</kbd></button><button className="top-icon" onClick={() => { const first = notificationsQuery.data?.find(item => !item.readAt); toast(first ? `${first.title}: ${first.message}` : "لا توجد إشعارات جديدة", { icon: <Bell size={16} /> }); }}><Bell size={18} />{Boolean(notificationsQuery.data?.some(item => !item.readAt)) && <i />}</button><span className="top-divider" /><div className="top-profile"><span className="user-avatar">ع</span><div><strong>عبدالرحمن</strong><small>مدير النظام</small></div><ChevronDown size={14} /></div></div></header><div className="page-content">{content}</div><footer className="app-footer"><span>© ٢٠٢٦ زيتي بلس</span><span>آخر مزامنة منذ دقيقة</span><span className="online"><i /> النظام يعمل بشكل طبيعي</span></footer></main>
+    <main className="main-area"><header className="topbar"><div className="topbar-start"><button className="mobile-menu" onClick={() => setMobileOpen(true)}><Menu size={20} /></button><div className="breadcrumbs"><span>الرئيسية</span><ChevronLeft size={14} /><strong>{active === "dashboard" ? "الإحصائيات" : navGroups.flatMap(g => g.items).find(i => i.key === active)?.label}</strong></div></div><div className="topbar-actions"><button className="quick-search" onClick={() => setCommandOpen(true)}><Search size={16} /><span>بحث سريع</span><kbd>⌘ K</kbd></button><button className="top-icon" onClick={() => { const first = notificationsQuery.data?.find(item => !item.readAt); toast(first ? `${first.title}: ${first.message}` : "لا توجد إشعارات جديدة", { icon: <Bell size={16} /> }); }}><Bell size={18} />{Boolean(notificationsQuery.data?.some(item => !item.readAt)) && <i />}</button><span className="top-divider" /><div className="top-profile"><span className="user-avatar">ع</span><div><strong>{user?.name || "المستخدم"}</strong><small>{user?.role === "admin" ? "مدير النظام" : "مستخدم"}</small></div><ChevronDown size={14} /></div></div></header><div className="page-content">{content}</div><footer className="app-footer"><span>© ٢٠٢٦ زيتي بلس</span><span>آخر مزامنة منذ دقيقة</span><span className="online"><i /> النظام يعمل بشكل طبيعي</span></footer></main>
     {modal && <RecordForm module={modal.module} row={modal.row} onClose={() => setModal(null)} onSave={saveRecord} />}{driverDetail && <DriverVehiclesModal driver={driverDetail} vehicles={vehicles} onClose={() => setDriverDetail(null)} />}{assignmentVehicle && <AssignDriverModal vehicle={assignmentVehicle} drivers={drivers} onClose={() => setAssignmentVehicle(null)} onSave={saveAssignment} />}{assignmentDriver && <AssignVehicleModal driver={assignmentDriver} vehicles={vehicles} onClose={() => setAssignmentDriver(null)} onSave={saveVehicleAssignment} />}{quickAction && <QuickActionModal action={quickAction.action} row={quickAction.row} onClose={() => setQuickAction(null)} onSave={value => { if (quickAction.action === "status") { if (active === "maintenance") setMaintenance(prev => prev.map(item => item.id === quickAction.row.id ? { ...item, status: value } : item)); if (active === "documents") setDocuments(prev => prev.map(item => item.id === quickAction.row.id ? { ...item, status: value } : item)); if (active === "drivers") setDrivers(prev => prev.map(item => item.id === quickAction.row.id ? { ...item, status: value } : item)); if (active === "finance") setContracts(prev => prev.map(item => item.id === quickAction.row.id ? { ...item, status: value } : item)); } if (active === "documents" && quickAction.action === "extend") setDocuments(prev => prev.map(item => item.id === quickAction.row.id ? { ...item, expiry: value, status: "ساري" } : item)); if (active === "maintenance" && quickAction.action === "cost") setMaintenance(prev => prev.map(item => item.id === quickAction.row.id ? { ...item, cost: value } : item)); if (active === "maintenance" && quickAction.action === "item") setMaintenance(prev => prev.map(item => item.id === quickAction.row.id ? { ...item, type: `${item.type} · ${value}` } : item)); setQuickAction(null); toast.success("تم حفظ الإجراء"); }} />}{detail && <DetailModal module={detail.module} row={detail.row} onClose={() => setDetail(null)} onEdit={() => setModal({ module: detail.module, row: detail.row })} />}
     {commandOpen && <Modal title="البحث السريع" onClose={() => setCommandOpen(false)}><div className="command-search"><Search size={18} /><input autoFocus placeholder="ابحث عن مركبة، سائق، عميل أو إجراء..." /></div><div className="command-list"><button onClick={() => { onNavigate("vehicles"); setCommandOpen(false); }}><CarFront size={16} /><span>الانتقال إلى المركبات</span><kbd>↵</kbd></button><button onClick={() => { onNavigate("maintenance"); setCommandOpen(false); }}><Wrench size={16} /><span>فتح طلب صيانة جديد</span><kbd>↵</kbd></button><button onClick={() => { onNavigate("documents"); setCommandOpen(false); }}><FileText size={16} /><span>عرض المستندات المنتهية</span><kbd>↵</kbd></button></div></Modal>}
   </div>;

@@ -237,10 +237,11 @@ export async function createContract(input: InsertContract, items: Omit<InsertCo
     const result = await tx.insert(contracts).values(input);
     const id = Number(result[0].insertId);
     if (items.length) await tx.insert(contractItems).values(items.map(item => ({ ...item, contractId: id })));
+    if (input.clientId) await tx.update(clients).set({ contracts: sql`${clients.contracts} + 1` }).where(eq(clients.id, input.clientId));
     for (const item of items) {
       if (!item.vehicleId) continue;
       const vehicleStatus = item.coverage === "سائق فقط" ? "متاحة" : "مؤجرة";
-      await tx.update(vehicles).set({ contract: input.ref, client: input.client, status: vehicleStatus }).where(eq(vehicles.id, item.vehicleId));
+      await tx.update(vehicles).set({ contract: input.ref, client: input.client, clientId: input.clientId ?? null, contractId: id, status: vehicleStatus }).where(eq(vehicles.id, item.vehicleId));
     }
     const created = await tx.select().from(contracts).where(eq(contracts.id, id)).limit(1);
     const createdItems = await tx.select().from(contractItems).where(eq(contractItems.contractId, id));
@@ -251,16 +252,43 @@ export async function createContract(input: InsertContract, items: Omit<InsertCo
 export async function updateContract(id: number, input: Partial<InsertContract>, items?: Omit<InsertContractItem, "contractId">[]) {
   const db = await getDb();
   if (!db) return null;
-  await db.update(contracts).set(input).where(and(eq(contracts.id, id), isNull(contracts.archivedAt)));
-  if (items) {
-    await db.delete(contractItems).where(eq(contractItems.contractId, id));
-    if (items.length) await db.insert(contractItems).values(items.map(item => ({ ...item, contractId: id })));
-  }
-  const updated = (await db.select().from(contracts).where(eq(contracts.id, id)).limit(1))[0];
-  const updatedItems = await db.select().from(contractItems).where(eq(contractItems.contractId, id));
-  return updated ? { ...updated, items: updatedItems } : null;
+  return db.transaction(async tx => {
+    const current = (await tx.select().from(contracts).where(and(eq(contracts.id, id), isNull(contracts.archivedAt))).limit(1))[0];
+    if (!current) return null;
+    const oldItems = await tx.select().from(contractItems).where(eq(contractItems.contractId, id));
+    await tx.update(contracts).set(input).where(eq(contracts.id, id));
+    if (items) {
+      await tx.delete(contractItems).where(eq(contractItems.contractId, id));
+      if (items.length) await tx.insert(contractItems).values(items.map(item => ({ ...item, contractId: id })));
+      const nextVehicleIds = new Set(items.map(item => item.vehicleId).filter((value): value is number => Boolean(value)));
+      for (const item of oldItems) if (item.vehicleId && !nextVehicleIds.has(item.vehicleId)) await tx.update(vehicles).set({ contract: "—", contractId: null, client: "—", clientId: null, status: "متاحة" }).where(eq(vehicles.id, item.vehicleId));
+      const nextClient = input.client ?? current.client;
+      const nextClientId = input.clientId ?? current.clientId;
+      for (const item of items) if (item.vehicleId) await tx.update(vehicles).set({ contract: current.ref, contractId: id, client: nextClient, clientId: nextClientId ?? null, status: item.coverage === "سائق فقط" ? "متاحة" : "مؤجرة" }).where(eq(vehicles.id, item.vehicleId));
+    }
+    if (input.clientId && input.clientId !== current.clientId) {
+      if (current.clientId) await tx.update(clients).set({ contracts: sql`GREATEST(0, ${clients.contracts} - 1)` }).where(eq(clients.id, current.clientId));
+      await tx.update(clients).set({ contracts: sql`${clients.contracts} + 1` }).where(eq(clients.id, input.clientId));
+    }
+    const updated = (await tx.select().from(contracts).where(eq(contracts.id, id)).limit(1))[0];
+    const updatedItems = await tx.select().from(contractItems).where(eq(contractItems.contractId, id));
+    return updated ? { ...updated, items: updatedItems } : null;
+  });
 }
-export async function archiveContract(id: number) { const db = await getDb(); if (!db) return false; await db.update(contracts).set({ archivedAt: new Date() }).where(eq(contracts.id, id)); return true; }
+
+export async function archiveContract(id: number) {
+  const db = await getDb();
+  if (!db) return false;
+  return db.transaction(async tx => {
+    const current = (await tx.select().from(contracts).where(and(eq(contracts.id, id), isNull(contracts.archivedAt))).limit(1))[0];
+    if (!current) return false;
+    const items = await tx.select().from(contractItems).where(eq(contractItems.contractId, id));
+    for (const item of items) if (item.vehicleId) await tx.update(vehicles).set({ contract: "—", contractId: null, client: "—", clientId: null, status: "متاحة" }).where(eq(vehicles.id, item.vehicleId));
+    if (current.clientId) await tx.update(clients).set({ contracts: sql`GREATEST(0, ${clients.contracts} - 1)` }).where(eq(clients.id, current.clientId));
+    await tx.update(contracts).set({ archivedAt: new Date() }).where(eq(contracts.id, id));
+    return true;
+  });
+}
 
 export async function updateContractStatus(id: number, status: Contract["status"]): Promise<Contract | null> {
   const db = await getDb();

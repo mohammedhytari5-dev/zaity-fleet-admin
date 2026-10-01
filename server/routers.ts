@@ -92,15 +92,6 @@ const paymentInput = z.object({ contractId: z.number().int().positive().nullable
 const representativeInput = z.object({ clientId: z.number().int().positive(), name: z.string().min(2).max(160), phone: z.string().min(3).max(40) });
 const settingInput = z.object({ category: z.string().min(2).max(80), key: z.string().min(2).max(80), label: z.string().min(2).max(160), value: z.string().min(1).max(255), active: z.number().int().min(0).max(1).default(1) });
 
-const demoVehicles = [
-  { id: 1, plate: "أ ب ج 4821", brand: "تويوتا", model: "كامري 2024", year: "2024", color: "أبيض لؤلؤي", mileage: "38,240 كم", driver: "أحمد العتيبي", status: "متاحة" as const, client: "شركة المدار", contract: "عقد #CN-24018" },
-  { id: 2, plate: "ر س د 7312", brand: "هيونداي", model: "سوناتا 2023", year: "2023", color: "رمادي", mileage: "64,890 كم", driver: "خالد الشهري", status: "مؤجرة" as const, client: "مجموعة رواسي", contract: "عقد #CN-23997" },
-  { id: 3, plate: "ن و هـ 1098", brand: "مرسيدس", model: "E-Class 2024", year: "2024", color: "أسود", mileage: "21,450 كم", driver: "—", status: "في الصيانة" as const, client: "—", contract: "—" },
-  { id: 4, plate: "ج ح خ 5560", brand: "كيا", model: "K5 2022", year: "2022", color: "أزرق ليلي", mileage: "92,210 كم", driver: "سعد الحربي", status: "مشغولة" as const, client: "بنك الأمان", contract: "عقد #CN-23841" },
-  { id: 5, plate: "م ك ل 8843", brand: "فورد", model: "تورس 2023", year: "2023", color: "فضي", mileage: "47,680 كم", driver: "ناصر الزهراني", status: "متاحة" as const, client: "—", contract: "—" },
-  { id: 6, plate: "ط ظ ع 2301", brand: "تويوتا", model: "راف فور 2024", year: "2024", color: "أخضر غامق", mileage: "12,750 كم", driver: "—", status: "قيد التجهيز" as const, client: "—", contract: "—" },
-];
-
 export const appRouter = router({
   system: systemRouter,
   auth: router({
@@ -114,7 +105,7 @@ export const appRouter = router({
   vehicles: router({
     list: protectedProcedure.query(async () => {
       const records = await listVehicles();
-      return records && records.length > 0 ? records : demoVehicles;
+      return records ?? [];
     }),
     create: adminProcedure.input(vehicleInput).mutation(async ({ input }) => (await createVehicle(input)) ?? { ...input, id: Date.now() }),
     update: adminProcedure.input(z.object({ id: z.number().int().positive(), data: vehicleInput.partial() })).mutation(async ({ input }) => (await updateVehicle(input.id, input.data)) ?? { ...input.data, id: input.id }),
