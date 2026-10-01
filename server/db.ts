@@ -68,8 +68,13 @@ export async function updateVehicle(id: number, input: Partial<InsertVehicle>): 
 export async function archiveVehicle(id: number): Promise<boolean> {
   const db = await getDb();
   if (!db) return false;
-  await db.update(vehicles).set({ archivedAt: new Date() }).where(eq(vehicles.id, id));
-  return true;
+  return db.transaction(async tx => {
+    const vehicle = (await tx.select().from(vehicles).where(eq(vehicles.id, id)).limit(1))[0];
+    if (!vehicle) return false;
+    if (vehicle.driverId) await tx.update(drivers).set({ vehicleId: null, vehicle: "—", status: "متاح" }).where(eq(drivers.id, vehicle.driverId));
+    await tx.update(vehicles).set({ driverId: null, driver: "—", archivedAt: new Date() }).where(eq(vehicles.id, id));
+    return true;
+  });
 }
 
 export async function listDrivers(): Promise<Driver[] | null> {
@@ -98,8 +103,33 @@ export async function updateDriver(id: number, input: Partial<InsertDriver>): Pr
 export async function archiveDriver(id: number): Promise<boolean> {
   const db = await getDb();
   if (!db) return false;
-  await db.update(drivers).set({ archivedAt: new Date() }).where(eq(drivers.id, id));
-  return true;
+  return db.transaction(async tx => {
+    const driver = (await tx.select().from(drivers).where(eq(drivers.id, id)).limit(1))[0];
+    if (!driver) return false;
+    if (driver.vehicleId) await tx.update(vehicles).set({ driverId: null, driver: "—" }).where(eq(vehicles.id, driver.vehicleId));
+    await tx.update(drivers).set({ vehicleId: null, vehicle: "—", status: "متاح", archivedAt: new Date() }).where(eq(drivers.id, id));
+    return true;
+  });
+}
+
+export async function assignVehicleDriver(vehicleId: number, driverId: number | null): Promise<Vehicle | null> {
+  const db = await getDb();
+  if (!db) return null;
+  return db.transaction(async tx => {
+    const vehicle = (await tx.select().from(vehicles).where(and(eq(vehicles.id, vehicleId), isNull(vehicles.archivedAt))).limit(1))[0];
+    if (!vehicle) return null;
+    if (vehicle.driverId && vehicle.driverId !== driverId) await tx.update(drivers).set({ vehicleId: null, vehicle: "—", status: "متاح" }).where(eq(drivers.id, vehicle.driverId));
+    if (!driverId) {
+      await tx.update(vehicles).set({ driverId: null, driver: "—" }).where(eq(vehicles.id, vehicleId));
+    } else {
+      const driver = (await tx.select().from(drivers).where(and(eq(drivers.id, driverId), isNull(drivers.archivedAt))).limit(1))[0];
+      if (!driver) return null;
+      if (driver.vehicleId && driver.vehicleId !== vehicleId) await tx.update(vehicles).set({ driverId: null, driver: "—" }).where(eq(vehicles.id, driver.vehicleId));
+      await tx.update(vehicles).set({ driverId, driver: driver.name }).where(eq(vehicles.id, vehicleId));
+      await tx.update(drivers).set({ vehicleId, vehicle: vehicle.plate, status: "مشغول" }).where(eq(drivers.id, driverId));
+    }
+    return (await tx.select().from(vehicles).where(eq(vehicles.id, vehicleId)).limit(1))[0] ?? null;
+  });
 }
 
 export async function listMaintenanceRequests(): Promise<MaintenanceRequest[] | null> {
@@ -111,25 +141,38 @@ export async function listMaintenanceRequests(): Promise<MaintenanceRequest[] | 
 export async function createMaintenanceRequest(input: InsertMaintenanceRequest): Promise<MaintenanceRequest | null> {
   const db = await getDb();
   if (!db) return null;
-  const result = await db.insert(maintenanceRequests).values(input);
-  const id = Number(result[0].insertId);
-  const created = await db.select().from(maintenanceRequests).where(eq(maintenanceRequests.id, id)).limit(1);
-  return created[0] ?? null;
+  return db.transaction(async tx => {
+    const result = await tx.insert(maintenanceRequests).values(input);
+    const id = Number(result[0].insertId);
+    if (input.vehicleId && input.status !== "مكتمل") await tx.update(vehicles).set({ status: "في الصيانة" }).where(eq(vehicles.id, input.vehicleId));
+    return (await tx.select().from(maintenanceRequests).where(eq(maintenanceRequests.id, id)).limit(1))[0] ?? null;
+  });
 }
 
 export async function updateMaintenanceRequest(id: number, input: Partial<InsertMaintenanceRequest>): Promise<MaintenanceRequest | null> {
   const db = await getDb();
   if (!db) return null;
-  await db.update(maintenanceRequests).set(input).where(and(eq(maintenanceRequests.id, id), isNull(maintenanceRequests.archivedAt)));
-  const updated = await db.select().from(maintenanceRequests).where(eq(maintenanceRequests.id, id)).limit(1);
-  return updated[0] ?? null;
+  return db.transaction(async tx => {
+    const current = (await tx.select().from(maintenanceRequests).where(and(eq(maintenanceRequests.id, id), isNull(maintenanceRequests.archivedAt))).limit(1))[0];
+    if (!current) return null;
+    await tx.update(maintenanceRequests).set(input).where(eq(maintenanceRequests.id, id));
+    const vehicleId = input.vehicleId ?? current.vehicleId;
+    if (vehicleId) await tx.update(vehicles).set({ status: (input.status ?? current.status) === "مكتمل" ? "متاحة" : "في الصيانة" }).where(eq(vehicles.id, vehicleId));
+    if (input.vehicleId && current.vehicleId && input.vehicleId !== current.vehicleId) await tx.update(vehicles).set({ status: "متاحة" }).where(eq(vehicles.id, current.vehicleId));
+    return (await tx.select().from(maintenanceRequests).where(eq(maintenanceRequests.id, id)).limit(1))[0] ?? null;
+  });
 }
 
 export async function archiveMaintenanceRequest(id: number): Promise<boolean> {
   const db = await getDb();
   if (!db) return false;
-  await db.update(maintenanceRequests).set({ archivedAt: new Date() }).where(eq(maintenanceRequests.id, id));
-  return true;
+  return db.transaction(async tx => {
+    const current = (await tx.select().from(maintenanceRequests).where(and(eq(maintenanceRequests.id, id), isNull(maintenanceRequests.archivedAt))).limit(1))[0];
+    if (!current) return false;
+    await tx.update(maintenanceRequests).set({ archivedAt: new Date() }).where(eq(maintenanceRequests.id, id));
+    if (current.vehicleId) await tx.update(vehicles).set({ status: "متاحة" }).where(eq(vehicles.id, current.vehicleId));
+    return true;
+  });
 }
 
 export async function listDocuments(): Promise<Document[] | null> {
@@ -306,55 +349,78 @@ export async function markNotificationRead(id: number) { const db = await getDb(
 export async function createNotification(input: typeof notifications.$inferInsert) { const db = await getDb(); if (!db) return null; const result = await db.insert(notifications).values(input); return Number(result[0].insertId); }
 export async function listPayments() { const db = await getDb(); return db ? db.select().from(payments).where(isNull(payments.archivedAt)).orderBy(desc(payments.createdAt)) : null; }
 
-async function applyPaymentImpact(input: { contractId?: number | null; claimId?: number | null; amount?: number }, direction: 1 | -1) {
-  const db = await getDb();
-  if (!db) return;
-  const amount = Number(input.amount ?? 0) * direction;
-  if (input.contractId && amount) {
-    await db.update(contracts).set({ collected: sql`GREATEST(0, ${contracts.collected} + ${amount})` }).where(and(eq(contracts.id, input.contractId), isNull(contracts.archivedAt)));
+type DbExecutor = any;
+async function validatePaymentReferences(db: DbExecutor, input: { contractId?: number | null; claimId?: number | null; clientId?: number | null; amount?: number }) {
+  if (!input.contractId && !input.claimId && !input.clientId) throw new Error("يجب ربط الدفعة بعقد أو مطالبة أو عميل");
+  if (input.contractId) {
+    const contract = (await db.select().from(contracts).where(and(eq(contracts.id, input.contractId), isNull(contracts.archivedAt))).limit(1))[0];
+    if (!contract) throw new Error("العقد المرتبط بالدفعة غير موجود");
   }
+  if (input.claimId) {
+    const claim = (await db.select().from(claims).where(and(eq(claims.id, input.claimId), isNull(claims.archivedAt))).limit(1))[0];
+    if (!claim) throw new Error("المطالبة المرتبطة بالدفعة غير موجودة");
+    if (input.contractId && claim.contractId && input.contractId !== claim.contractId) throw new Error("المطالبة لا تتبع العقد المحدد");
+    if (Number(input.amount ?? 0) > claim.amount - claim.paid) throw new Error("قيمة الدفعة تتجاوز المتبقي من المطالبة");
+  }
+  if (input.clientId) {
+    const client = (await db.select().from(clients).where(and(eq(clients.id, input.clientId), isNull(clients.archivedAt))).limit(1))[0];
+    if (!client) throw new Error("العميل المرتبط بالدفعة غير موجود");
+  }
+}
+async function applyPaymentImpact(db: DbExecutor, input: { contractId?: number | null; claimId?: number | null; amount?: number }, direction: 1 | -1) {
+  const amount = Number(input.amount ?? 0) * direction;
+  if (input.contractId && amount) await db.update(contracts).set({ collected: sql`GREATEST(0, ${contracts.collected} + ${amount})` }).where(and(eq(contracts.id, input.contractId), isNull(contracts.archivedAt)));
   if (input.claimId && amount) {
     const claim = (await db.select().from(claims).where(and(eq(claims.id, input.claimId), isNull(claims.archivedAt))).limit(1))[0];
     if (claim) {
       const paid = Math.max(0, claim.paid + amount);
-      await db.update(claims).set({ paid, status: paid >= claim.amount ? "مدفوعة" : paid > 0 ? "مستحقة" : "مستحقة" }).where(eq(claims.id, input.claimId));
+      await db.update(claims).set({ paid, status: paid >= claim.amount ? "مدفوعة" : "مستحقة" }).where(eq(claims.id, input.claimId));
     }
   }
 }
 export async function createPayment(input: typeof payments.$inferInsert) {
   const db = await getDb();
   if (!db) return null;
-  const result = await db.insert(payments).values(input);
-  const paymentId = Number(result[0].insertId);
-  await applyPaymentImpact(input, 1);
-  const rows = await db.select().from(payments).where(eq(payments.id, paymentId)).limit(1);
-  return rows[0] ?? null;
+  return db.transaction(async tx => {
+    await validatePaymentReferences(tx, input);
+    const result = await tx.insert(payments).values(input);
+    const paymentId = Number(result[0].insertId);
+    await applyPaymentImpact(tx, input, 1);
+    return (await tx.select().from(payments).where(eq(payments.id, paymentId)).limit(1))[0] ?? null;
+  });
 }
 export async function updatePayment(id: number, input: Partial<typeof payments.$inferInsert>) {
   const db = await getDb();
   if (!db) return null;
-  const current = (await db.select().from(payments).where(and(eq(payments.id, id), isNull(payments.archivedAt))).limit(1))[0];
-  if (!current) return null;
-  await applyPaymentImpact(current, -1);
-  await db.update(payments).set(input).where(eq(payments.id, id));
-  const updated = (await db.select().from(payments).where(eq(payments.id, id)).limit(1))[0];
-  await applyPaymentImpact(updated, 1);
-  return updated ?? null;
+  return db.transaction(async tx => {
+    const current = (await tx.select().from(payments).where(and(eq(payments.id, id), isNull(payments.archivedAt))).limit(1))[0];
+    if (!current) return null;
+    const next = { ...current, ...input };
+    await applyPaymentImpact(tx, current, -1);
+    await validatePaymentReferences(tx, next);
+    await tx.update(payments).set(input).where(eq(payments.id, id));
+    await applyPaymentImpact(tx, next, 1);
+    return (await tx.select().from(payments).where(eq(payments.id, id)).limit(1))[0] ?? null;
+  });
 }
 export async function archivePayment(id: number) {
   const db = await getDb();
   if (!db) return false;
-  const current = (await db.select().from(payments).where(and(eq(payments.id, id), isNull(payments.archivedAt))).limit(1))[0];
-  if (!current) return false;
-  await applyPaymentImpact(current, -1);
-  await db.update(payments).set({ archivedAt: new Date() }).where(eq(payments.id, id));
-  return true;
+  return db.transaction(async tx => {
+    const current = (await tx.select().from(payments).where(and(eq(payments.id, id), isNull(payments.archivedAt))).limit(1))[0];
+    if (!current) return false;
+    await applyPaymentImpact(tx, current, -1);
+    await tx.update(payments).set({ archivedAt: new Date() }).where(eq(payments.id, id));
+    return true;
+  });
 }
+
 export async function updateSetting(id: number, input: Partial<typeof settingCatalog.$inferInsert>) { const db = await getDb(); if (!db) return null; await db.update(settingCatalog).set(input).where(eq(settingCatalog.id, id)); return (await db.select().from(settingCatalog).where(eq(settingCatalog.id, id)).limit(1))[0] ?? null; }
 export async function archiveSetting(id: number) { const db = await getDb(); if (!db) return false; await db.update(settingCatalog).set({ active: 0 }).where(eq(settingCatalog.id, id)); return true; }
 export async function listRepresentatives(clientId: number) { const db = await getDb(); return db ? db.select().from(clientRepresentatives).where(and(eq(clientRepresentatives.clientId, clientId), isNull(clientRepresentatives.archivedAt))) : null; }
 export async function createRepresentative(input: typeof clientRepresentatives.$inferInsert) { const db = await getDb(); if (!db) return null; const result = await db.insert(clientRepresentatives).values(input); const rows = await db.select().from(clientRepresentatives).where(eq(clientRepresentatives.id, Number(result[0].insertId))).limit(1); return rows[0] ?? null; }
 export async function listUsers() { const db = await getDb(); return db ? db.select({ id: users.id, name: users.name, email: users.email, role: users.role, createdAt: users.createdAt, lastSignedIn: users.lastSignedIn }).from(users).orderBy(desc(users.createdAt)) : null; }
+export async function countAdmins() { const db = await getDb(); if (!db) return null; const rows = await db.select({ id: users.id }).from(users).where(eq(users.role, "admin")); return rows.length; }
 export async function updateUserRole(id: number, role: "user" | "admin") { const db = await getDb(); if (!db) return null; await db.update(users).set({ role }).where(eq(users.id, id)); return (await db.select({ id: users.id, name: users.name, email: users.email, role: users.role, createdAt: users.createdAt, lastSignedIn: users.lastSignedIn }).from(users).where(eq(users.id, id)).limit(1))[0] ?? null; }
 export async function listSettings(category?: string) { const db = await getDb(); if (!db) return null; return category ? db.select().from(settingCatalog).where(eq(settingCatalog.category, category)) : db.select().from(settingCatalog); }
 export async function upsertSetting(input: typeof settingCatalog.$inferInsert) { const db = await getDb(); if (!db) return null; const result = await db.insert(settingCatalog).values(input); return Number(result[0].insertId); }

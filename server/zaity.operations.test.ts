@@ -67,6 +67,15 @@ describe("Zaity operations", () => {
     }
   });
 
+
+  it("rejects driver assignment without authentication", async () => {
+    const ctx: TrpcContext = { user: undefined, req: { protocol: "https", headers: {} } as TrpcContext["req"], res: {} as TrpcContext["res"] };
+    await expect(appRouter.createCaller(ctx).vehicles.assignDriver({ vehicleId: 1, driverId: null })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+  it("rejects unlinked payments for authenticated admins", async () => {
+    const ctx: TrpcContext = { user: adminUser, req: { protocol: "https", headers: {} } as TrpcContext["req"], res: {} as TrpcContext["res"] };
+    await expect(appRouter.createCaller(ctx).payments.create({ amount: 100, paidAt: "2026-09-30", method: "تحويل" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
   it("protects operational mutations added in the operations suite", async () => {
     const ctx: TrpcContext = { user: undefined, req: { protocol: "https", headers: {} } as TrpcContext["req"], res: {} as TrpcContext["res"] };
     await expect(appRouter.createCaller(ctx).tasks.create({ title: "مهمة اختبار" })).rejects.toMatchObject({ code: "UNAUTHORIZED" });

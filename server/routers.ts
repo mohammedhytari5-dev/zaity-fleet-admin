@@ -4,7 +4,7 @@ import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
-import { archiveClaim, archiveClient, archiveContract, archiveDocument, archiveDriver, archiveMaintenanceRequest, archivePayment, archiveSetting, archiveVehicle, createAuditLog, createClaim, createClient, createContract, createDocument, createDriver, createMaintenanceRequest, createNotification, createPayment, createRepresentative, createTask, createVehicle, listAuditLogs, listClaims, listClients, listContracts, listDocuments, listDrivers, listMaintenanceRequests, listNotifications, listPayments, listRepresentatives, listSettings, listTasks, listUsers, listVehicles, markNotificationRead, updateClaim, updatePayment, updateSetting, updateClient, updateContract, updateContractStatus, updateUserRole, updateDocument, updateDriver, updateMaintenanceRequest, updateTask, updateVehicle, upsertSetting } from "./db";
+import { archiveClaim, archiveClient, archiveContract, archiveDocument, archiveDriver, archiveMaintenanceRequest, archivePayment, archiveSetting, archiveVehicle, assignVehicleDriver, countAdmins, createAuditLog, createClaim, createClient, createContract, createDocument, createDriver, createMaintenanceRequest, createNotification, createPayment, createRepresentative, createTask, createVehicle, listAuditLogs, listClaims, listClients, listContracts, listDocuments, listDrivers, listMaintenanceRequests, listNotifications, listPayments, listRepresentatives, listSettings, listTasks, listUsers, listVehicles, markNotificationRead, updateClaim, updatePayment, updateSetting, updateClient, updateContract, updateContractStatus, updateUserRole, updateDocument, updateDriver, updateMaintenanceRequest, updateTask, updateVehicle, upsertSetting } from "./db";
 
 function requireRecord<T>(record: T | null | undefined, entity: string): T {
   if (!record) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `قاعدة البيانات غير متصلة؛ تعذر حفظ ${entity}` });
@@ -71,7 +71,7 @@ const documentInput = z.object({
   status: z.enum(["ساري", "قريبًا", "متأخر", "منتهي"]).default("ساري"),
   owner: z.string().max(160).default("—"),
   fileName: z.string().max(255).optional(),
-  fileUrl: z.string().max(1000).optional(),
+  fileUrl: z.string().max(3000000).optional(),
 });
 const clientInput = z.object({
   name: z.string().min(2).max(200),
@@ -94,7 +94,7 @@ const claimInput = z.object({
   status: z.enum(["مستحقة", "مدفوعة", "متأخرة", "ملغاة"]).default("مستحقة"),
 });
 const taskInput = z.object({ title: z.string().min(2).max(200), description: z.string().max(4000).optional(), dueAt: z.string().max(32).default("—"), status: z.enum(["مفتوحة", "مكتملة", "ملغاة"]).default("مفتوحة"), assignee: z.string().max(160).default("—") });
-const paymentInput = z.object({ contractId: z.number().int().positive().nullable().default(null), claimId: z.number().int().positive().nullable().default(null), clientId: z.number().int().positive().nullable().default(null), amount: z.number().int().positive(), paidAt: z.string().min(2).max(32), method: z.string().min(2).max(80), reference: z.string().max(80).default("—"), notes: z.string().max(4000).optional() });
+const paymentInput = z.object({ contractId: z.number().int().positive().nullable().default(null), claimId: z.number().int().positive().nullable().default(null), clientId: z.number().int().positive().nullable().default(null), amount: z.number().int().positive(), paidAt: z.string().min(2).max(32), method: z.string().min(2).max(80), reference: z.string().max(80).default("—"), notes: z.string().max(4000).optional() }).refine(value => Boolean(value.contractId || value.claimId || value.clientId), { message: "يجب ربط الدفعة بعقد أو مطالبة أو عميل" });
 const representativeInput = z.object({ clientId: z.number().int().positive(), name: z.string().min(2).max(160), phone: z.string().min(3).max(40) });
 const settingInput = z.object({ category: z.string().min(2).max(80), key: z.string().min(2).max(80), label: z.string().min(2).max(160), value: z.string().min(1).max(255), active: z.number().int().min(0).max(1).default(1) });
 
@@ -115,6 +115,7 @@ export const appRouter = router({
     }),
     create: adminProcedure.input(vehicleInput).mutation(async ({ input }) => requireRecord(await createVehicle(input), "المركبة")),
     update: adminProcedure.input(z.object({ id: z.number().int().positive(), data: vehicleInput.partial() })).mutation(async ({ input }) => requireRecord(await updateVehicle(input.id, input.data), "المركبة")),
+    assignDriver: adminProcedure.input(z.object({ vehicleId: z.number().int().positive(), driverId: z.number().int().positive().nullable() })).mutation(async ({ input }) => requireRecord(await assignVehicleDriver(input.vehicleId, input.driverId), "إسناد السائق")),
     archive: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archiveVehicle(input.id) })),
   }),
   drivers: router({
@@ -169,8 +170,8 @@ export const appRouter = router({
   }),
   payments: router({ list: protectedProcedure.query(() => listPayments()), create: adminProcedure.input(paymentInput).mutation(({ input }) => createPayment(input)), update: adminProcedure.input(z.object({ id: z.number().int().positive(), data: paymentInput.partial() })).mutation(({ input }) => updatePayment(input.id, input.data)), archive: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archivePayment(input.id) })) }),
   representatives: router({ list: protectedProcedure.input(z.object({ clientId: z.number().int().positive() })).query(({ input }) => listRepresentatives(input.clientId)), create: adminProcedure.input(representativeInput).mutation(({ input }) => createRepresentative(input)) }),
-  users: router({ list: adminProcedure.query(() => listUsers()), updateRole: adminProcedure.input(z.object({ id: z.number().int().positive(), role: z.enum(["user", "admin"]) })).mutation(({ input }) => updateUserRole(input.id, input.role)) }),
-  settingsCatalog: router({ list: protectedProcedure.input(z.object({ category: z.string().optional() }).optional()).query(({ input }) => listSettings(input?.category)), create: adminProcedure.input(settingInput).mutation(({ input }) => upsertSetting(input)), update: adminProcedure.input(z.object({ id: z.number().int().positive(), data: settingInput.partial() })).mutation(({ input }) => updateSetting(input.id, input.data)), archive: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archiveSetting(input.id) })) }),
+  users: router({ list: adminProcedure.query(() => listUsers()), updateRole: adminProcedure.input(z.object({ id: z.number().int().positive(), role: z.enum(["user", "admin"]) })).mutation(async ({ input }) => { if (input.role === "user") { const admins = await countAdmins(); if (admins !== null && admins <= 1) throw new TRPCError({ code: "FORBIDDEN", message: "لا يمكن تخفيض صلاحية آخر مدير في النظام" }); } return requireRecord(await updateUserRole(input.id, input.role), "صلاحية المستخدم"); }) }),
+  settingsCatalog: router({ list: protectedProcedure.input(z.object({ category: z.string().optional() }).optional()).query(({ input }) => listSettings(input?.category)), create: adminProcedure.input(settingInput).mutation(async ({ input }) => requireRecord(await upsertSetting(input), "القيمة المرجعية")), update: adminProcedure.input(z.object({ id: z.number().int().positive(), data: settingInput.partial() })).mutation(async ({ input }) => requireRecord(await updateSetting(input.id, input.data), "القيمة المرجعية")), archive: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archiveSetting(input.id) })) }),
   audit: router({ list: adminProcedure.query(() => listAuditLogs()), record: adminProcedure.input(z.object({ action: z.string().max(80), entityType: z.string().max(80), entityId: z.number().int().positive().optional(), details: z.string().max(4000).optional() })).mutation(({ ctx, input }) => createAuditLog({ ...input, userId: ctx.user?.id ?? null })) }),
 });
 

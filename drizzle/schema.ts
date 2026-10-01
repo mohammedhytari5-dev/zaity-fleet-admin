@@ -1,4 +1,4 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+import { int, mediumtext, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
@@ -119,7 +119,7 @@ export const documents = mysqlTable("documents", {
   status: mysqlEnum("status", ["ساري", "قريبًا", "متأخر", "منتهي"]).notNull().default("ساري"),
   owner: varchar("owner", { length: 160 }).notNull().default("—"),
   fileName: varchar("fileName", { length: 255 }),
-  fileUrl: text("fileUrl"),
+  fileUrl: mediumtext("fileUrl"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   archivedAt: timestamp("archivedAt"),
