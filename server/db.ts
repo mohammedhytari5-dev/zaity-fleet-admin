@@ -5,16 +5,41 @@ import { AuditLog, Claim, Client, Contract, ContractItem, Document, Driver, Inse
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
+let _authSchemaReady: Promise<void> | null = null;
+
+async function ensureAuthSchema(db: ReturnType<typeof drizzle>) {
+  const statements = [
+    "ALTER TABLE `users` ADD COLUMN `passwordHash` TEXT NULL",
+    "ALTER TABLE `users` ADD COLUMN `isActive` INT NOT NULL DEFAULT 1",
+    "ALTER TABLE `users` ADD COLUMN `permissions` TEXT NULL",
+    "ALTER TABLE `users` ADD COLUMN `username` VARCHAR(80) NULL",
+    "CREATE UNIQUE INDEX `users_username_unique` ON `users` (`username`)",
+  ];
+  for (const statement of statements) {
+    try {
+      await db.execute(sql.raw(statement));
+    } catch (error: any) {
+      const message = String(error?.cause?.message || error?.message || error);
+      if (!/Duplicate column|Duplicate key name|already exists|already has/i.test(message)) {
+        console.warn(`[Database] Schema check skipped: ${message}`);
+      }
+    }
+  }
+}
 
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
       _db = drizzle(process.env.DATABASE_URL);
+      _authSchemaReady = ensureAuthSchema(_db).catch(error => {
+        console.warn("[Database] Could not prepare authentication fields:", error);
+      });
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
       _db = null;
     }
   }
+  if (_db && _authSchemaReady) await _authSchemaReady;
   return _db;
 }
 
