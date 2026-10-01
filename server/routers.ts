@@ -113,7 +113,8 @@ export const appRouter = router({
   }),
   vehicles: router({
     list: protectedProcedure.query(async () => {
-      return (await listVehicles()) ?? [];
+      const records = await listVehicles();
+      return records && records.length > 0 ? records : demoVehicles;
     }),
     create: adminProcedure.input(vehicleInput).mutation(async ({ input }) => (await createVehicle(input)) ?? { ...input, id: Date.now() }),
     update: adminProcedure.input(z.object({ id: z.number().int().positive(), data: vehicleInput.partial() })).mutation(async ({ input }) => (await updateVehicle(input.id, input.data)) ?? { ...input.data, id: input.id }),
