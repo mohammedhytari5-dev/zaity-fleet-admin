@@ -279,6 +279,7 @@ function SettingsPage({ settingsCount, auditLogs }: { settingsCount: number; aud
   const [location, navigate] = useLocation();
   const [activeCategory, setActiveCategory] = useState<{ key: string; title: string } | null>(null);
   const [newValue, setNewValue] = useState("");
+  const [newUser, setNewUser] = useState({ name: "", email: "", password: "", role: "user" as "user" | "admin", permissions: ["dashboard", "vehicles", "maintenance", "documents", "drivers", "clients", "finance"] });
   const { data: settings = [], refetch } = trpc.settingsCatalog.list.useQuery(undefined, { staleTime: 30000 });
   const createSetting = trpc.settingsCatalog.create.useMutation();
   const updateSetting = trpc.settingsCatalog.update.useMutation();
@@ -286,6 +287,7 @@ function SettingsPage({ settingsCount, auditLogs }: { settingsCount: number; aud
   const deleteSetting = trpc.settingsCatalog.delete.useMutation();
   const { data: users = [], refetch: refetchUsers } = trpc.users.list.useQuery(undefined, { enabled: Boolean(location.includes("/users")) });
   const updateUserRole = trpc.users.updateRole.useMutation();
+  const createUser = trpc.users.create.useMutation();
 
   const cards = [
     { key: "pm", icon: Wrench, group: "المركبات", title: "الصيانات الدورية", text: "إضافة وتعديل قواعد الصيانة الدورية" },
@@ -315,7 +317,29 @@ function SettingsPage({ settingsCount, auditLogs }: { settingsCount: number; aud
 
   const selectedCard = cards.find(card => location.endsWith(`/${card.key}`));
   if (selectedCard && selectedCard.key === "users") {
-    return <><PageHeader eyebrow="الإعدادات / الأمان" title="المستخدمون والصلاحيات" description="إدارة حسابات المستخدمين وتحديد مستوى الوصول إلى العمليات الإدارية." /><button className="btn ghost" onClick={() => navigate("/dashboard/settings")}><ChevronRight size={15} />العودة إلى إعدادات النظام</button><section className="surface" style={{ marginTop: "1rem", padding: "1.25rem" }}><div className="compact-list">{(users ?? []).length ? (users ?? []).map(account => <div className="compact-row" key={account.id}><div className="compact-main"><strong>{account.name || "مستخدم بلا اسم"}</strong><small>{account.email || "بدون بريد"}</small></div><select value={account.role} onChange={e => updateUserRole.mutate({ id: account.id, role: e.target.value as "user" | "admin" }, { onSuccess: () => { refetchUsers(); toast.success("تم تحديث صلاحية المستخدم"); }, onError: error => toast.error(error.message) })}><option value="admin">مدير النظام</option><option value="user">مستخدم</option></select></div>) : <div className="empty-state" style={{ padding: "2rem" }}><strong>لا يوجد مستخدمون</strong><span>سيظهر المستخدمون بعد تسجيل دخولهم إلى النظام.</span></div>}</div></section></>;
+    const permissionOptions = [["dashboard", "لوحة التحكم"], ["vehicles", "المركبات"], ["maintenance", "الصيانة"], ["documents", "المستندات"], ["drivers", "السائقون"], ["clients", "العملاء"], ["finance", "المالية"]] as const;
+    const accounts = users ?? [];
+    const submitUser = (event: React.FormEvent) => {
+      event.preventDefault();
+      if (!newUser.name.trim() || !newUser.email.trim() || newUser.password.length < 8) { toast.error("أدخل الاسم والبريد وكلمة مرور من 8 أحرف على الأقل"); return; }
+      createUser.mutate({ ...newUser, name: newUser.name.trim(), email: newUser.email.trim().toLowerCase() }, { onSuccess: () => { setNewUser({ name: "", email: "", password: "", role: "user", permissions: ["dashboard", "vehicles", "maintenance", "documents", "drivers", "clients", "finance"] }); refetchUsers(); toast.success("تم إنشاء المستخدم بنجاح"); }, onError: error => toast.error(error.message) });
+    };
+    return <>
+      <PageHeader eyebrow="الإعدادات / الأمان" title="المستخدمون والصلاحيات" description="أنشئ حسابات دخول فعلية وحدد دور كل مستخدم والأقسام المسموح له بها." />
+      <button className="btn ghost" onClick={() => navigate("/dashboard/settings")}><ChevronRight size={15} />العودة إلى إعدادات النظام</button>
+      <section className="surface user-admin-form" style={{ marginTop: "1rem", padding: "1.25rem" }}>
+        <div className="section-head"><div><h2>إضافة مستخدم جديد</h2><span>سيتمكن المستخدم من الدخول بالبريد وكلمة المرور التي تحددها.</span></div></div>
+        <form onSubmit={submitUser} className="form-grid" style={{ marginTop: "1rem" }}>
+          <Field label="الاسم الكامل" value={newUser.name} onChange={value => setNewUser(prev => ({ ...prev, name: value }))} />
+          <Field label="البريد الإلكتروني" value={newUser.email} onChange={value => setNewUser(prev => ({ ...prev, email: value }))} type="email" />
+          <Field label="كلمة المرور" value={newUser.password} onChange={value => setNewUser(prev => ({ ...prev, password: value }))} type="password" />
+          <label className="field"><span>الدور</span><select value={newUser.role} onChange={event => setNewUser(prev => ({ ...prev, role: event.target.value as "user" | "admin" }))}><option value="user">مستخدم</option><option value="admin">مدير النظام</option></select></label>
+          <div className="permission-picker"><span>الأقسام المسموح بها</span><div>{permissionOptions.map(([key, label]) => <label key={key}><input type="checkbox" checked={newUser.permissions.includes(key)} onChange={event => setNewUser(prev => ({ ...prev, permissions: event.target.checked ? [...prev.permissions, key] : prev.permissions.filter(permission => permission !== key) }))} />{label}</label>)}</div></div>
+          <div><button className="btn primary" type="submit" disabled={createUser.isPending}><Plus size={15} />{createUser.isPending ? "جارٍ الإنشاء..." : "إنشاء المستخدم"}</button></div>
+        </form>
+      </section>
+      <section className="surface" style={{ marginTop: "1rem", padding: "1.25rem" }}><div className="section-head"><div><h2>الحسابات الحالية</h2><span>{accounts.length} مستخدم محفوظ</span></div></div><div className="compact-list">{accounts.length ? accounts.map(account => <div className="compact-row" key={account.id}><div className="compact-main"><strong>{account.name || "مستخدم بلا اسم"}</strong><small>{account.email || "بدون بريد"} · {account.isActive ? "نشط" : "موقوف"}</small></div><select value={account.role} onChange={event => updateUserRole.mutate({ id: account.id, role: event.target.value as "user" | "admin" }, { onSuccess: () => { refetchUsers(); toast.success("تم تحديث صلاحية المستخدم"); }, onError: error => toast.error(error.message) })}><option value="admin">مدير النظام</option><option value="user">مستخدم</option></select></div>) : <div className="empty-state" style={{ padding: "2rem" }}><strong>لا يوجد مستخدمون</strong><span>أنشئ أول حساب من النموذج أعلاه.</span></div>}</div></section>
+    </>;
   }
   if (selectedCard) {
     const values = (settings ?? []).filter(setting => setting.category === selectedCard.key);
@@ -359,7 +383,7 @@ function SettingsPage({ settingsCount, auditLogs }: { settingsCount: number; aud
 }
 
 export default function FleetDashboard() {
-  const { user, loading: authLoading, logout } = useAuth({ redirectOnUnauthenticated: true });
+  const { user, loading: authLoading, logout } = useAuth({ redirectOnUnauthenticated: true, redirectPath: "/login" });
   const [, navigate] = useLocation();
   const utils = trpc.useUtils();
   const vehicleQuery = trpc.vehicles.list.useQuery(undefined, { staleTime: 30000, enabled: Boolean(user) });
@@ -416,7 +440,9 @@ export default function FleetDashboard() {
   useEffect(() => { if (claimQuery.data) setClaims(claimQuery.data as Claim[]); }, [claimQuery.data]);
   useEffect(() => { if (contractsQuery.data) setContracts(contractsQuery.data as Contract[]); }, [contractsQuery.data]);
   useEffect(() => { const handler = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setCommandOpen(true); } if (e.key === "Escape") { setCommandOpen(false); setMobileOpen(false); } }; window.addEventListener("keydown", handler); return () => window.removeEventListener("keydown", handler); }, []);
-  const onNavigate = (key: ModuleKey) => { setActive(key); setMobileOpen(false); navigate(key === "dashboard" ? "/dashboard" : `/dashboard/${key === "finance" ? "financial/contracts" : key}`); };
+  const userPermissions = new Set(user?.role === "admin" ? ["dashboard", "vehicles", "maintenance", "documents", "drivers", "clients", "finance", "settings"] : (() => { try { return JSON.parse(user?.permissions || "[]") as string[]; } catch { return []; } })());
+  const canAccess = (key: ModuleKey) => userPermissions.has(key);
+  const onNavigate = (key: ModuleKey) => { if (!canAccess(key)) { toast.error("ليس لديك صلاحية الوصول إلى هذا القسم"); return; } setActive(key); setMobileOpen(false); navigate(key === "dashboard" ? "/dashboard" : `/dashboard/${key === "finance" ? "financial/contracts" : key}`); };
   const onAction = (action: string, row: Row) => {
     if (action === "view") setDetail({ module: active, row });
     else if (action === "edit") setModal({ module: active, row });
@@ -557,7 +583,7 @@ export default function FleetDashboard() {
   if (authLoading) return <div className="auth-state" dir="rtl">جارٍ التحقق من صلاحية الدخول...</div>;
   if (!user) return <div className="auth-state" dir="rtl">جارٍ تحويلك إلى صفحة تسجيل الدخول...</div>;
   return <div className="app-shell" dir="rtl">
-    <aside className={`sidebar ${collapsed ? "collapsed" : ""} ${mobileOpen ? "mobile-open" : ""}`}><div className="sidebar-top"><Logo compact={collapsed} /><button className="collapse-btn" onClick={() => setCollapsed(!collapsed)} aria-label="طي القائمة"><ChevronRight size={17} /></button></div><div className="workspace-switch"><span className="workspace-avatar">ه</span><div><strong>الهتاري بلس لإدارة الأسطول</strong><small>الحساب الرئيسي</small></div><ChevronDown size={15} /></div><nav>{navGroups.map(group => <div className="nav-group" key={group.label}><span className="nav-label">{group.label}</span>{group.items.map(item => <button key={item.key} className={`nav-item ${active === item.key ? "active" : ""}`} onClick={() => onNavigate(item.key as ModuleKey)}><item.icon size={18} /><span>{item.label}</span>{sidebarCounts[item.key] !== undefined && <em>{sidebarCounts[item.key]!.toLocaleString("ar-SA")}</em>}</button>)}</div>)}</nav><div className="sidebar-bottom"><button className="help-link" onClick={() => toast.info("تواصل مع مسؤول النظام للحصول على المساعدة") }><Headphones size={17} /><span>مركز المساعدة</span></button><div className="sidebar-user"><span className="user-avatar">ع</span><div><strong>{user?.name || "المستخدم"}</strong><small>{user?.role === "admin" ? "مدير النظام" : "مستخدم"}</small></div><button onClick={() => logout()} aria-label="تسجيل الخروج"><LogOut size={16} /></button></div></div></aside>
+    <aside className={`sidebar ${collapsed ? "collapsed" : ""} ${mobileOpen ? "mobile-open" : ""}`}><div className="sidebar-top"><Logo compact={collapsed} /><button className="collapse-btn" onClick={() => setCollapsed(!collapsed)} aria-label="طي القائمة"><ChevronRight size={17} /></button></div><div className="workspace-switch"><span className="workspace-avatar">ه</span><div><strong>الهتاري بلس لإدارة الأسطول</strong><small>الحساب الرئيسي</small></div><ChevronDown size={15} /></div><nav>{navGroups.map(group => <div className="nav-group" key={group.label}><span className="nav-label">{group.label}</span>{group.items.filter(item => canAccess(item.key as ModuleKey)).map(item => <button key={item.key} className={`nav-item ${active === item.key ? "active" : ""}`} onClick={() => onNavigate(item.key as ModuleKey)}><item.icon size={18} /><span>{item.label}</span>{sidebarCounts[item.key] !== undefined && <em>{sidebarCounts[item.key]!.toLocaleString("ar-SA")}</em>}</button>)}</div>)}</nav><div className="sidebar-bottom"><button className="help-link" onClick={() => toast.info("تواصل مع مسؤول النظام للحصول على المساعدة") }><Headphones size={17} /><span>مركز المساعدة</span></button><div className="sidebar-user"><span className="user-avatar">ع</span><div><strong>{user?.name || "المستخدم"}</strong><small>{user?.role === "admin" ? "مدير النظام" : "مستخدم"}</small></div><button onClick={() => logout()} aria-label="تسجيل الخروج"><LogOut size={16} /></button></div></div></aside>
     {mobileOpen && <div className="mobile-overlay" onClick={() => setMobileOpen(false)} />}
     <main className="main-area"><header className="topbar"><div className="topbar-start"><button className="mobile-menu" onClick={() => setMobileOpen(true)}><Menu size={20} /></button><div className="breadcrumbs"><span>الرئيسية</span><ChevronLeft size={14} /><strong>{active === "dashboard" ? "الإحصائيات" : navGroups.flatMap(g => g.items).find(i => i.key === active)?.label}</strong></div></div><div className="topbar-actions"><button className="quick-search" onClick={() => setCommandOpen(true)}><Search size={16} /><span>بحث سريع</span><kbd>⌘ K</kbd></button><button className="top-icon" onClick={() => { const first = notificationsQuery.data?.find(item => !item.readAt); toast(first ? `${first.title}: ${first.message}` : "لا توجد إشعارات جديدة", { icon: <Bell size={16} /> }); }}><Bell size={18} />{Boolean(notificationsQuery.data?.some(item => !item.readAt)) && <i />}</button><span className="top-divider" /><div className="top-profile"><span className="user-avatar">ع</span><div><strong>{user?.name || "المستخدم"}</strong><small>{user?.role === "admin" ? "مدير النظام" : "مستخدم"}</small></div><ChevronDown size={14} /></div></div></header><div className="page-content">{content}</div><footer className="app-footer"><span>© {new Date().getFullYear()} الهتاري بلس</span><span>البيانات متصلة بقاعدة البيانات</span><span className="online"><i /> النظام يعمل بشكل طبيعي</span></footer></main>
     {modal && <RecordForm module={modal.module} row={modal.row} onClose={() => setModal(null)} onSave={saveRecord} />}{driverDetail && <DriverVehiclesModal driver={driverDetail} vehicles={vehicles} onClose={() => setDriverDetail(null)} />}{assignmentVehicle && <AssignDriverModal vehicle={assignmentVehicle} drivers={drivers} onClose={() => setAssignmentVehicle(null)} onSave={saveAssignment} />}{assignmentDriver && <AssignVehicleModal driver={assignmentDriver} vehicles={vehicles} onClose={() => setAssignmentDriver(null)} onSave={saveVehicleAssignment} />}{quickAction && <QuickActionModal action={quickAction.action} module={active} row={quickAction.row} onClose={() => setQuickAction(null)} onSave={saveQuickAction} />}{detail && <DetailModal module={detail.module} row={detail.row} onClose={() => setDetail(null)} onEdit={() => setModal({ module: detail.module, row: detail.row })} />}

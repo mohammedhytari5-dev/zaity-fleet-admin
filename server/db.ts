@@ -1,4 +1,5 @@
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { drizzle } from "drizzle-orm/mysql2";
 import { AuditLog, Claim, Client, Contract, ContractItem, Document, Driver, InsertClaim, InsertClient, InsertContract, InsertContractItem, InsertDocument, InsertDriver, InsertMaintenanceRequest, InsertUser, InsertVehicle, MaintenanceRequest, User, Vehicle, auditLogs, claims, clientRepresentatives, clients, contractItems, contracts, documents, drivers, maintenanceRequests, notifications, payments, settingCatalog, tasks, users, vehicles } from "../drizzle/schema";
 import { ENV } from './_core/env';
@@ -38,8 +39,48 @@ export async function upsertUser(user: InsertUser): Promise<void> {
 export async function getUserByOpenId(openId: string): Promise<User | undefined> {
   const db = await getDb();
   if (!db) return undefined;
-  const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
+  const result = await db.select().from(users).where(and(eq(users.openId, openId), eq(users.isActive, 1))).limit(1);
   return result[0];
+}
+
+function hashPassword(password: string) {
+  const salt = randomBytes(16).toString("hex");
+  const hash = scryptSync(password, salt, 64).toString("hex");
+  return `${salt}:${hash}`;
+}
+
+function verifyPassword(password: string, stored: string) {
+  const [salt, expected] = stored.split(":");
+  if (!salt || !expected) return false;
+  const actual = scryptSync(password, salt, 64);
+  const expectedBuffer = Buffer.from(expected, "hex");
+  return actual.length === expectedBuffer.length && timingSafeEqual(actual, expectedBuffer);
+}
+
+export async function getUserByEmail(email: string): Promise<User | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(users).where(and(eq(users.email, email.toLowerCase()), eq(users.isActive, 1))).limit(1);
+  return result[0];
+}
+
+export async function authenticateLocalUser(email: string, password: string): Promise<User | null> {
+  const user = await getUserByEmail(email);
+  if (!user?.passwordHash || !verifyPassword(password, user.passwordHash)) return null;
+  const db = await getDb();
+  if (!db) return null;
+  await db.update(users).set({ lastSignedIn: new Date() }).where(eq(users.id, user.id));
+  return { ...user, lastSignedIn: new Date() };
+}
+
+export async function createLocalUser(input: { name: string; email: string; password: string; role: "user" | "admin"; permissions?: string[] }) {
+  const db = await getDb();
+  if (!db) return null;
+  const email = input.email.trim().toLowerCase();
+  const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
+  if (existing[0]) throw new Error("البريد الإلكتروني مستخدم بالفعل");
+  const result = await db.insert(users).values({ openId: `local-${randomBytes(18).toString("hex")}`, name: input.name.trim(), email, loginMethod: "local", passwordHash: hashPassword(input.password), role: input.role, permissions: JSON.stringify(input.permissions ?? []), isActive: 1 });
+  return (await db.select({ id: users.id, name: users.name, email: users.email, role: users.role, permissions: users.permissions, isActive: users.isActive, createdAt: users.createdAt, lastSignedIn: users.lastSignedIn }).from(users).where(eq(users.id, Number(result[0].insertId))).limit(1))[0] ?? null;
 }
 
 export async function listVehicles(): Promise<Vehicle[] | null> {
@@ -419,9 +460,9 @@ export async function updateSetting(id: number, input: Partial<typeof settingCat
 export async function archiveSetting(id: number) { const db = await getDb(); if (!db) return false; await db.update(settingCatalog).set({ active: 0 }).where(eq(settingCatalog.id, id)); return true; }
 export async function listRepresentatives(clientId: number) { const db = await getDb(); return db ? db.select().from(clientRepresentatives).where(and(eq(clientRepresentatives.clientId, clientId), isNull(clientRepresentatives.archivedAt))) : null; }
 export async function createRepresentative(input: typeof clientRepresentatives.$inferInsert) { const db = await getDb(); if (!db) return null; const result = await db.insert(clientRepresentatives).values(input); const rows = await db.select().from(clientRepresentatives).where(eq(clientRepresentatives.id, Number(result[0].insertId))).limit(1); return rows[0] ?? null; }
-export async function listUsers() { const db = await getDb(); return db ? db.select({ id: users.id, name: users.name, email: users.email, role: users.role, createdAt: users.createdAt, lastSignedIn: users.lastSignedIn }).from(users).orderBy(desc(users.createdAt)) : null; }
+export async function listUsers() { const db = await getDb(); return db ? db.select({ id: users.id, name: users.name, email: users.email, role: users.role, permissions: users.permissions, isActive: users.isActive, createdAt: users.createdAt, lastSignedIn: users.lastSignedIn }).from(users).orderBy(desc(users.createdAt)) : null; }
 export async function countAdmins() { const db = await getDb(); if (!db) return null; const rows = await db.select({ id: users.id }).from(users).where(eq(users.role, "admin")); return rows.length; }
-export async function updateUserRole(id: number, role: "user" | "admin") { const db = await getDb(); if (!db) return null; await db.update(users).set({ role }).where(eq(users.id, id)); return (await db.select({ id: users.id, name: users.name, email: users.email, role: users.role, createdAt: users.createdAt, lastSignedIn: users.lastSignedIn }).from(users).where(eq(users.id, id)).limit(1))[0] ?? null; }
+export async function updateUserRole(id: number, role: "user" | "admin") { const db = await getDb(); if (!db) return null; await db.update(users).set({ role }).where(eq(users.id, id)); return (await db.select({ id: users.id, name: users.name, email: users.email, role: users.role, permissions: users.permissions, isActive: users.isActive, createdAt: users.createdAt, lastSignedIn: users.lastSignedIn }).from(users).where(eq(users.id, id)).limit(1))[0] ?? null; }
 export async function listSettings(category?: string) { const db = await getDb(); if (!db) return null; return category ? db.select().from(settingCatalog).where(eq(settingCatalog.category, category)) : db.select().from(settingCatalog); }
 export async function upsertSetting(input: typeof settingCatalog.$inferInsert) { const db = await getDb(); if (!db) return null; const result = await db.insert(settingCatalog).values(input); return Number(result[0].insertId); }
 export async function deleteSetting(id: number) { const db = await getDb(); if (!db) return false; await db.delete(settingCatalog).where(eq(settingCatalog.id, id)); return true; }
