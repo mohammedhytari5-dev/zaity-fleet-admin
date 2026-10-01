@@ -24,6 +24,10 @@ export default function Login() {
     if (!authLoading && user) navigate("/dashboard");
   }, [authLoading, navigate, user]);
 
+  if (authLoading || user) {
+    return <main className="login-page" dir="rtl"><section className="login-card login-loading"><span className="login-logo">ه</span><strong>{authLoading ? "جارٍ التحقق من الجلسة..." : "جارٍ فتح لوحة التحكم..."}</strong></section></main>;
+  }
+
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
     if (!username.trim() || !password) {
