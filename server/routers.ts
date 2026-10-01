@@ -1,9 +1,15 @@
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { archiveClaim, archiveClient, archiveContract, archiveDocument, archiveDriver, archiveMaintenanceRequest, archivePayment, archiveSetting, archiveVehicle, createAuditLog, createClaim, createClient, createContract, createDocument, createDriver, createMaintenanceRequest, createNotification, createPayment, createRepresentative, createTask, createVehicle, listAuditLogs, listClaims, listClients, listContracts, listDocuments, listDrivers, listMaintenanceRequests, listNotifications, listPayments, listRepresentatives, listSettings, listTasks, listUsers, listVehicles, markNotificationRead, updateClaim, updatePayment, updateSetting, updateClient, updateContract, updateContractStatus, updateUserRole, updateDocument, updateDriver, updateMaintenanceRequest, updateTask, updateVehicle, upsertSetting } from "./db";
+
+function requireRecord<T>(record: T | null | undefined, entity: string): T {
+  if (!record) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `قاعدة البيانات غير متصلة؛ تعذر حفظ ${entity}` });
+  return record;
+}
 
 const vehicleInput = z.object({
   plate: z.string().min(2).max(32),
@@ -107,48 +113,48 @@ export const appRouter = router({
       const records = await listVehicles();
       return records ?? [];
     }),
-    create: adminProcedure.input(vehicleInput).mutation(async ({ input }) => (await createVehicle(input)) ?? { ...input, id: Date.now() }),
-    update: adminProcedure.input(z.object({ id: z.number().int().positive(), data: vehicleInput.partial() })).mutation(async ({ input }) => (await updateVehicle(input.id, input.data)) ?? { ...input.data, id: input.id }),
+    create: adminProcedure.input(vehicleInput).mutation(async ({ input }) => requireRecord(await createVehicle(input), "المركبة")),
+    update: adminProcedure.input(z.object({ id: z.number().int().positive(), data: vehicleInput.partial() })).mutation(async ({ input }) => requireRecord(await updateVehicle(input.id, input.data), "المركبة")),
     archive: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archiveVehicle(input.id) })),
   }),
   drivers: router({
     list: protectedProcedure.query(async () => (await listDrivers()) ?? []),
-    create: adminProcedure.input(driverInput).mutation(async ({ input }) => (await createDriver(input)) ?? { ...input, id: Date.now() }),
-    update: adminProcedure.input(z.object({ id: z.number().int().positive(), data: driverInput.partial() })).mutation(async ({ input }) => (await updateDriver(input.id, input.data)) ?? { ...input.data, id: input.id }),
+    create: adminProcedure.input(driverInput).mutation(async ({ input }) => requireRecord(await createDriver(input), "السائق")),
+    update: adminProcedure.input(z.object({ id: z.number().int().positive(), data: driverInput.partial() })).mutation(async ({ input }) => requireRecord(await updateDriver(input.id, input.data), "السائق")),
     archive: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archiveDriver(input.id) })),
   }),
   maintenance: router({
     list: protectedProcedure.query(async () => (await listMaintenanceRequests()) ?? []),
-    create: adminProcedure.input(maintenanceInput).mutation(async ({ input }) => (await createMaintenanceRequest(input)) ?? { ...input, id: Date.now() }),
-    update: adminProcedure.input(z.object({ id: z.number().int().positive(), data: maintenanceInput.partial() })).mutation(async ({ input }) => (await updateMaintenanceRequest(input.id, input.data)) ?? { ...input.data, id: input.id }),
+    create: adminProcedure.input(maintenanceInput).mutation(async ({ input }) => requireRecord(await createMaintenanceRequest(input), "طلب الصيانة")),
+    update: adminProcedure.input(z.object({ id: z.number().int().positive(), data: maintenanceInput.partial() })).mutation(async ({ input }) => requireRecord(await updateMaintenanceRequest(input.id, input.data), "طلب الصيانة")),
     archive: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archiveMaintenanceRequest(input.id) })),
   }),
   documents: router({
     list: protectedProcedure.query(async () => (await listDocuments()) ?? []),
-    create: adminProcedure.input(documentInput).mutation(async ({ input }) => (await createDocument(input)) ?? { ...input, id: Date.now() }),
-    update: adminProcedure.input(z.object({ id: z.number().int().positive(), data: documentInput.partial() })).mutation(async ({ input }) => (await updateDocument(input.id, input.data)) ?? { ...input.data, id: input.id }),
+    create: adminProcedure.input(documentInput).mutation(async ({ input }) => requireRecord(await createDocument(input), "المستند")),
+    update: adminProcedure.input(z.object({ id: z.number().int().positive(), data: documentInput.partial() })).mutation(async ({ input }) => requireRecord(await updateDocument(input.id, input.data), "المستند")),
     archive: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archiveDocument(input.id) })),
   }),
   clients: router({
     list: protectedProcedure.query(async () => (await listClients()) ?? []),
-    create: adminProcedure.input(clientInput).mutation(async ({ input }) => (await createClient(input)) ?? { ...input, id: Date.now() }),
-    update: adminProcedure.input(z.object({ id: z.number().int().positive(), data: clientInput.partial() })).mutation(async ({ input }) => (await updateClient(input.id, input.data)) ?? { ...input.data, id: input.id }),
+    create: adminProcedure.input(clientInput).mutation(async ({ input }) => requireRecord(await createClient(input), "العميل")),
+    update: adminProcedure.input(z.object({ id: z.number().int().positive(), data: clientInput.partial() })).mutation(async ({ input }) => requireRecord(await updateClient(input.id, input.data), "العميل")),
     archive: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archiveClient(input.id) })),
   }),
   claims: router({
     list: protectedProcedure.query(async () => (await listClaims()) ?? []),
-    create: adminProcedure.input(claimInput).mutation(async ({ input }) => (await createClaim(input)) ?? { ...input, id: Date.now() }),
-    update: adminProcedure.input(z.object({ id: z.number().int().positive(), data: claimInput.partial() })).mutation(async ({ input }) => (await updateClaim(input.id, input.data)) ?? { ...input.data, id: input.id }),
+    create: adminProcedure.input(claimInput).mutation(async ({ input }) => requireRecord(await createClaim(input), "المطالبة")),
+    update: adminProcedure.input(z.object({ id: z.number().int().positive(), data: claimInput.partial() })).mutation(async ({ input }) => requireRecord(await updateClaim(input.id, input.data), "المطالبة")),
     archive: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archiveClaim(input.id) })),
   }),
   contracts: router({
     list: protectedProcedure.query(async () => (await listContracts()) ?? []),
     create: adminProcedure.input(contractInput).mutation(async ({ input }) => {
       const { items, ...contract } = input;
-      return (await createContract(contract, items)) ?? { ...contract, id: Date.now(), items: items.map((item, index) => ({ ...item, id: Date.now() + index, contractId: Date.now() })) };
+      return requireRecord(await createContract(contract, items), "العقد");
     }),
-    update: adminProcedure.input(z.object({ id: z.number().int().positive(), data: contractInput.partial() })).mutation(async ({ input }) => { const { items, ...contract } = input.data; return (await updateContract(input.id, contract, items)) ?? { ...contract, id: input.id, items }; }),
-    updateStatus: adminProcedure.input(z.object({ id: z.number().int().positive(), status: z.enum(["قائم", "مكتمل", "عرض سعر", "ملغي"]) })).mutation(async ({ input }) => (await updateContractStatus(input.id, input.status)) ?? { id: input.id, status: input.status }),
+    update: adminProcedure.input(z.object({ id: z.number().int().positive(), data: contractInput.partial() })).mutation(async ({ input }) => { const { items, ...contract } = input.data; return requireRecord(await updateContract(input.id, contract, items), "العقد"); }),
+    updateStatus: adminProcedure.input(z.object({ id: z.number().int().positive(), status: z.enum(["قائم", "مكتمل", "عرض سعر", "ملغي"]) })).mutation(async ({ input }) => requireRecord(await updateContractStatus(input.id, input.status), "العقد")),
     archive: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archiveContract(input.id) })),
   }),
   tasks: router({

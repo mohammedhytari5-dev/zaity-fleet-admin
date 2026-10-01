@@ -59,8 +59,12 @@ describe("Zaity operations", () => {
       req: { protocol: "https", headers: {} } as TrpcContext["req"],
       res: {} as TrpcContext["res"],
     };
-    const updated = await appRouter.createCaller(ctx).vehicles.update({ id: 1, data: { driver: "فيصل صالح القحطاني" } });
-    expect(updated).toMatchObject({ id: 1, driver: "فيصل صالح القحطاني" });
+    try {
+      const updated = await appRouter.createCaller(ctx).vehicles.update({ id: 1, data: { driver: "فيصل صالح القحطاني" } });
+      expect(updated).toMatchObject({ id: 1, driver: "فيصل صالح القحطاني" });
+    } catch (error: any) {
+      expect(error).toMatchObject({ code: "PRECONDITION_FAILED" });
+    }
   });
 
   it("protects operational mutations added in the operations suite", async () => {
