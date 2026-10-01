@@ -263,25 +263,53 @@ export async function listNotifications() { const db = await getDb(); return db 
 export async function markNotificationRead(id: number) { const db = await getDb(); if (!db) return false; await db.update(notifications).set({ readAt: new Date() }).where(eq(notifications.id, id)); return true; }
 export async function createNotification(input: typeof notifications.$inferInsert) { const db = await getDb(); if (!db) return null; const result = await db.insert(notifications).values(input); return Number(result[0].insertId); }
 export async function listPayments() { const db = await getDb(); return db ? db.select().from(payments).where(isNull(payments.archivedAt)).orderBy(desc(payments.createdAt)) : null; }
+
+async function applyPaymentImpact(input: { contractId?: number | null; claimId?: number | null; amount?: number }, direction: 1 | -1) {
+  const db = await getDb();
+  if (!db) return;
+  const amount = Number(input.amount ?? 0) * direction;
+  if (input.contractId && amount) {
+    await db.update(contracts).set({ collected: sql`GREATEST(0, ${contracts.collected} + ${amount})` }).where(and(eq(contracts.id, input.contractId), isNull(contracts.archivedAt)));
+  }
+  if (input.claimId && amount) {
+    const claim = (await db.select().from(claims).where(and(eq(claims.id, input.claimId), isNull(claims.archivedAt))).limit(1))[0];
+    if (claim) {
+      const paid = Math.max(0, claim.paid + amount);
+      await db.update(claims).set({ paid, status: paid >= claim.amount ? "مدفوعة" : paid > 0 ? "مستحقة" : "مستحقة" }).where(eq(claims.id, input.claimId));
+    }
+  }
+}
 export async function createPayment(input: typeof payments.$inferInsert) {
   const db = await getDb();
   if (!db) return null;
   const result = await db.insert(payments).values(input);
   const paymentId = Number(result[0].insertId);
-  const amount = Number(input.amount ?? 0);
-  if (input.contractId && amount > 0) {
-    await db.update(contracts).set({ collected: sql`${contracts.collected} + ${amount}` }).where(and(eq(contracts.id, input.contractId), isNull(contracts.archivedAt)));
-  }
-  if (input.claimId && amount > 0) {
-    const claim = (await db.select().from(claims).where(and(eq(claims.id, input.claimId), isNull(claims.archivedAt))).limit(1))[0];
-    if (claim) {
-      const paid = claim.paid + amount;
-      await db.update(claims).set({ paid, status: paid >= claim.amount ? "مدفوعة" : claim.status }).where(eq(claims.id, input.claimId));
-    }
-  }
+  await applyPaymentImpact(input, 1);
   const rows = await db.select().from(payments).where(eq(payments.id, paymentId)).limit(1);
   return rows[0] ?? null;
 }
+export async function updatePayment(id: number, input: Partial<typeof payments.$inferInsert>) {
+  const db = await getDb();
+  if (!db) return null;
+  const current = (await db.select().from(payments).where(and(eq(payments.id, id), isNull(payments.archivedAt))).limit(1))[0];
+  if (!current) return null;
+  await applyPaymentImpact(current, -1);
+  await db.update(payments).set(input).where(eq(payments.id, id));
+  const updated = (await db.select().from(payments).where(eq(payments.id, id)).limit(1))[0];
+  await applyPaymentImpact(updated, 1);
+  return updated ?? null;
+}
+export async function archivePayment(id: number) {
+  const db = await getDb();
+  if (!db) return false;
+  const current = (await db.select().from(payments).where(and(eq(payments.id, id), isNull(payments.archivedAt))).limit(1))[0];
+  if (!current) return false;
+  await applyPaymentImpact(current, -1);
+  await db.update(payments).set({ archivedAt: new Date() }).where(eq(payments.id, id));
+  return true;
+}
+export async function updateSetting(id: number, input: Partial<typeof settingCatalog.$inferInsert>) { const db = await getDb(); if (!db) return null; await db.update(settingCatalog).set(input).where(eq(settingCatalog.id, id)); return (await db.select().from(settingCatalog).where(eq(settingCatalog.id, id)).limit(1))[0] ?? null; }
+export async function archiveSetting(id: number) { const db = await getDb(); if (!db) return false; await db.update(settingCatalog).set({ active: 0 }).where(eq(settingCatalog.id, id)); return true; }
 export async function listRepresentatives(clientId: number) { const db = await getDb(); return db ? db.select().from(clientRepresentatives).where(and(eq(clientRepresentatives.clientId, clientId), isNull(clientRepresentatives.archivedAt))) : null; }
 export async function createRepresentative(input: typeof clientRepresentatives.$inferInsert) { const db = await getDb(); if (!db) return null; const result = await db.insert(clientRepresentatives).values(input); const rows = await db.select().from(clientRepresentatives).where(eq(clientRepresentatives.id, Number(result[0].insertId))).limit(1); return rows[0] ?? null; }
 export async function listSettings(category?: string) { const db = await getDb(); if (!db) return null; return category ? db.select().from(settingCatalog).where(eq(settingCatalog.category, category)) : db.select().from(settingCatalog); }
