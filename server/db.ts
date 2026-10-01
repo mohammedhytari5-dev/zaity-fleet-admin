@@ -248,6 +248,20 @@ export async function createContract(input: InsertContract, items: Omit<InsertCo
   });
 }
 
+export async function updateContract(id: number, input: Partial<InsertContract>, items?: Omit<InsertContractItem, "contractId">[]) {
+  const db = await getDb();
+  if (!db) return null;
+  await db.update(contracts).set(input).where(and(eq(contracts.id, id), isNull(contracts.archivedAt)));
+  if (items) {
+    await db.delete(contractItems).where(eq(contractItems.contractId, id));
+    if (items.length) await db.insert(contractItems).values(items.map(item => ({ ...item, contractId: id })));
+  }
+  const updated = (await db.select().from(contracts).where(eq(contracts.id, id)).limit(1))[0];
+  const updatedItems = await db.select().from(contractItems).where(eq(contractItems.contractId, id));
+  return updated ? { ...updated, items: updatedItems } : null;
+}
+export async function archiveContract(id: number) { const db = await getDb(); if (!db) return false; await db.update(contracts).set({ archivedAt: new Date() }).where(eq(contracts.id, id)); return true; }
+
 export async function updateContractStatus(id: number, status: Contract["status"]): Promise<Contract | null> {
   const db = await getDb();
   if (!db) return null;

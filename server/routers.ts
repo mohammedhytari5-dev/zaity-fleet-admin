@@ -3,7 +3,7 @@ import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
-import { archiveClaim, archiveClient, archiveDocument, archiveDriver, archiveMaintenanceRequest, archivePayment, archiveSetting, archiveVehicle, createAuditLog, createClaim, createClient, createContract, createDocument, createDriver, createMaintenanceRequest, createNotification, createPayment, createRepresentative, createTask, createVehicle, listAuditLogs, listClaims, listClients, listContracts, listDocuments, listDrivers, listMaintenanceRequests, listNotifications, listPayments, listRepresentatives, listSettings, listTasks, listVehicles, markNotificationRead, updateClaim, updatePayment, updateSetting, updateClient, updateContractStatus, updateDocument, updateDriver, updateMaintenanceRequest, updateTask, updateVehicle, upsertSetting } from "./db";
+import { archiveClaim, archiveClient, archiveContract, archiveDocument, archiveDriver, archiveMaintenanceRequest, archivePayment, archiveSetting, archiveVehicle, createAuditLog, createClaim, createClient, createContract, createDocument, createDriver, createMaintenanceRequest, createNotification, createPayment, createRepresentative, createTask, createVehicle, listAuditLogs, listClaims, listClients, listContracts, listDocuments, listDrivers, listMaintenanceRequests, listNotifications, listPayments, listRepresentatives, listSettings, listTasks, listVehicles, markNotificationRead, updateClaim, updatePayment, updateSetting, updateClient, updateContract, updateContractStatus, updateDocument, updateDriver, updateMaintenanceRequest, updateTask, updateVehicle, upsertSetting } from "./db";
 
 const vehicleInput = z.object({
   plate: z.string().min(2).max(32),
@@ -156,7 +156,9 @@ export const appRouter = router({
       const { items, ...contract } = input;
       return (await createContract(contract, items)) ?? { ...contract, id: Date.now(), items: items.map((item, index) => ({ ...item, id: Date.now() + index, contractId: Date.now() })) };
     }),
+    update: adminProcedure.input(z.object({ id: z.number().int().positive(), data: contractInput.partial() })).mutation(async ({ input }) => { const { items, ...contract } = input.data; return (await updateContract(input.id, contract, items)) ?? { ...contract, id: input.id, items }; }),
     updateStatus: adminProcedure.input(z.object({ id: z.number().int().positive(), status: z.enum(["قائم", "مكتمل", "عرض سعر", "ملغي"]) })).mutation(async ({ input }) => (await updateContractStatus(input.id, input.status)) ?? { id: input.id, status: input.status }),
+    archive: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archiveContract(input.id) })),
   }),
   tasks: router({
     list: protectedProcedure.query(() => listTasks()),
