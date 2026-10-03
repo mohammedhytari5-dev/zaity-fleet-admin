@@ -833,6 +833,11 @@ export default function FleetDashboard() {
       year: String(data.year || ""),
       color: String(data.color || "—"),
       mileage: String(data.mileage || "0 كم"),
+      ...(canAccess("finance") ? {
+        purchasePrice: Math.max(0, Math.trunc(Number(data.purchasePrice ?? 0))),
+        purchaseDate: String(data.purchaseDate || "—"),
+        inServiceDate: String(data.inServiceDate || "—"),
+      } : {}),
       projectId: data.projectId ? Number(data.projectId) : null,
       project: String(data.project || "—"),
       driver: String(data.driver || "—"),
