@@ -57,7 +57,7 @@ const contractItemInput = z.object({
   vehiclePlate: z.string().max(32).default("—"),
   quantity: z.number().int().positive().default(1),
   driver: z.string().max(120).default("—"),
-  coverage: z.enum(["مركبة وسائق", "سائق فقط", "مركبة فقط"]),
+  coverage: z.enum(["مركبة وسائق", "سائق فقط", "مركبة فقط"]).default("مركبة وسائق"),
   description: z.string().max(240).default("خدمة تشغيل"),
 });
 const contractInput = z.object({
