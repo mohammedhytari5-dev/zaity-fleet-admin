@@ -1,6 +1,8 @@
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { drizzle } from "drizzle-orm/mysql2";
+import { createPool } from "mysql2";
+import { getMysqlConnectionOptions } from "./db-connection";
 import { AuditLog, Claim, Client, Contract, ContractItem, Document, Driver, Employee, InsertEmployee, InsertClaim, InsertClient, InsertContract, InsertContractItem, InsertDocument, InsertDriver, InsertMaintenanceRequest, InsertUser, InsertVehicle, InsertVehicleExpense, VehicleExpense, InsertVehicleRevenue, VehicleRevenue, MaintenanceRequest, User, Vehicle, auditLogs, claims, clientRepresentatives, clients, contractItems, contracts, documents, drivers, employees, maintenanceRequests, notifications, payments, vehicleExpenses, vehicleRevenues, settingCatalog, tasks, users, vehicles } from "../drizzle/schema";
 import { InsertProject, Project, projects } from "../drizzle/schema";
 import { InsertPayable, Payable, PayablePayment, InsertPayablePayment, payables, payablePayments } from "../drizzle/schema";
@@ -32,8 +34,9 @@ async function ensureAuthSchema(db: ReturnType<typeof drizzle>) {
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
-      _db = drizzle(process.env.DATABASE_URL);
-      _authSchemaReady = ensureAuthSchema(_db).catch(error => {
+      const database = drizzle(createPool(getMysqlConnectionOptions(process.env.DATABASE_URL)));
+      _db = database;
+      _authSchemaReady = ensureAuthSchema(database).catch(error => {
         console.warn("[Database] Could not prepare authentication fields:", error);
       });
     } catch (error) {
