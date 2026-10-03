@@ -63,7 +63,7 @@ const contractItemInput = z.object({
 const contractInput = z.object({
   ref: z.string().min(2).max(40), client: z.string().min(2).max(160), clientId: z.number().int().positive().nullable().default(null), type: z.string().min(2).max(120),
   startDate: z.string().min(2).max(32), expiry: z.string().min(2).max(32), total: z.number().int().nonnegative().default(0), collected: z.number().int().nonnegative().default(0),
-  status: z.enum(["قائم", "مكتمل", "عرض سعر", "ملغي"]).default("قائم"), notes: z.string().max(4000).optional(), items: z.array(contractItemInput).min(1),
+  status: z.enum(["قائم", "مكتمل", "عرض سعر", "ملغي"]).default("قائم"), notes: z.string().max(4000).nullable().optional(), items: z.array(contractItemInput).min(1),
 });
 const driverInput = z.object({
   name: z.string().min(2).max(160),

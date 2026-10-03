@@ -811,9 +811,13 @@ export async function getPayableReceipt(id: number) {
   const row = (await db.select({ receiptName: payables.receiptName, receiptUrl: payables.receiptUrl }).from(payables).where(and(eq(payables.id, id), isNull(payables.archivedAt))).limit(1))[0];
   return row?.receiptUrl ? { name: row.receiptName || "فاتورة مورد", url: row.receiptUrl } : null;
 }
+function isVehiclePurchasePayable(payable: Pick<Payable, "description">) {
+  return /(?:شراء|قيمة شراء).*(?:باص|مركبة|سيارة)|(?:باص|مركبة|سيارة).*شراء/.test(String(payable.description || ""));
+}
+
 async function syncPayableVehicleExpense(tx: DbExecutor, payable: Payable, actor: LedgerActor = {}) {
   const existing = (await tx.select().from(vehicleExpenses).where(eq(vehicleExpenses.payableId, payable.id)).limit(1))[0];
-  if (payable.status === "ملغاة" || !payable.vehicleId || !payable.vehicleCategory) {
+  if (payable.status === "ملغاة" || isVehiclePurchasePayable(payable) || !payable.vehicleId || !payable.vehicleCategory) {
     if (existing && !existing.archivedAt) await tx.update(vehicleExpenses).set({ archivedAt: new Date(), archivedByUserId: actor.id ?? null, archivedByName: actor.name || "—" }).where(eq(vehicleExpenses.id, existing.id));
     return;
   }
