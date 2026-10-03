@@ -1,7 +1,9 @@
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { drizzle } from "drizzle-orm/mysql2";
-import { AuditLog, Claim, Client, Contract, ContractItem, Document, Driver, InsertClaim, InsertClient, InsertContract, InsertContractItem, InsertDocument, InsertDriver, InsertMaintenanceRequest, InsertUser, InsertVehicle, MaintenanceRequest, User, Vehicle, auditLogs, claims, clientRepresentatives, clients, contractItems, contracts, documents, drivers, maintenanceRequests, notifications, payments, settingCatalog, tasks, users, vehicles } from "../drizzle/schema";
+import { AuditLog, Claim, Client, Contract, ContractItem, Document, Driver, Employee, InsertEmployee, InsertClaim, InsertClient, InsertContract, InsertContractItem, InsertDocument, InsertDriver, InsertMaintenanceRequest, InsertUser, InsertVehicle, InsertVehicleExpense, VehicleExpense, InsertVehicleRevenue, VehicleRevenue, MaintenanceRequest, User, Vehicle, auditLogs, claims, clientRepresentatives, clients, contractItems, contracts, documents, drivers, employees, maintenanceRequests, notifications, payments, vehicleExpenses, vehicleRevenues, settingCatalog, tasks, users, vehicles } from "../drizzle/schema";
+import { InsertProject, Project, projects } from "../drizzle/schema";
+import { InsertPayable, Payable, PayablePayment, InsertPayablePayment, payables, payablePayments } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -113,11 +115,164 @@ export async function listVehicles(): Promise<Vehicle[] | null> {
   if (!db) return null;
   return db.select().from(vehicles).where(isNull(vehicles.archivedAt)).orderBy(desc(vehicles.createdAt));
 }
+export async function listVehicleFinancialSummaries() {
+  const db = await getDb();
+  if (!db) return null;
+  const [expenses, revenues] = await Promise.all([
+    db.select({ vehicleId: vehicleExpenses.vehicleId, amount: vehicleExpenses.amount }).from(vehicleExpenses).where(isNull(vehicleExpenses.archivedAt)),
+    db.select({ vehicleId: vehicleRevenues.vehicleId, amount: vehicleRevenues.amount }).from(vehicleRevenues).where(isNull(vehicleRevenues.archivedAt)),
+  ]);
+  const summary = new Map<number, { expenseTotal: number; revenueTotal: number }>();
+  for (const row of expenses) { const item = summary.get(row.vehicleId) ?? { expenseTotal: 0, revenueTotal: 0 }; item.expenseTotal += Number(row.amount || 0); summary.set(row.vehicleId, item); }
+  for (const row of revenues) { const item = summary.get(row.vehicleId) ?? { expenseTotal: 0, revenueTotal: 0 }; item.revenueTotal += Number(row.amount || 0); summary.set(row.vehicleId, item); }
+  return Object.fromEntries(Array.from(summary.entries()).map(([id, value]) => [id, { ...value, netOperatingReturn: value.revenueTotal - value.expenseTotal }]));
+}
+
+export async function getVehicleFinancialProfile(vehicleId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const vehicle = (await db.select().from(vehicles).where(and(eq(vehicles.id, vehicleId), isNull(vehicles.archivedAt))).limit(1))[0];
+  if (!vehicle) return null;
+  const [expenses, revenueRows, paymentRows, contractRows, contractItemRows, claimRows, projectRows, clientRows, allAllocations, payableRows] = await Promise.all([
+    db.select().from(vehicleExpenses).where(and(eq(vehicleExpenses.vehicleId, vehicleId), isNull(vehicleExpenses.archivedAt))).orderBy(desc(vehicleExpenses.spentAt), desc(vehicleExpenses.createdAt)),
+    db.select().from(vehicleRevenues).where(and(eq(vehicleRevenues.vehicleId, vehicleId), isNull(vehicleRevenues.archivedAt))).orderBy(desc(vehicleRevenues.createdAt)),
+    db.select().from(payments).where(isNull(payments.archivedAt)).orderBy(desc(payments.paidAt)),
+    db.select().from(contracts), db.select().from(contractItems), db.select().from(claims), db.select().from(projects), db.select().from(clients),
+    db.select({ paymentId: vehicleRevenues.paymentId, amount: vehicleRevenues.amount }).from(vehicleRevenues).where(isNull(vehicleRevenues.archivedAt)),
+    db.select({ id: payables.id, receiptUrl: payables.receiptUrl }).from(payables).where(and(eq(payables.vehicleId, vehicleId), isNull(payables.archivedAt))),
+  ]);
+  const paymentById = new Map(paymentRows.map(row => [row.id, row]));
+  const contractById = new Map(contractRows.map(row => [row.id, row]));
+  const claimById = new Map(claimRows.map(row => [row.id, row]));
+  const usedByPayment = new Map<number, number>();
+  for (const row of allAllocations) usedByPayment.set(row.paymentId, (usedByPayment.get(row.paymentId) ?? 0) + Number(row.amount || 0));
+  const revenueDetails = revenueRows.map(allocation => {
+    const payment = paymentById.get(allocation.paymentId);
+    const contractId = payment?.contractId ?? (payment?.claimId ? claimById.get(payment.claimId)?.contractId : null);
+    const contract = contractId ? contractById.get(contractId) : undefined;
+    const { receiptUrl, ...safeAllocation } = allocation;
+    return { ...safeAllocation, hasReceipt: Boolean(receiptUrl), paidAt: payment?.paidAt ?? "—", method: payment?.method ?? "—", reference: payment?.reference ?? "—", contractRef: contract?.ref ?? "—", client: allocation.clientName || contract?.client || "—" };
+  });
+  const payableReceipts = new Set(payableRows.filter(row => Boolean(row.receiptUrl)).map(row => row.id));
+  const safeExpenses = expenses.map(({ receiptUrl, ...expense }) => ({ ...expense, hasReceipt: Boolean(receiptUrl) || Boolean(expense.payableId && payableReceipts.has(expense.payableId)) }));
+  const allocatablePayments = paymentRows.flatMap(payment => {
+    const contractId = payment.contractId ?? (payment.claimId ? claimById.get(payment.claimId)?.contractId : null);
+    if (!contractId) return [];
+    const contract = contractById.get(contractId);
+    if (!contract) return [];
+    const items = contractItemRows.filter(item => item.contractId === contractId);
+    const linked = items.length ? items.some(item => item.vehicleId === vehicleId) : vehicle.contractId === contractId;
+    if (!linked) return [];
+    const remaining = Math.max(0, Number(payment.amount || 0) - (usedByPayment.get(payment.id) ?? 0));
+    if (!remaining) return [];
+    return [{ id: payment.id, amount: Number(payment.amount), paidAt: payment.paidAt, method: payment.method, reference: payment.reference, contractId, contractRef: contract.ref, client: clientRows.find(client => client.id === (payment.clientId ?? contract.clientId))?.name ?? contract.client, remaining }];
+  });
+  const categoryTotals: Record<string, number> = {};
+  for (const expense of expenses) categoryTotals[expense.category] = (categoryTotals[expense.category] ?? 0) + Number(expense.amount || 0);
+  const expenseTotal = expenses.reduce((total, expense) => total + Number(expense.amount || 0), 0);
+  const revenueTotal = revenueRows.reduce((total, revenue) => total + Number(revenue.amount || 0), 0);
+  const purchasePrice = Number(vehicle.purchasePrice || 0);
+  return {
+    vehicle, expenses: safeExpenses, revenues: revenueDetails, allocatablePayments, categoryTotals,
+    purchasePrice, expenseTotal, investedTotal: purchasePrice + expenseTotal, revenueTotal,
+    netCashReturn: revenueTotal - purchasePrice - expenseTotal,
+    project: projectRows.find(project => project.id === vehicle.projectId)?.name ?? vehicle.project,
+    client: clientRows.find(client => client.id === vehicle.clientId)?.name ?? vehicle.client,
+  };
+}
+
+export async function getVehicleReceipt(vehicleId: number, kind: "expense" | "revenue" | "maintenance", recordId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  if (kind === "maintenance") {
+    const row = (await db.select({ receiptName: maintenanceRequests.receiptName, receiptUrl: maintenanceRequests.receiptUrl }).from(maintenanceRequests).where(and(eq(maintenanceRequests.id, recordId), eq(maintenanceRequests.vehicleId, vehicleId))).limit(1))[0];
+    return row?.receiptUrl ? { name: row.receiptName || "مرفق صيانة", url: row.receiptUrl } : null;
+  }
+  if (kind === "expense") {
+    const row = (await db.select({ receiptName: vehicleExpenses.receiptName, receiptUrl: vehicleExpenses.receiptUrl, payableId: vehicleExpenses.payableId }).from(vehicleExpenses).where(and(eq(vehicleExpenses.id, recordId), eq(vehicleExpenses.vehicleId, vehicleId), isNull(vehicleExpenses.archivedAt))).limit(1))[0];
+    if (row?.receiptUrl) return { name: row.receiptName || "مرفق مالي", url: row.receiptUrl };
+    if (row?.payableId) { const payable = (await db.select({ receiptName: payables.receiptName, receiptUrl: payables.receiptUrl }).from(payables).where(and(eq(payables.id, row.payableId), isNull(payables.archivedAt))).limit(1))[0]; if (payable?.receiptUrl) return { name: payable.receiptName || row.receiptName || "فاتورة مورد", url: payable.receiptUrl }; }
+    return null;
+  }
+  const row = (await db.select({ receiptName: vehicleRevenues.receiptName, receiptUrl: vehicleRevenues.receiptUrl }).from(vehicleRevenues).where(and(eq(vehicleRevenues.id, recordId), eq(vehicleRevenues.vehicleId, vehicleId), isNull(vehicleRevenues.archivedAt))).limit(1))[0];
+  return row?.receiptUrl ? { name: row.receiptName || "إيصال إيراد", url: row.receiptUrl } : null;
+}
+
+export async function createVehicleExpense(input: Pick<InsertVehicleExpense, "vehicleId" | "category" | "amount" | "spentAt" | "description" | "vendor" | "receiptName" | "receiptUrl" | "notes">, actor: LedgerActor) {
+  const db = await getDb();
+  if (!db) return null;
+  return db.transaction(async tx => {
+    const vehicle = (await tx.select().from(vehicles).where(and(eq(vehicles.id, input.vehicleId), isNull(vehicles.archivedAt))).limit(1))[0];
+    if (!vehicle) return null;
+    const result = await tx.insert(vehicleExpenses).values({ ...input, projectId: vehicle.projectId ?? null, projectName: vehicle.project || "—", clientId: vehicle.clientId ?? null, clientName: vehicle.client || "—", createdByUserId: actor.id ?? null, createdByName: actor.name || "—", updatedByUserId: actor.id ?? null, updatedByName: actor.name || "—" });
+    return (await tx.select().from(vehicleExpenses).where(eq(vehicleExpenses.id, Number(result[0].insertId))).limit(1))[0] ?? null;
+  });
+}
+export async function updateVehicleExpense(id: number, input: Partial<Pick<InsertVehicleExpense, "category" | "amount" | "spentAt" | "description" | "vendor" | "receiptName" | "receiptUrl" | "notes">>, actor: LedgerActor) {
+  const db = await getDb();
+  if (!db) return null;
+  const current = (await db.select().from(vehicleExpenses).where(and(eq(vehicleExpenses.id, id), isNull(vehicleExpenses.archivedAt))).limit(1))[0];
+  if (!current || current.maintenanceRequestId) return null;
+  await db.update(vehicleExpenses).set({ ...input, updatedByUserId: actor.id ?? null, updatedByName: actor.name || "—" }).where(eq(vehicleExpenses.id, id));
+  return (await db.select().from(vehicleExpenses).where(eq(vehicleExpenses.id, id)).limit(1))[0] ?? null;
+}
+export async function archiveVehicleExpense(id: number, actor: LedgerActor) {
+  const db = await getDb();
+  if (!db) return false;
+  const current = (await db.select().from(vehicleExpenses).where(and(eq(vehicleExpenses.id, id), isNull(vehicleExpenses.archivedAt))).limit(1))[0];
+  if (!current || current.maintenanceRequestId) return false;
+  await db.update(vehicleExpenses).set({ archivedAt: new Date(), archivedByUserId: actor.id ?? null, archivedByName: actor.name || "—" }).where(eq(vehicleExpenses.id, id));
+  return true;
+}
+export async function createVehicleRevenue(input: Pick<InsertVehicleRevenue, "vehicleId" | "paymentId" | "amount" | "receiptName" | "receiptUrl" | "notes">, actor: LedgerActor) {
+  const db = await getDb();
+  if (!db) return null;
+  return db.transaction(async tx => {
+    await tx.execute(sql`SELECT id FROM payments WHERE id = ${input.paymentId} FOR UPDATE`);
+    const vehicle = (await tx.select().from(vehicles).where(and(eq(vehicles.id, input.vehicleId), isNull(vehicles.archivedAt))).limit(1))[0];
+    const payment = (await tx.select().from(payments).where(and(eq(payments.id, input.paymentId), isNull(payments.archivedAt))).limit(1))[0];
+    if (!vehicle || !payment) return null;
+    const claim = payment.claimId ? (await tx.select().from(claims).where(eq(claims.id, payment.claimId)).limit(1))[0] : undefined;
+    const contractId = payment.contractId ?? claim?.contractId;
+    if (!contractId) throw new Error("لا يمكن تخصيص دفعة غير مرتبطة بعقد إلى باص");
+    const contract = (await tx.select().from(contracts).where(eq(contracts.id, contractId)).limit(1))[0];
+    if (!contract) throw new Error("العقد المرتبط بالإيراد غير موجود");
+    const items = await tx.select().from(contractItems).where(eq(contractItems.contractId, contractId));
+    if (items.length ? !items.some(item => item.vehicleId === vehicle.id) : vehicle.contractId !== contractId) throw new Error("هذا الباص غير مرتبط بالعقد المصدر للإيراد؛ لا يمكن نسبته إليه تلقائيًا");
+    const allocations = await tx.select({ amount: vehicleRevenues.amount }).from(vehicleRevenues).where(and(eq(vehicleRevenues.paymentId, payment.id), isNull(vehicleRevenues.archivedAt)));
+    const allocated = allocations.reduce((total, row) => total + Number(row.amount || 0), 0);
+    if (Number(input.amount) > Number(payment.amount) - allocated) throw new Error(`المبلغ يتجاوز الجزء غير الموزع من الدفعة (${Math.max(0, Number(payment.amount) - allocated)} ر.س)`);
+    const project = (await tx.select().from(projects).where(and(eq(projects.contractId, contractId), isNull(projects.archivedAt))).limit(1))[0];
+    const clientId = payment.clientId ?? contract.clientId ?? (vehicle.contractId === contractId ? vehicle.clientId : null);
+    const client = clientId ? (await tx.select({ name: clients.name }).from(clients).where(eq(clients.id, clientId)).limit(1))[0] : undefined;
+    const result = await tx.insert(vehicleRevenues).values({ ...input, projectId: project?.id ?? (vehicle.contractId === contractId ? vehicle.projectId : null), projectName: project?.name ?? (vehicle.contractId === contractId ? vehicle.project : "—"), clientId: clientId ?? null, clientName: client?.name ?? contract.client ?? vehicle.client ?? "—", createdByUserId: actor.id ?? null, createdByName: actor.name || "—" });
+    return (await tx.select().from(vehicleRevenues).where(eq(vehicleRevenues.id, Number(result[0].insertId))).limit(1))[0] ?? null;
+  });
+}
+export async function archiveVehicleRevenue(id: number, actor: LedgerActor) {
+  const db = await getDb();
+  if (!db) return false;
+  const current = (await db.select().from(vehicleRevenues).where(and(eq(vehicleRevenues.id, id), isNull(vehicleRevenues.archivedAt))).limit(1))[0];
+  if (!current) return false;
+  await db.update(vehicleRevenues).set({ archivedAt: new Date(), archivedByUserId: actor.id ?? null, archivedByName: actor.name || "—" }).where(eq(vehicleRevenues.id, id));
+  return true;
+}
 
 export async function createVehicle(input: InsertVehicle): Promise<Vehicle | null> {
   const db = await getDb();
   if (!db) return null;
-  const result = await db.insert(vehicles).values(input);
+  let normalized = { ...input };
+  if (input.projectId) {
+    const project = (await db.select().from(projects).where(and(eq(projects.id, input.projectId), isNull(projects.archivedAt))).limit(1))[0];
+    if (!project) return null;
+    normalized.project = project.name;
+  } else normalized.project = "—";
+  if (input.employeeId) {
+    const employee = (await db.select().from(employees).where(and(eq(employees.id, input.employeeId), isNull(employees.archivedAt))).limit(1))[0];
+    if (!employee || employee.status !== "نشط") return null;
+    normalized.employee = employee.name;
+  } else normalized.employee = "—";
+  const result = await db.insert(vehicles).values(normalized);
   const id = Number(result[0].insertId);
   const created = await db.select().from(vehicles).where(eq(vehicles.id, id)).limit(1);
   return created[0] ?? null;
@@ -126,7 +281,24 @@ export async function createVehicle(input: InsertVehicle): Promise<Vehicle | nul
 export async function updateVehicle(id: number, input: Partial<InsertVehicle>): Promise<Vehicle | null> {
   const db = await getDb();
   if (!db) return null;
-  await db.update(vehicles).set(input).where(and(eq(vehicles.id, id), isNull(vehicles.archivedAt)));
+  const normalized = { ...input };
+  if (input.projectId !== undefined) {
+    if (input.projectId === null) normalized.project = "—";
+    else {
+      const project = (await db.select().from(projects).where(and(eq(projects.id, input.projectId), isNull(projects.archivedAt))).limit(1))[0];
+      if (!project) return null;
+      normalized.project = project.name;
+    }
+  } else delete normalized.project;
+  if (input.employeeId !== undefined) {
+    if (input.employeeId === null) normalized.employee = input.employee ?? "—";
+    else {
+      const employee = (await db.select().from(employees).where(and(eq(employees.id, input.employeeId), isNull(employees.archivedAt))).limit(1))[0];
+      if (!employee || employee.status !== "نشط") return null;
+      normalized.employee = employee.name;
+    }
+  } else delete normalized.employee;
+  await db.update(vehicles).set(normalized).where(and(eq(vehicles.id, id), isNull(vehicles.archivedAt)));
   const updated = await db.select().from(vehicles).where(eq(vehicles.id, id)).limit(1);
   return updated[0] ?? null;
 }
@@ -148,7 +320,86 @@ export async function listDrivers(): Promise<Driver[] | null> {
   if (!db) return null;
   return db.select().from(drivers).where(isNull(drivers.archivedAt)).orderBy(desc(drivers.createdAt));
 }
-
+export async function listEmployees(): Promise<Employee[] | null> {
+  const db = await getDb();
+  if (!db) return null;
+  return db.select().from(employees).where(isNull(employees.archivedAt)).orderBy(desc(employees.createdAt));
+}
+export async function createEmployee(input: InsertEmployee): Promise<Employee | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.insert(employees).values(input);
+  const id = Number(result[0].insertId);
+  return (await db.select().from(employees).where(eq(employees.id, id)).limit(1))[0] ?? null;
+}
+export async function updateEmployee(id: number, input: Partial<InsertEmployee>): Promise<Employee | null> {
+  const db = await getDb();
+  if (!db) return null;
+  await db.update(employees).set(input).where(and(eq(employees.id, id), isNull(employees.archivedAt)));
+  return (await db.select().from(employees).where(eq(employees.id, id)).limit(1))[0] ?? null;
+}
+export async function archiveEmployee(id: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  return db.transaction(async tx => {
+    const employee = (await tx.select().from(employees).where(and(eq(employees.id, id), isNull(employees.archivedAt))).limit(1))[0];
+    if (!employee) return false;
+    await tx.update(vehicles).set({ employeeId: null }).where(eq(vehicles.employeeId, id));
+    await tx.update(projects).set({ managerEmployeeId: null }).where(eq(projects.managerEmployeeId, id));
+    await tx.update(employees).set({ status: "منتهي الخدمة", archivedAt: new Date() }).where(eq(employees.id, id));
+    return true;
+  });
+}
+export async function listProjects(): Promise<(Project & { actualVehicles: number })[] | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const [projectRows, vehicleRows] = await Promise.all([
+    db.select().from(projects).where(isNull(projects.archivedAt)).orderBy(desc(projects.createdAt)),
+    db.select({ projectId: vehicles.projectId }).from(vehicles).where(isNull(vehicles.archivedAt)),
+  ]);
+  return projectRows.map(project => ({ ...project, actualVehicles: vehicleRows.filter(vehicle => vehicle.projectId === project.id).length }));
+}
+export async function createProject(input: InsertProject): Promise<Project | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const normalized = { ...input };
+  if (input.managerEmployeeId) {
+    const employee = (await db.select().from(employees).where(and(eq(employees.id, input.managerEmployeeId), isNull(employees.archivedAt))).limit(1))[0];
+    if (!employee || employee.status !== "نشط") return null;
+    normalized.manager = employee.name;
+  }
+  const result = await db.insert(projects).values(normalized);
+  const id = Number(result[0].insertId);
+  return (await db.select().from(projects).where(eq(projects.id, id)).limit(1))[0] ?? null;
+}
+export async function updateProject(id: number, input: Partial<InsertProject>): Promise<Project | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const normalized = { ...input };
+  if (input.managerEmployeeId !== undefined) {
+    if (input.managerEmployeeId === null) normalized.manager = input.manager ?? "—";
+    else {
+      const employee = (await db.select().from(employees).where(and(eq(employees.id, input.managerEmployeeId), isNull(employees.archivedAt))).limit(1))[0];
+      if (!employee || employee.status !== "نشط") return null;
+      normalized.manager = employee.name;
+    }
+  }
+  await db.update(projects).set(normalized).where(and(eq(projects.id, id), isNull(projects.archivedAt)));
+  if (input.name !== undefined) await db.update(vehicles).set({ project: input.name }).where(and(eq(vehicles.projectId, id), isNull(vehicles.archivedAt)));
+  return (await db.select().from(projects).where(eq(projects.id, id)).limit(1))[0] ?? null;
+}
+export async function archiveProject(id: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  return db.transaction(async tx => {
+    const current = (await tx.select().from(projects).where(and(eq(projects.id, id), isNull(projects.archivedAt))).limit(1))[0];
+    if (!current) return false;
+    const assigned = await tx.select({ id: vehicles.id }).from(vehicles).where(and(eq(vehicles.projectId, id), isNull(vehicles.archivedAt))).limit(1);
+    if (assigned.length) return false;
+    await tx.update(projects).set({ archivedAt: new Date() }).where(eq(projects.id, id));
+    return true;
+  });
+}
 export async function createDriver(input: InsertDriver): Promise<Driver | null> {
   const db = await getDb();
   if (!db) return null;
@@ -198,24 +449,54 @@ export async function assignVehicleDriver(vehicleId: number, driverId: number | 
   });
 }
 
+type LedgerActor = { id?: number | null; name?: string | null };
+function parseRiyalAmount(value: unknown) {
+  const arabicDigits: Record<string, string> = { "٠": "0", "١": "1", "٢": "2", "٣": "3", "٤": "4", "٥": "5", "٦": "6", "٧": "7", "٨": "8", "٩": "9" };
+  const normalized = String(value ?? "").replace(/[٠-٩]/g, digit => arabicDigits[digit]).replace(/[٬,]/g, "").replace(/[^0-9.\-]/g, "");
+  return Math.max(0, Math.round(Number(normalized) || 0));
+}
+async function syncMaintenanceExpense(tx: DbExecutor, request: MaintenanceRequest, actor: LedgerActor = {}) {
+  if (!request.vehicleId) return;
+  const amount = parseRiyalAmount(request.cost);
+  const existing = (await tx.select().from(vehicleExpenses).where(eq(vehicleExpenses.maintenanceRequestId, request.id)).limit(1))[0];
+  const vehicle = (await tx.select().from(vehicles).where(eq(vehicles.id, request.vehicleId)).limit(1))[0];
+  if (!vehicle) return;
+  const reason = [request.type, request.reason !== "—" ? request.reason : ""].filter(Boolean).join(" · ").slice(0, 300) || "تكلفة أمر صيانة";
+  const sameVehicle = existing?.vehicleId === request.vehicleId;
+  const snapshot = {
+    vehicleId: request.vehicleId, projectId: sameVehicle ? existing?.projectId ?? null : vehicle.projectId ?? null, projectName: sameVehicle ? existing?.projectName || vehicle.project || "—" : vehicle.project || "—", clientId: sameVehicle ? existing?.clientId ?? null : vehicle.clientId ?? null, clientName: sameVehicle ? existing?.clientName || vehicle.client || "—" : vehicle.client || "—",
+    category: "صيانة" as const, amount, spentAt: request.start && request.start !== "—" ? request.start : new Date().toISOString().slice(0, 10), description: reason,
+    vendor: request.manager || "—", receiptName: request.receiptName ?? null, receiptUrl: request.receiptUrl ?? null,
+    updatedByUserId: actor.id ?? existing?.updatedByUserId ?? null, updatedByName: actor.name || existing?.updatedByName || "—",
+  };
+  if (existing) await tx.update(vehicleExpenses).set(snapshot).where(eq(vehicleExpenses.id, existing.id));
+  else if (amount > 0) await tx.insert(vehicleExpenses).values({ ...snapshot, maintenanceRequestId: request.id, createdByUserId: actor.id ?? null, createdByName: actor.name || "—" });
+}
+
 export async function listMaintenanceRequests(): Promise<MaintenanceRequest[] | null> {
   const db = await getDb();
   if (!db) return null;
   return db.select().from(maintenanceRequests).where(isNull(maintenanceRequests.archivedAt)).orderBy(desc(maintenanceRequests.createdAt));
 }
 
-export async function createMaintenanceRequest(input: InsertMaintenanceRequest): Promise<MaintenanceRequest | null> {
+export async function createMaintenanceRequest(input: InsertMaintenanceRequest, actor: LedgerActor = {}): Promise<MaintenanceRequest | null> {
   const db = await getDb();
   if (!db) return null;
   return db.transaction(async tx => {
+    if (input.vehicleId) {
+      const vehicle = (await tx.select({ id: vehicles.id }).from(vehicles).where(and(eq(vehicles.id, input.vehicleId), isNull(vehicles.archivedAt))).limit(1))[0];
+      if (!vehicle) return null;
+    }
     const result = await tx.insert(maintenanceRequests).values(input);
     const id = Number(result[0].insertId);
     if (input.vehicleId && input.status !== "مكتمل") await tx.update(vehicles).set({ status: "في الصيانة" }).where(eq(vehicles.id, input.vehicleId));
-    return (await tx.select().from(maintenanceRequests).where(eq(maintenanceRequests.id, id)).limit(1))[0] ?? null;
+    const created = (await tx.select().from(maintenanceRequests).where(eq(maintenanceRequests.id, id)).limit(1))[0] ?? null;
+    if (created) await syncMaintenanceExpense(tx, created, actor);
+    return created;
   });
 }
 
-export async function updateMaintenanceRequest(id: number, input: Partial<InsertMaintenanceRequest>): Promise<MaintenanceRequest | null> {
+export async function updateMaintenanceRequest(id: number, input: Partial<InsertMaintenanceRequest>, actor: LedgerActor = {}): Promise<MaintenanceRequest | null> {
   const db = await getDb();
   if (!db) return null;
   return db.transaction(async tx => {
@@ -223,9 +504,16 @@ export async function updateMaintenanceRequest(id: number, input: Partial<Insert
     if (!current) return null;
     await tx.update(maintenanceRequests).set(input).where(eq(maintenanceRequests.id, id));
     const vehicleId = input.vehicleId ?? current.vehicleId;
-    if (vehicleId) await tx.update(vehicles).set({ status: (input.status ?? current.status) === "مكتمل" ? "متاحة" : "في الصيانة" }).where(eq(vehicles.id, vehicleId));
-    if (input.vehicleId && current.vehicleId && input.vehicleId !== current.vehicleId) await tx.update(vehicles).set({ status: "متاحة" }).where(eq(vehicles.id, current.vehicleId));
-    return (await tx.select().from(maintenanceRequests).where(eq(maintenanceRequests.id, id)).limit(1))[0] ?? null;
+    const refreshVehicleStatus = async (targetVehicleId: number) => {
+      const activeRequests = await tx.select({ status: maintenanceRequests.status }).from(maintenanceRequests).where(and(eq(maintenanceRequests.vehicleId, targetVehicleId), isNull(maintenanceRequests.archivedAt)));
+      const hasOpenRequest = activeRequests.some(request => request.status !== "مكتمل");
+      await tx.update(vehicles).set({ status: hasOpenRequest ? "في الصيانة" : "متاحة" }).where(eq(vehicles.id, targetVehicleId));
+    };
+    if (current.vehicleId && input.vehicleId !== undefined && input.vehicleId !== current.vehicleId) await refreshVehicleStatus(current.vehicleId);
+    if (vehicleId) await refreshVehicleStatus(vehicleId);
+    const updated = (await tx.select().from(maintenanceRequests).where(eq(maintenanceRequests.id, id)).limit(1))[0] ?? null;
+    if (updated) await syncMaintenanceExpense(tx, updated, actor);
+    return updated;
   });
 }
 
@@ -236,7 +524,10 @@ export async function archiveMaintenanceRequest(id: number): Promise<boolean> {
     const current = (await tx.select().from(maintenanceRequests).where(and(eq(maintenanceRequests.id, id), isNull(maintenanceRequests.archivedAt))).limit(1))[0];
     if (!current) return false;
     await tx.update(maintenanceRequests).set({ archivedAt: new Date() }).where(eq(maintenanceRequests.id, id));
-    if (current.vehicleId) await tx.update(vehicles).set({ status: "متاحة" }).where(eq(vehicles.id, current.vehicleId));
+    if (current.vehicleId) {
+      const remaining = await tx.select({ status: maintenanceRequests.status }).from(maintenanceRequests).where(and(eq(maintenanceRequests.vehicleId, current.vehicleId), isNull(maintenanceRequests.archivedAt)));
+      await tx.update(vehicles).set({ status: remaining.some(request => request.status !== "مكتمل") ? "في الصيانة" : "متاحة" }).where(eq(vehicles.id, current.vehicleId));
+    }
     return true;
   });
 }
@@ -247,10 +538,25 @@ export async function listDocuments(): Promise<Document[] | null> {
   return db.select().from(documents).where(isNull(documents.archivedAt)).orderBy(desc(documents.createdAt));
 }
 
+async function documentEntityName(db: DbExecutor, entityType: string, entityId: number) {
+  if (entityType === "مركبة") return (await db.select({ name: vehicles.plate }).from(vehicles).where(and(eq(vehicles.id, entityId), isNull(vehicles.archivedAt))).limit(1))[0]?.name ?? null;
+  if (entityType === "سائق") return (await db.select({ name: drivers.name }).from(drivers).where(and(eq(drivers.id, entityId), isNull(drivers.archivedAt))).limit(1))[0]?.name ?? null;
+  if (entityType === "موظف") return (await db.select({ name: employees.name }).from(employees).where(and(eq(employees.id, entityId), isNull(employees.archivedAt))).limit(1))[0]?.name ?? null;
+  if (entityType === "مشروع") return (await db.select({ name: projects.name }).from(projects).where(and(eq(projects.id, entityId), isNull(projects.archivedAt))).limit(1))[0]?.name ?? null;
+  if (entityType === "عميل") return (await db.select({ name: clients.name }).from(clients).where(and(eq(clients.id, entityId), isNull(clients.archivedAt))).limit(1))[0]?.name ?? null;
+  return null;
+}
+
 export async function createDocument(input: InsertDocument): Promise<Document | null> {
   const db = await getDb();
   if (!db) return null;
-  const result = await db.insert(documents).values(input);
+  const normalized = { ...input };
+  if (input.entityId) {
+    const name = await documentEntityName(db, input.entityType || "مركبة", input.entityId);
+    if (!name) return null;
+    normalized.entity = name;
+  } else normalized.entity = "—";
+  const result = await db.insert(documents).values(normalized);
   const id = Number(result[0].insertId);
   const created = await db.select().from(documents).where(eq(documents.id, id)).limit(1);
   return created[0] ?? null;
@@ -259,7 +565,17 @@ export async function createDocument(input: InsertDocument): Promise<Document | 
 export async function updateDocument(id: number, input: Partial<InsertDocument>): Promise<Document | null> {
   const db = await getDb();
   if (!db) return null;
-  await db.update(documents).set(input).where(and(eq(documents.id, id), isNull(documents.archivedAt)));
+  const current = (await db.select().from(documents).where(and(eq(documents.id, id), isNull(documents.archivedAt))).limit(1))[0];
+  if (!current) return null;
+  const normalized = { ...input };
+  const entityType = input.entityType ?? current.entityType;
+  const entityId = input.entityId === undefined ? current.entityId : input.entityId;
+  if (entityId) {
+    const name = await documentEntityName(db, entityType || "مركبة", entityId);
+    if (!name) return null;
+    normalized.entity = name;
+  } else normalized.entity = "—";
+  await db.update(documents).set(normalized).where(and(eq(documents.id, id), isNull(documents.archivedAt)));
   const updated = await db.select().from(documents).where(eq(documents.id, id)).limit(1);
   return updated[0] ?? null;
 }
@@ -310,7 +626,8 @@ export async function listClaims(): Promise<Claim[] | null> {
 export async function createClaim(input: InsertClaim): Promise<Claim | null> {
   const db = await getDb();
   if (!db) return null;
-  const result = await db.insert(claims).values(input);
+  if (input.status !== "غير مرفوعة" && input.status !== "جديدة") return null;
+  const result = await db.insert(claims).values({ ...input, paid: 0 });
   const id = Number(result[0].insertId);
   const created = await db.select().from(claims).where(eq(claims.id, id)).limit(1);
   return created[0] ?? null;
@@ -319,6 +636,23 @@ export async function createClaim(input: InsertClaim): Promise<Claim | null> {
 export async function updateClaim(id: number, input: Partial<InsertClaim>): Promise<Claim | null> {
   const db = await getDb();
   if (!db) return null;
+  if (input.paid !== undefined) return null;
+  const current = (await db.select().from(claims).where(and(eq(claims.id, id), isNull(claims.archivedAt))).limit(1))[0];
+  if (!current) return null;
+  const nextStatus = input.status ?? current.status;
+  const nextAmount = Number(input.amount ?? current.amount);
+  const transitions: Record<Claim["status"], Claim["status"][]> = {
+    "غير مرفوعة": ["جديدة", "ملغاة"],
+    "جديدة": ["تحت الإجراء", "مرفوضة", "ملغاة"],
+    "تحت الإجراء": ["جديدة", "تم اعتمادها", "مرفوضة", "ملغاة"],
+    "تم اعتمادها": ["تحت الإجراء", "ملغاة"],
+    "تم صرفها": [],
+    "مرفوضة": ["جديدة", "ملغاة"],
+    "ملغاة": ["جديدة"],
+  };
+  if (input.status && input.status !== current.status && !transitions[current.status].includes(input.status)) return null;
+  if (nextStatus === "تم صرفها" && current.status !== "تم صرفها") return null;
+  if (nextAmount < current.paid || (current.status === "تم صرفها" && nextAmount > current.paid)) return null;
   await db.update(claims).set(input).where(and(eq(claims.id, id), isNull(claims.archivedAt)));
   const updated = await db.select().from(claims).where(eq(claims.id, id)).limit(1);
   return updated[0] ?? null;
@@ -415,6 +749,219 @@ export async function markNotificationRead(id: number) { const db = await getDb(
 export async function createNotification(input: typeof notifications.$inferInsert) { const db = await getDb(); if (!db) return null; const result = await db.insert(notifications).values(input); return Number(result[0].insertId); }
 export async function listPayments() { const db = await getDb(); return db ? db.select().from(payments).where(isNull(payments.archivedAt)).orderBy(desc(payments.createdAt)) : null; }
 
+export async function listPayables(): Promise<(Omit<Payable, "receiptUrl"> & { hasReceipt: boolean; remaining: number; overdue: boolean; payments: PayablePayment[] })[] | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const [records, ledger] = await Promise.all([
+    db.select().from(payables).where(isNull(payables.archivedAt)).orderBy(desc(payables.createdAt)),
+    db.select().from(payablePayments).orderBy(desc(payablePayments.createdAt)),
+  ]);
+  const now = Date.now();
+  return records.map(record => {
+    const entries = ledger.filter(payment => payment.payableId === record.id);
+    const remaining = Math.max(0, record.amount - record.paid);
+    const due = record.dueDate !== "—" ? Date.parse(`${record.dueDate}T23:59:59`) : NaN;
+    const { receiptUrl, ...safeRecord } = record;
+    return { ...safeRecord, hasReceipt: Boolean(receiptUrl), remaining, overdue: remaining > 0 && record.status !== "ملغاة" && Number.isFinite(due) && due < now, payments: entries };
+  });
+}
+export async function getPayableReceipt(id: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const row = (await db.select({ receiptName: payables.receiptName, receiptUrl: payables.receiptUrl }).from(payables).where(and(eq(payables.id, id), isNull(payables.archivedAt))).limit(1))[0];
+  return row?.receiptUrl ? { name: row.receiptName || "فاتورة مورد", url: row.receiptUrl } : null;
+}
+async function syncPayableVehicleExpense(tx: DbExecutor, payable: Payable, actor: LedgerActor = {}) {
+  const existing = (await tx.select().from(vehicleExpenses).where(eq(vehicleExpenses.payableId, payable.id)).limit(1))[0];
+  if (payable.status === "ملغاة" || !payable.vehicleId || !payable.vehicleCategory) {
+    if (existing && !existing.archivedAt) await tx.update(vehicleExpenses).set({ archivedAt: new Date(), archivedByUserId: actor.id ?? null, archivedByName: actor.name || "—" }).where(eq(vehicleExpenses.id, existing.id));
+    return;
+  }
+  const vehicle = (await tx.select().from(vehicles).where(eq(vehicles.id, payable.vehicleId)).limit(1))[0];
+  if (!vehicle) throw new Error("الباص المرتبط بفاتورة المورد غير موجود");
+  const sameVehicle = existing?.vehicleId === vehicle.id;
+  const values = { vehicleId: vehicle.id, projectId: sameVehicle ? existing?.projectId ?? null : vehicle.projectId ?? null, projectName: sameVehicle ? existing?.projectName || vehicle.project || "—" : vehicle.project || "—", clientId: sameVehicle ? existing?.clientId ?? null : vehicle.clientId ?? null, clientName: sameVehicle ? existing?.clientName || vehicle.client || "—" : vehicle.client || "—", category: payable.vehicleCategory, amount: Number(payable.amount), spentAt: payable.issueDate && payable.issueDate !== "—" ? payable.issueDate : new Date(payable.createdAt).toISOString().slice(0, 10), description: `فاتورة ${payable.ref} · ${payable.description}`.slice(0, 300), vendor: payable.supplier, receiptName: payable.receiptName ?? null, receiptUrl: null, notes: payable.notes ?? null, updatedByUserId: actor.id ?? existing?.updatedByUserId ?? null, updatedByName: actor.name || existing?.updatedByName || "—" };
+  if (existing) await tx.update(vehicleExpenses).set(values).where(eq(vehicleExpenses.id, existing.id));
+  else await tx.insert(vehicleExpenses).values({ ...values, payableId: payable.id, createdByUserId: actor.id ?? null, createdByName: actor.name || "—", updatedByUserId: actor.id ?? null, updatedByName: actor.name || "—" });
+}
+export async function createPayable(input: InsertPayable, actor: LedgerActor = {}): Promise<Payable | null> {
+  const db = await getDb();
+  if (!db) return null;
+  return db.transaction(async tx => {
+    const result = await tx.insert(payables).values({ ...input, paid: 0, status: "جديدة" });
+    const id = Number(result[0].insertId);
+    const payable = (await tx.select().from(payables).where(eq(payables.id, id)).limit(1))[0] ?? null;
+    if (payable?.vehicleId) await syncPayableVehicleExpense(tx, payable, actor);
+    return payable;
+  });
+}
+export async function updatePayable(id: number, input: Partial<InsertPayable>, actor: LedgerActor = {}): Promise<Payable | null> {
+  const db = await getDb();
+  if (!db) return null;
+  if (input.paid !== undefined || input.status !== undefined) return null;
+  return db.transaction(async tx => {
+    const current = (await tx.select().from(payables).where(and(eq(payables.id, id), isNull(payables.archivedAt))).limit(1))[0];
+    if (!current || Number(input.amount ?? current.amount) < current.paid) return null;
+    if (current.vehicleId && current.paid > 0 && (input.vehicleId !== undefined && input.vehicleId !== current.vehicleId || input.vehicleCategory !== undefined && input.vehicleCategory !== current.vehicleCategory)) throw new Error("لا يمكن نقل فاتورة باص أو تغيير فئتها بعد تسجيل دفعة عليها");
+    await tx.update(payables).set(input).where(eq(payables.id, id));
+    const updated = (await tx.select().from(payables).where(eq(payables.id, id)).limit(1))[0] ?? null;
+    if (updated && (current.vehicleId || updated.vehicleId)) await syncPayableVehicleExpense(tx, updated, actor);
+    return updated;
+  });
+}
+export async function updatePayableStatus(id: number, status: Payable["status"], actor: LedgerActor = {}): Promise<Payable | null> {
+  const db = await getDb();
+  if (!db) return null;
+  return db.transaction(async tx => {
+    const current = (await tx.select().from(payables).where(and(eq(payables.id, id), isNull(payables.archivedAt))).limit(1))[0];
+    if (!current) return null;
+    const allowed: Record<Payable["status"], Payable["status"][]> = { "جديدة": ["معتمدة", "ملغاة"], "معتمدة": ["ملغاة"], "مدفوعة جزئيًا": ["ملغاة"], "مدفوعة": [], "ملغاة": [] };
+    if (status !== current.status && !allowed[current.status].includes(status)) return null;
+    if (status === "ملغاة" && current.vehicleId && current.paid > 0) throw new Error("لا يمكن إلغاء فاتورة مرتبطة بباص بعد تسجيل دفعة عليها؛ عالجها بإشعار دائن لتبقى تكلفة الباص دقيقة");
+    if (status === "مدفوعة" && current.paid < current.amount) return null;
+    await tx.update(payables).set({ status }).where(eq(payables.id, id));
+    const updated = (await tx.select().from(payables).where(eq(payables.id, id)).limit(1))[0] ?? null;
+    if (updated?.vehicleId) await syncPayableVehicleExpense(tx, updated, actor);
+    return updated;
+  });
+}
+export async function registerPayablePayment(input: InsertPayablePayment): Promise<PayablePayment | null> {
+  const db = await getDb();
+  if (!db) return null;
+  return db.transaction(async tx => {
+    const payable = (await tx.select().from(payables).where(and(eq(payables.id, input.payableId), isNull(payables.archivedAt))).limit(1))[0];
+    if (!payable) return null;
+    if (!["معتمدة", "مدفوعة جزئيًا"].includes(payable.status)) throw new Error("يجب اعتماد فاتورة المورد قبل تسجيل الصرف");
+    if (input.amount <= 0 || input.amount > payable.amount - payable.paid) throw new Error("المبلغ يتجاوز الرصيد المتبقي أو غير صالح");
+    const result = await tx.insert(payablePayments).values(input);
+    const paid = payable.paid + input.amount;
+    await tx.update(payables).set({ paid, status: paid >= payable.amount ? "مدفوعة" : "مدفوعة جزئيًا" }).where(eq(payables.id, payable.id));
+    const id = Number(result[0].insertId);
+    return (await tx.select().from(payablePayments).where(eq(payablePayments.id, id)).limit(1))[0] ?? null;
+  });
+}
+
+export async function getCompanyReport(from: string, to: string) {
+  const db = await getDb();
+  if (!db) return null;
+  const [vehicleRows, contractRows, claimRows, incomingRows, payableRows, outgoingRows, maintenanceRows, projectRows, documentRows, employeeRows, driverRows, vehicleExpenseRows, vehicleRevenueRows, clientRows, contractItemRows] = await Promise.all([
+    db.select().from(vehicles).where(isNull(vehicles.archivedAt)),
+    db.select().from(contracts).where(isNull(contracts.archivedAt)),
+    db.select().from(claims).where(isNull(claims.archivedAt)),
+    db.select().from(payments).where(isNull(payments.archivedAt)),
+    db.select().from(payables).where(isNull(payables.archivedAt)),
+    db.select().from(payablePayments),
+    db.select().from(maintenanceRequests).where(isNull(maintenanceRequests.archivedAt)),
+    db.select().from(projects).where(isNull(projects.archivedAt)),
+    db.select().from(documents).where(isNull(documents.archivedAt)),
+    db.select().from(employees).where(isNull(employees.archivedAt)),
+    db.select().from(drivers).where(isNull(drivers.archivedAt)),
+    db.select().from(vehicleExpenses).where(isNull(vehicleExpenses.archivedAt)),
+    db.select().from(vehicleRevenues).where(isNull(vehicleRevenues.archivedAt)),
+    db.select().from(clients).where(isNull(clients.archivedAt)),
+    db.select().from(contractItems),
+  ]);
+  const inRange = (value: unknown) => { const date = value instanceof Date ? value.toISOString().slice(0, 10) : String(value ?? "").slice(0, 10); return date >= from && date <= to; };
+  const periodClaims = claimRows.filter(row => inRange(row.submittedAt));
+  const periodContracts = contractRows.filter(row => inRange(row.startDate));
+  const periodIncoming = incomingRows.filter(row => inRange(row.paidAt));
+  const periodOutgoing = outgoingRows.filter(row => inRange(row.paidAt));
+  const periodMaintenance = maintenanceRows.filter(row => inRange(row.start));
+  const periodProjects = projectRows.filter(row => inRange(row.startDate));
+  const periodDocuments = documentRows.filter(row => inRange(row.expiry));
+  const periodVehicleExpenses = vehicleExpenseRows.filter(row => inRange(row.spentAt));
+  const paymentById = new Map(incomingRows.map(row => [row.id, row]));
+  const periodVehicleRevenues = vehicleRevenueRows.filter(row => { const payment = paymentById.get(row.paymentId); return payment ? inRange(payment.paidAt) : false; });
+  const outstandingClaims = claimRows.filter(row => !["تم صرفها", "مرفوضة", "ملغاة"].includes(row.status));
+  const activePayables = payableRows.filter(row => row.status !== "ملغاة");
+  const costNumber = (value: string) => Number(value.replace(/[^0-9.]/g, "")) || 0;
+  const dateValue = (value: string) => value && value !== "—" ? Date.parse(`${value.slice(0,10)}T23:59:59`) : NaN;
+  const now = Date.now(); const soon = now + 30 * 86400000;
+  const activeMaintenance = maintenanceRows.filter(row => row.status !== "مكتمل");
+  const vehiclesById = new Map(vehicleRows.map(row => [row.id, row]));
+  const ledgerGroups = (expenseRows: typeof periodVehicleExpenses, revenueRows: typeof periodVehicleRevenues, key: "vehicleId" | "projectId" | "clientId", labelFor: (row: any) => string) => {
+    const grouped = new Map<string, { id: number | null; name: string; expense: number; revenue: number; buses: Set<number> }>();
+    const add = (row: any, kind: "expense" | "revenue") => {
+      const rawId = row[key] as number | null;
+      const name = labelFor(row) || "—";
+      const groupKey = rawId != null ? `${key}:${rawId}` : `${key}:${name}`;
+      const item = grouped.get(groupKey) ?? { id: rawId ?? null, name, expense: 0, revenue: 0, buses: new Set<number>() };
+      item[kind] += Number(row.amount || 0);
+      item.buses.add(row.vehicleId);
+      grouped.set(groupKey, item);
+    };
+    expenseRows.forEach(row => add(row, "expense")); revenueRows.forEach(row => add(row, "revenue"));
+    return Array.from(grouped.values()).map(item => ({ id: item.id, name: item.name, expense: item.expense, revenue: item.revenue, netOperatingResult: item.revenue - item.expense, busCount: item.buses.size })).sort((a,b) => Math.abs(b.expense) + Math.abs(b.revenue) - Math.abs(a.expense) - Math.abs(a.revenue));
+  };
+  const vehicleProfitabilityBase = ledgerGroups(periodVehicleExpenses, periodVehicleRevenues, "vehicleId", row => { const bus = vehiclesById.get(row.vehicleId); return bus ? `${bus.plate} · ${bus.brand} ${bus.model}` : `مركبة #${row.vehicleId}`; });
+  const vehicleProfitabilityIds = new Set(vehicleProfitabilityBase.map(row => row.id));
+  for (const bus of vehicleRows) if (inRange(bus.purchaseDate) && !vehicleProfitabilityIds.has(bus.id)) vehicleProfitabilityBase.push({ id: bus.id, name: `${bus.plate} · ${bus.brand} ${bus.model}`, expense: 0, revenue: 0, netOperatingResult: 0, busCount: 1 });
+  const vehicleProfitability = vehicleProfitabilityBase.map(row => { const bus = vehiclesById.get(row.id ?? -1); const purchaseInPeriod = bus && inRange(bus.purchaseDate) ? Number(bus.purchasePrice || 0) : 0; return { ...row, plate: bus?.plate ?? row.name, purchaseInPeriod, netReturn: row.revenue - row.expense - purchaseInPeriod }; });
+  const projectProfitability = ledgerGroups(periodVehicleExpenses, periodVehicleRevenues, "projectId", row => row.projectName || "—");
+  const clientProfitability = ledgerGroups(periodVehicleExpenses, periodVehicleRevenues, "clientId", row => row.clientName || "—");
+  const vehicleCostsInPeriod = periodVehicleExpenses.reduce((sum,row) => sum + Number(row.amount || 0), 0);
+  const allocatedVehicleRevenueInPeriod = periodVehicleRevenues.reduce((sum,row) => sum + Number(row.amount || 0), 0);
+  return {
+    period: { from, to },
+    fleet: {
+      total: vehicleRows.length,
+      working: vehicleRows.filter(row => ["مؤجرة", "مشغولة"].includes(row.status)).length,
+      ready: vehicleRows.filter(row => row.status === "متاحة").length,
+      maintenance: vehicleRows.filter(row => row.status === "في الصيانة").length,
+      leased: vehicleRows.filter(row => row.status === "مؤجرة").length,
+      stopped: vehicleRows.filter(row => row.status === "متوقفة").length,
+      setup: vehicleRows.filter(row => row.status === "قيد التجهيز").length,
+    },
+    finance: {
+      contractsValueInPeriod: periodContracts.reduce((sum, row) => sum + row.total, 0),
+      incomingInPeriod: periodIncoming.reduce((sum, row) => sum + row.amount, 0),
+      receivableOutstanding: outstandingClaims.reduce((sum, row) => sum + Math.max(0, row.amount - row.paid), 0),
+      unpaidClaims: outstandingClaims.filter(row => row.amount > row.paid).length,
+      overdueClaims: outstandingClaims.filter(row => { const due = dateValue(row.due); return Number.isFinite(due) && due < now && row.amount > row.paid; }).length,
+      payablesOutstanding: activePayables.reduce((sum, row) => sum + Math.max(0, row.amount - row.paid), 0),
+      outgoingInPeriod: periodOutgoing.reduce((sum, row) => sum + row.amount, 0),
+      vehicleCostsInPeriod,
+      allocatedVehicleRevenueInPeriod,
+      fleetVehicleNetInPeriod: allocatedVehicleRevenueInPeriod - vehicleCostsInPeriod - vehicleProfitability.reduce((sum,row) => sum + row.purchaseInPeriod, 0),
+      overduePayables: activePayables.filter(row => { const due = dateValue(row.dueDate); return Number.isFinite(due) && due < now && row.amount > row.paid; }).length,
+    },
+    maintenance: {
+      openedInPeriod: periodMaintenance.length,
+      openNow: activeMaintenance.length,
+      completedInPeriod: periodMaintenance.filter(row => row.status === "مكتمل").length,
+      costInPeriod: periodMaintenance.reduce((sum, row) => sum + costNumber(row.cost), 0),
+      overdueNow: activeMaintenance.filter(row => { const due = dateValue(row.expectedReturn || row.due); return Number.isFinite(due) && due < now; }).length,
+    },
+    projects: {
+      startedInPeriod: periodProjects.length,
+      totalNow: projectRows.length,
+      activeNow: projectRows.filter(row => row.status === "نشط").length,
+      requiredVehicles: projectRows.filter(row => row.status === "نشط").reduce((sum, row) => sum + row.requiredVehicles, 0),
+      assignedVehicles: vehicleRows.filter(row => row.projectId !== null).length,
+    },
+    documents: {
+      expiringInPeriod: periodDocuments.length,
+      expiredNow: documentRows.filter(row => { const expiry = dateValue(row.expiry); return Number.isFinite(expiry) && expiry < now; }).length,
+      expiringNext30Days: documentRows.filter(row => { const expiry = dateValue(row.expiry); return Number.isFinite(expiry) && expiry >= now && expiry <= soon; }).length,
+    },
+    people: {
+      employees: employeeRows.length,
+      activeEmployees: employeeRows.filter(row => row.status === "نشط").length,
+      drivers: driverRows.length,
+      availableDrivers: driverRows.filter(row => row.status === "متاح").length,
+    },
+    details: {
+      claims: periodClaims.map(row => ({ id: row.id, ref: row.ref, client: row.client, status: row.status, amount: row.amount, paid: row.paid, due: row.due })),
+      contracts: periodContracts.map(row => ({ id: row.id, ref: row.ref, client: row.client, status: row.status, total: row.total, collected: row.collected, startDate: row.startDate, expiry: row.expiry })),
+      payables: activePayables.map(row => ({ id: row.id, ref: row.ref, supplier: row.supplier, status: row.status, amount: row.amount, paid: row.paid, remaining: Math.max(0, row.amount - row.paid), dueDate: row.dueDate })),
+      maintenance: periodMaintenance.map(row => ({ id: row.id, ref: row.ref, vehicle: row.vehicle, status: row.status, cost: row.cost, start: row.start, expectedReturn: row.expectedReturn })),
+      vehicleProfitability,
+      projectProfitability,
+      clientProfitability,
+    },
+  };
+}
+
 type DbExecutor = any;
 async function validatePaymentReferences(db: DbExecutor, input: { contractId?: number | null; claimId?: number | null; clientId?: number | null; amount?: number }) {
   if (!input.contractId && !input.claimId && !input.clientId) throw new Error("يجب ربط الدفعة بعقد أو مطالبة أو عميل");
@@ -425,6 +972,7 @@ async function validatePaymentReferences(db: DbExecutor, input: { contractId?: n
   if (input.claimId) {
     const claim = (await db.select().from(claims).where(and(eq(claims.id, input.claimId), isNull(claims.archivedAt))).limit(1))[0];
     if (!claim) throw new Error("المطالبة المرتبطة بالدفعة غير موجودة");
+    if (claim.status !== "تم اعتمادها" && claim.status !== "تم صرفها") throw new Error("لا يمكن تسجيل دفعة قبل اعتماد المطالبة");
     if (input.contractId && claim.contractId && input.contractId !== claim.contractId) throw new Error("المطالبة لا تتبع العقد المحدد");
     if (Number(input.amount ?? 0) > claim.amount - claim.paid) throw new Error("قيمة الدفعة تتجاوز المتبقي من المطالبة");
   }
@@ -440,7 +988,8 @@ async function applyPaymentImpact(db: DbExecutor, input: { contractId?: number |
     const claim = (await db.select().from(claims).where(and(eq(claims.id, input.claimId), isNull(claims.archivedAt))).limit(1))[0];
     if (claim) {
       const paid = Math.max(0, claim.paid + amount);
-      await db.update(claims).set({ paid, status: paid >= claim.amount ? "مدفوعة" : "مستحقة" }).where(eq(claims.id, input.claimId));
+      const status = paid >= claim.amount ? "تم صرفها" : claim.status === "تم صرفها" ? "تم اعتمادها" : claim.status;
+      await db.update(claims).set({ paid, status }).where(eq(claims.id, input.claimId));
     }
   }
 }
@@ -459,9 +1008,14 @@ export async function updatePayment(id: number, input: Partial<typeof payments.$
   const db = await getDb();
   if (!db) return null;
   return db.transaction(async tx => {
+    await tx.execute(sql`SELECT id FROM payments WHERE id = ${id} FOR UPDATE`);
     const current = (await tx.select().from(payments).where(and(eq(payments.id, id), isNull(payments.archivedAt))).limit(1))[0];
     if (!current) return null;
     const next = { ...current, ...input };
+    const allocations = await tx.select({ amount: vehicleRevenues.amount }).from(vehicleRevenues).where(and(eq(vehicleRevenues.paymentId, id), isNull(vehicleRevenues.archivedAt)));
+    const allocated = allocations.reduce((total, row) => total + Number(row.amount || 0), 0);
+    if (input.amount !== undefined && Number(next.amount) < allocated) throw new Error(`لا يمكن خفض الدفعة عن الإيرادات المخصصة للباصات (${allocated} ر.س)`);
+    if (allocations.length && ((input.contractId !== undefined && input.contractId !== current.contractId) || (input.claimId !== undefined && input.claimId !== current.claimId))) throw new Error("لا يمكن نقل الدفعة إلى عقد أو مطالبة أخرى بعد تخصيص جزء منها لباص");
     await applyPaymentImpact(tx, current, -1);
     await validatePaymentReferences(tx, next);
     await tx.update(payments).set(input).where(eq(payments.id, id));
@@ -473,8 +1027,11 @@ export async function archivePayment(id: number) {
   const db = await getDb();
   if (!db) return false;
   return db.transaction(async tx => {
+    await tx.execute(sql`SELECT id FROM payments WHERE id = ${id} FOR UPDATE`);
     const current = (await tx.select().from(payments).where(and(eq(payments.id, id), isNull(payments.archivedAt))).limit(1))[0];
     if (!current) return false;
+    const allocations = await tx.select({ id: vehicleRevenues.id }).from(vehicleRevenues).where(and(eq(vehicleRevenues.paymentId, id), isNull(vehicleRevenues.archivedAt))).limit(1);
+    if (allocations.length) throw new Error("لا يمكن إلغاء هذه الدفعة قبل إلغاء تخصيص إيرادات الباص المرتبطة بها");
     await applyPaymentImpact(tx, current, -1);
     await tx.update(payments).set({ archivedAt: new Date() }).where(eq(payments.id, id));
     return true;

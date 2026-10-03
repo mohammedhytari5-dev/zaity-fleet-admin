@@ -106,6 +106,48 @@
       "when": 1790843000000,
       "tag": "0014_usernames",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "5",
+      "when": 1791011404717,
+      "tag": "0015_claim_workflow",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "5",
+      "when": 1791011727044,
+      "tag": "0016_projects_and_vehicle_assignments",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "5",
+      "when": 1791012065903,
+      "tag": "0017_maintenance_details_and_payables",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "5",
+      "when": 1791012760347,
+      "tag": "0018_employees_and_reporting",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "5",
+      "when": 1791013585649,
+      "tag": "0019_vehicle_lifecycle_costs",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "5",
+      "when": 1791013978181,
+      "tag": "0020_vehicle_linked_payables",
+      "breakpoints": true
     }
   ]
 }

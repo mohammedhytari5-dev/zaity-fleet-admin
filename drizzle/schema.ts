@@ -16,6 +16,26 @@ export const users = mysqlTable("users", {
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
 });
 
+export const projects = mysqlTable("projects", {
+  id: int("id").autoincrement().primaryKey(),
+  ref: varchar("ref", { length: 40 }).notNull().unique(),
+  name: varchar("name", { length: 200 }).notNull(),
+  clientId: int("clientId"),
+  client: varchar("client", { length: 200 }).notNull().default("—"),
+  contractId: int("contractId"),
+  contract: varchar("contract", { length: 40 }).notNull().default("—"),
+  managerEmployeeId: int("managerEmployeeId"),
+  manager: varchar("manager", { length: 160 }).notNull().default("—"),
+  startDate: varchar("startDate", { length: 32 }).notNull().default("—"),
+  endDate: varchar("endDate", { length: 32 }).notNull().default("—"),
+  requiredVehicles: int("requiredVehicles").notNull().default(0),
+  status: mysqlEnum("status", ["مخطط", "نشط", "موقوف", "مكتمل", "ملغي"]).notNull().default("مخطط"),
+  notes: text("notes"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  archivedAt: timestamp("archivedAt"),
+});
+
 export const vehicles = mysqlTable("vehicles", {
   id: int("id").autoincrement().primaryKey(),
   plate: varchar("plate", { length: 32 }).notNull().unique(),
@@ -24,9 +44,16 @@ export const vehicles = mysqlTable("vehicles", {
   year: varchar("year", { length: 8 }).notNull(),
   color: varchar("color", { length: 48 }).notNull(),
   mileage: varchar("mileage", { length: 32 }).notNull(),
+  purchasePrice: int("purchasePrice").notNull().default(0),
+  purchaseDate: varchar("purchaseDate", { length: 32 }).notNull().default("—"),
+  inServiceDate: varchar("inServiceDate", { length: 32 }).notNull().default("—"),
+  projectId: int("projectId"),
+  project: varchar("project", { length: 200 }).notNull().default("—"),
   driverId: int("driverId"),
   driver: varchar("driver", { length: 120 }).notNull().default("—"),
-  status: mysqlEnum("status", ["متاحة", "مؤجرة", "مشغولة", "في الصيانة", "قيد التجهيز"]).notNull().default("متاحة"),
+  employeeId: int("employeeId"),
+  employee: varchar("employee", { length: 160 }).notNull().default("—"),
+  status: mysqlEnum("status", ["متاحة", "مؤجرة", "مشغولة", "في الصيانة", "قيد التجهيز", "متوقفة"]).notNull().default("متاحة"),
   clientId: int("clientId"),
   client: varchar("client", { length: 160 }).notNull().default("—"),
   contractId: int("contractId"),
@@ -76,7 +103,10 @@ export const claims = mysqlTable("claims", {
   amount: int("amount").notNull().default(0),
   due: varchar("due", { length: 32 }).notNull().default("—"),
   paid: int("paid").notNull().default(0),
-  status: mysqlEnum("status", ["مستحقة", "مدفوعة", "متأخرة", "ملغاة"]).notNull().default("مستحقة"),
+  submittedAt: varchar("submittedAt", { length: 32 }).notNull().default("—"),
+  followUpAt: varchar("followUpAt", { length: 32 }).notNull().default("—"),
+  notes: text("notes"),
+  status: mysqlEnum("status", ["غير مرفوعة", "جديدة", "تحت الإجراء", "تم اعتمادها", "تم صرفها", "مرفوضة", "ملغاة"]).notNull().default("جديدة"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   archivedAt: timestamp("archivedAt"),
@@ -97,17 +127,40 @@ export const drivers = mysqlTable("drivers", {
   archivedAt: timestamp("archivedAt"),
 });
 
+export const employees = mysqlTable("employees", {
+  id: int("id").autoincrement().primaryKey(),
+  employeeNo: varchar("employeeNo", { length: 40 }).notNull().unique(),
+  name: varchar("name", { length: 160 }).notNull(),
+  nationalId: varchar("nationalId", { length: 64 }).notNull().default("—"),
+  phone: varchar("phone", { length: 40 }).notNull().default("—"),
+  email: varchar("email", { length: 320 }).notNull().default("—"),
+  department: varchar("department", { length: 120 }).notNull().default("الإدارة"),
+  jobTitle: varchar("jobTitle", { length: 120 }).notNull().default("موظف"),
+  hireDate: varchar("hireDate", { length: 32 }).notNull().default("—"),
+  status: mysqlEnum("status", ["نشط", "إجازة", "موقوف", "منتهي الخدمة"]).notNull().default("نشط"),
+  notes: text("notes"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  archivedAt: timestamp("archivedAt"),
+});
+
 export const maintenanceRequests = mysqlTable("maintenance_requests", {
   id: int("id").autoincrement().primaryKey(),
   ref: varchar("ref", { length: 40 }).notNull().unique(),
   vehicleId: int("vehicleId"),
   vehicle: varchar("vehicle", { length: 80 }).notNull(),
   type: varchar("type", { length: 160 }).notNull(),
+  reason: varchar("reason", { length: 500 }).notNull().default("—"),
+  workDone: text("workDone"),
+  parts: text("parts"),
   manager: varchar("manager", { length: 160 }).notNull().default("—"),
   start: varchar("start", { length: 32 }).notNull().default("—"),
   due: varchar("due", { length: 32 }).notNull().default("—"),
-  status: mysqlEnum("status", ["جديد", "جاري العمل", "مكتمل", "متوقف"]).notNull().default("جديد"),
+  expectedReturn: varchar("expectedReturn", { length: 32 }).notNull().default("—"),
+  status: mysqlEnum("status", ["جديد", "جاري العمل", "بانتظار الفحص", "مكتمل", "متوقف"]).notNull().default("جديد"),
   cost: varchar("cost", { length: 40 }).notNull().default("0 ر.س"),
+  receiptName: varchar("receiptName", { length: 255 }),
+  receiptUrl: mediumtext("receiptUrl"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   archivedAt: timestamp("archivedAt"),
@@ -118,6 +171,7 @@ export const documents = mysqlTable("documents", {
   name: varchar("name", { length: 160 }).notNull(),
   entityId: int("entityId"),
   entity: varchar("entity", { length: 160 }).notNull().default("—"),
+  entityType: varchar("entityType", { length: 40 }).notNull().default("مركبة"),
   type: varchar("type", { length: 80 }).notNull().default("مركبة"),
   expiry: varchar("expiry", { length: 32 }).notNull().default("—"),
   status: mysqlEnum("status", ["ساري", "قريبًا", "متأخر", "منتهي"]).notNull().default("ساري"),
@@ -164,6 +218,85 @@ export const payments = mysqlTable("payments", {
   notes: text("notes"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   archivedAt: timestamp("archivedAt"),
+});
+
+export const vehicleExpenses = mysqlTable("vehicle_expenses", {
+  id: int("id").autoincrement().primaryKey(),
+  vehicleId: int("vehicleId").notNull(),
+  maintenanceRequestId: int("maintenanceRequestId").unique(),
+  payableId: int("payableId").unique(),
+  projectId: int("projectId"),
+  projectName: varchar("projectName", { length: 200 }).notNull().default("—"),
+  clientId: int("clientId"),
+  clientName: varchar("clientName", { length: 200 }).notNull().default("—"),
+  category: mysqlEnum("category", ["صيانة", "قطع غيار", "زيوت وفلاتر", "إطارات", "إصلاحات وأعطال", "تأمين", "فحص واستمارة", "مخالفات", "أخرى"]).notNull(),
+  amount: int("amount").notNull().default(0),
+  spentAt: varchar("spentAt", { length: 32 }).notNull(),
+  description: varchar("description", { length: 300 }).notNull(),
+  vendor: varchar("vendor", { length: 160 }).notNull().default("—"),
+  receiptName: varchar("receiptName", { length: 255 }),
+  receiptUrl: mediumtext("receiptUrl"),
+  notes: text("notes"),
+  createdByUserId: int("createdByUserId"),
+  createdByName: varchar("createdByName", { length: 160 }).notNull().default("—"),
+  updatedByUserId: int("updatedByUserId"),
+  updatedByName: varchar("updatedByName", { length: 160 }).notNull().default("—"),
+  archivedByUserId: int("archivedByUserId"),
+  archivedByName: varchar("archivedByName", { length: 160 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  archivedAt: timestamp("archivedAt"),
+});
+
+export const vehicleRevenues = mysqlTable("vehicle_revenues", {
+  id: int("id").autoincrement().primaryKey(),
+  vehicleId: int("vehicleId").notNull(),
+  paymentId: int("paymentId").notNull(),
+  projectId: int("projectId"),
+  projectName: varchar("projectName", { length: 200 }).notNull().default("—"),
+  clientId: int("clientId"),
+  clientName: varchar("clientName", { length: 200 }).notNull().default("—"),
+  amount: int("amount").notNull().default(0),
+  receiptName: varchar("receiptName", { length: 255 }),
+  receiptUrl: mediumtext("receiptUrl"),
+  notes: text("notes"),
+  createdByUserId: int("createdByUserId"),
+  createdByName: varchar("createdByName", { length: 160 }).notNull().default("—"),
+  archivedByUserId: int("archivedByUserId"),
+  archivedByName: varchar("archivedByName", { length: 160 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  archivedAt: timestamp("archivedAt"),
+});
+
+export const payables = mysqlTable("payables", {
+  id: int("id").autoincrement().primaryKey(),
+  ref: varchar("ref", { length: 40 }).notNull().unique(),
+  supplier: varchar("supplier", { length: 200 }).notNull(),
+  description: varchar("description", { length: 300 }).notNull(),
+  amount: int("amount").notNull().default(0),
+  paid: int("paid").notNull().default(0),
+  issueDate: varchar("issueDate", { length: 32 }).notNull().default("—"),
+  dueDate: varchar("dueDate", { length: 32 }).notNull().default("—"),
+  status: mysqlEnum("status", ["جديدة", "معتمدة", "مدفوعة جزئيًا", "مدفوعة", "ملغاة"]).notNull().default("جديدة"),
+  notes: text("notes"),
+  vehicleId: int("vehicleId"),
+  vehicleCategory: mysqlEnum("vehicleCategory", ["صيانة", "قطع غيار", "زيوت وفلاتر", "إطارات", "إصلاحات وأعطال", "تأمين", "فحص واستمارة", "مخالفات", "أخرى"]),
+  receiptName: varchar("receiptName", { length: 255 }),
+  receiptUrl: mediumtext("receiptUrl"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  archivedAt: timestamp("archivedAt"),
+});
+
+export const payablePayments = mysqlTable("payable_payments", {
+  id: int("id").autoincrement().primaryKey(),
+  payableId: int("payableId").notNull(),
+  amount: int("amount").notNull(),
+  paidAt: varchar("paidAt", { length: 32 }).notNull(),
+  method: varchar("method", { length: 80 }).notNull().default("تحويل بنكي"),
+  reference: varchar("reference", { length: 80 }).notNull().default("—"),
+  notes: text("notes"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
 export const tasks = mysqlTable("tasks", {
@@ -213,8 +346,16 @@ export const auditLogs = mysqlTable("audit_logs", {
 
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
+export type Project = typeof projects.$inferSelect;
+export type InsertProject = typeof projects.$inferInsert;
+export type Employee = typeof employees.$inferSelect;
+export type InsertEmployee = typeof employees.$inferInsert;
 export type Vehicle = typeof vehicles.$inferSelect;
 export type InsertVehicle = typeof vehicles.$inferInsert;
+export type VehicleExpense = typeof vehicleExpenses.$inferSelect;
+export type InsertVehicleExpense = typeof vehicleExpenses.$inferInsert;
+export type VehicleRevenue = typeof vehicleRevenues.$inferSelect;
+export type InsertVehicleRevenue = typeof vehicleRevenues.$inferInsert;
 export type Contract = typeof contracts.$inferSelect;
 export type InsertContract = typeof contracts.$inferInsert;
 export type ContractItem = typeof contractItems.$inferSelect;
@@ -233,6 +374,10 @@ export type ClientRepresentative = typeof clientRepresentatives.$inferSelect;
 export type InsertClientRepresentative = typeof clientRepresentatives.$inferInsert;
 export type Payment = typeof payments.$inferSelect;
 export type InsertPayment = typeof payments.$inferInsert;
+export type Payable = typeof payables.$inferSelect;
+export type InsertPayable = typeof payables.$inferInsert;
+export type PayablePayment = typeof payablePayments.$inferSelect;
+export type InsertPayablePayment = typeof payablePayments.$inferInsert;
 export type Task = typeof tasks.$inferSelect;
 export type InsertTask = typeof tasks.$inferInsert;
 export type Notification = typeof notifications.$inferSelect;

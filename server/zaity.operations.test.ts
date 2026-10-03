@@ -14,6 +14,7 @@ describe("Zaity operations", () => {
     updatedAt: new Date(),
     lastSignedIn: new Date(),
   };
+  const vehicleOnlyUser = { ...adminUser, role: "user" as const, permissions: JSON.stringify(["vehicles"]) };
 
   it("exposes the authenticated dashboard contract", async () => {
     const ctx: TrpcContext = {
@@ -53,6 +54,78 @@ describe("Zaity operations", () => {
     if (vehicles.length) expect(vehicles[0]).toMatchObject({ plate: expect.any(String), status: expect.any(String) });
   });
 
+  it("allows an explicitly authorized module read but denies unrelated module reads", async () => {
+    const ctx: TrpcContext = {
+      user: vehicleOnlyUser,
+      req: { protocol: "https", headers: {} } as TrpcContext["req"],
+      res: {} as TrpcContext["res"],
+    };
+    const caller = appRouter.createCaller(ctx);
+    await expect(caller.vehicles.list()).resolves.toEqual(expect.any(Array));
+    await expect(caller.drivers.list()).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(caller.projects.list()).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(caller.payables.list()).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(caller.maintenance.list()).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(caller.documents.list()).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(caller.clients.list()).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(caller.contracts.list()).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(caller.claims.list()).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(caller.payments.list()).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(caller.tasks.list()).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(caller.notifications.list()).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("allows an explicitly authorized projects read", async () => {
+    const ctx: TrpcContext = {
+      user: { ...adminUser, role: "user" as const, permissions: JSON.stringify(["projects"]) },
+      req: { protocol: "https", headers: {} } as TrpcContext["req"],
+      res: {} as TrpcContext["res"],
+    };
+    await expect(appRouter.createCaller(ctx).projects.list()).resolves.toEqual(expect.any(Array));
+  });
+
+  it("allows the dedicated payables permission without granting other financial modules", async () => {
+    const ctx: TrpcContext = {
+      user: { ...adminUser, role: "user" as const, permissions: JSON.stringify(["payables"]) },
+      req: { protocol: "https", headers: {} } as TrpcContext["req"],
+      res: {} as TrpcContext["res"],
+    };
+    const caller = appRouter.createCaller(ctx);
+    await expect(caller.payables.list()).resolves.toEqual(expect.any(Array));
+    await expect(caller.claims.list()).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("keeps employee records and cross-module reports behind their dedicated permissions", async () => {
+    const ctx: TrpcContext = {
+      user: vehicleOnlyUser,
+      req: { protocol: "https", headers: {} } as TrpcContext["req"],
+      res: {} as TrpcContext["res"],
+    };
+    const caller = appRouter.createCaller(ctx);
+    await expect(caller.employees.list()).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(caller.reports.summary({ from: "2026-10-01", to: "2026-10-31" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("requires employee access before linking an employee to a document", async () => {
+    const ctx: TrpcContext = {
+      user: { ...adminUser, role: "user" as const, permissions: JSON.stringify(["documents"]) },
+      req: { protocol: "https", headers: {} } as TrpcContext["req"],
+      res: {} as TrpcContext["res"],
+    };
+    await expect(appRouter.createCaller(ctx).documents.create({ name: "هوية موظف", entityType: "موظف", entityId: 4 }))
+      .rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("rejects reversed report periods before querying stored data", async () => {
+    const ctx: TrpcContext = {
+      user: { ...adminUser, role: "user" as const, permissions: JSON.stringify(["reports"]) },
+      req: { protocol: "https", headers: {} } as TrpcContext["req"],
+      res: {} as TrpcContext["res"],
+    };
+    await expect(appRouter.createCaller(ctx).reports.summary({ from: "2026-10-31", to: "2026-10-01" }))
+      .rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
   it("accepts driver assignment through the vehicle update contract", async () => {
     const ctx: TrpcContext = {
       user: adminUser,
@@ -86,5 +159,35 @@ describe("Zaity operations", () => {
   it("rejects invalid payment amounts before reaching the database", async () => {
     const ctx: TrpcContext = { user: adminUser, req: { protocol: "https", headers: {} } as TrpcContext["req"], res: {} as TrpcContext["res"] };
     await expect(appRouter.createCaller(ctx).payments.create({ amount: 0, paidAt: "2026-09-30", method: "تحويل" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("keeps a bus financial file and its expense/revenue mutations behind finance permission", async () => {
+    const ctx: TrpcContext = { user: vehicleOnlyUser, req: { protocol: "https", headers: {} } as TrpcContext["req"], res: {} as TrpcContext["res"] };
+    const caller = appRouter.createCaller(ctx);
+    await expect(caller.vehicles.financeProfile({ vehicleId: 1 })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(caller.vehicles.receipt({ vehicleId: 1, recordId: 1, kind: "expense" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(caller.vehicles.update({ id: 1, data: { purchasePrice: 20000 } })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(caller.vehicles.expenseCreate({ vehicleId: 1, category: "إطارات", amount: 1000, spentAt: "2026-10-03", description: "إطارات اختبار", vendor: "ورشة" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(caller.vehicleRevenues.create({ vehicleId: 1, paymentId: 1, amount: 100 })).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("requires vehicle access as well as finance before attributing collected money to a bus", async () => {
+    const ctx: TrpcContext = { user: { ...adminUser, role: "user" as const, permissions: JSON.stringify(["finance"]) }, req: { protocol: "https", headers: {} } as TrpcContext["req"], res: {} as TrpcContext["res"] };
+    await expect(appRouter.createCaller(ctx).vehicleRevenues.create({ vehicleId: 1, paymentId: 1, amount: 100 })).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("requires finance as well as vehicle access before linking an accounts-payable invoice", async () => {
+    const ctx: TrpcContext = { user: { ...adminUser, role: "user" as const, permissions: JSON.stringify(["payables", "vehicles"]) }, req: { protocol: "https", headers: {} } as TrpcContext["req"], res: {} as TrpcContext["res"] };
+    await expect(appRouter.createCaller(ctx).payables.create({ ref: "AP-TEST-F", supplier: "ورشة اختبار", description: "فاتورة إطارات", amount: 1000, issueDate: "2026-10-03", dueDate: "2026-10-20", vehicleId: 1, vehicleCategory: "إطارات" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("requires vehicle permission before attaching an accounts-payable invoice to a bus", async () => {
+    const ctx: TrpcContext = { user: { ...adminUser, role: "user" as const, permissions: JSON.stringify(["payables"]) }, req: { protocol: "https", headers: {} } as TrpcContext["req"], res: {} as TrpcContext["res"] };
+    await expect(appRouter.createCaller(ctx).payables.create({ ref: "AP-TEST", supplier: "ورشة اختبار", description: "فاتورة إطارات", amount: 1000, issueDate: "2026-10-03", dueDate: "2026-10-20", vehicleId: 1, vehicleCategory: "إطارات" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("does not allow maintenance-only users to enter invoice amounts or financial attachments", async () => {
+    const ctx: TrpcContext = { user: { ...adminUser, role: "user" as const, permissions: JSON.stringify(["maintenance"]) }, req: { protocol: "https", headers: {} } as TrpcContext["req"], res: {} as TrpcContext["res"] };
+    await expect(appRouter.createCaller(ctx).maintenance.create({ ref: "MT-TEST", vehicleId: 1, vehicle: "1234", type: "إصلاح", manager: "اختبار", start: "2026-10-03", due: "2026-10-03", status: "جديد", cost: "500 ر.س" })).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 });
