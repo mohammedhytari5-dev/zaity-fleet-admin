@@ -7,6 +7,7 @@ import { AuditLog, Claim, Client, Contract, ContractItem, Document, Driver, Empl
 import { InsertProject, Project, projects } from "../drizzle/schema";
 import { InsertPayable, Payable, PayablePayment, InsertPayablePayment, payables, payablePayments } from "../drizzle/schema";
 import { ENV } from './_core/env';
+import { summarizeMaintenanceItems } from "./vehicle-maintenance-summary";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 let _authSchemaReady: Promise<void> | null = null;
@@ -136,13 +137,14 @@ export async function getVehicleFinancialProfile(vehicleId: number) {
   if (!db) return null;
   const vehicle = (await db.select().from(vehicles).where(and(eq(vehicles.id, vehicleId), isNull(vehicles.archivedAt))).limit(1))[0];
   if (!vehicle) return null;
-  const [expenses, revenueRows, paymentRows, contractRows, contractItemRows, claimRows, projectRows, clientRows, allAllocations, payableRows] = await Promise.all([
+  const [expenses, revenueRows, paymentRows, contractRows, contractItemRows, claimRows, projectRows, clientRows, allAllocations, payableRows, maintenanceRows] = await Promise.all([
     db.select().from(vehicleExpenses).where(and(eq(vehicleExpenses.vehicleId, vehicleId), isNull(vehicleExpenses.archivedAt))).orderBy(desc(vehicleExpenses.spentAt), desc(vehicleExpenses.createdAt)),
     db.select().from(vehicleRevenues).where(and(eq(vehicleRevenues.vehicleId, vehicleId), isNull(vehicleRevenues.archivedAt))).orderBy(desc(vehicleRevenues.createdAt)),
     db.select().from(payments).where(isNull(payments.archivedAt)).orderBy(desc(payments.paidAt)),
     db.select().from(contracts), db.select().from(contractItems), db.select().from(claims), db.select().from(projects), db.select().from(clients),
     db.select({ paymentId: vehicleRevenues.paymentId, amount: vehicleRevenues.amount }).from(vehicleRevenues).where(isNull(vehicleRevenues.archivedAt)),
     db.select({ id: payables.id, receiptUrl: payables.receiptUrl }).from(payables).where(and(eq(payables.vehicleId, vehicleId), isNull(payables.archivedAt))),
+    db.select({ id: maintenanceRequests.id, type: maintenanceRequests.type }).from(maintenanceRequests).where(eq(maintenanceRequests.vehicleId, vehicleId)),
   ]);
   const paymentById = new Map(paymentRows.map(row => [row.id, row]));
   const contractById = new Map(contractRows.map(row => [row.id, row]));
@@ -157,7 +159,13 @@ export async function getVehicleFinancialProfile(vehicleId: number) {
     return { ...safeAllocation, hasReceipt: Boolean(receiptUrl), paidAt: payment?.paidAt ?? "—", method: payment?.method ?? "—", reference: payment?.reference ?? "—", contractRef: contract?.ref ?? "—", client: allocation.clientName || contract?.client || "—" };
   });
   const payableReceipts = new Set(payableRows.filter(row => Boolean(row.receiptUrl)).map(row => row.id));
-  const safeExpenses = expenses.map(({ receiptUrl, ...expense }) => ({ ...expense, hasReceipt: Boolean(receiptUrl) || Boolean(expense.payableId && payableReceipts.has(expense.payableId)) }));
+  const maintenanceTypeByRequestId = new Map(maintenanceRows.map(row => [row.id, row.type]));
+  const expensesWithMaintenance = expenses.map(expense => ({
+    ...expense,
+    maintenanceItem: expense.maintenanceRequestId ? maintenanceTypeByRequestId.get(expense.maintenanceRequestId) ?? null : null,
+  }));
+  const safeExpenses = expensesWithMaintenance.map(({ receiptUrl, ...expense }) => ({ ...expense, hasReceipt: Boolean(receiptUrl) || Boolean(expense.payableId && payableReceipts.has(expense.payableId)) }));
+  const maintenanceItemTotals = summarizeMaintenanceItems(expensesWithMaintenance);
   const allocatablePayments = paymentRows.flatMap(payment => {
     const contractId = payment.contractId ?? (payment.claimId ? claimById.get(payment.claimId)?.contractId : null);
     if (!contractId) return [];
@@ -176,7 +184,7 @@ export async function getVehicleFinancialProfile(vehicleId: number) {
   const revenueTotal = revenueRows.reduce((total, revenue) => total + Number(revenue.amount || 0), 0);
   const purchasePrice = Number(vehicle.purchasePrice || 0);
   return {
-    vehicle, expenses: safeExpenses, revenues: revenueDetails, allocatablePayments, categoryTotals,
+    vehicle, expenses: safeExpenses, revenues: revenueDetails, allocatablePayments, categoryTotals, maintenanceItemTotals,
     purchasePrice, expenseTotal, investedTotal: purchasePrice + expenseTotal, revenueTotal,
     netCashReturn: revenueTotal - purchasePrice - expenseTotal,
     project: projectRows.find(project => project.id === vehicle.projectId)?.name ?? vehicle.project,
