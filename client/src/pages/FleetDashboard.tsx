@@ -562,10 +562,26 @@ export default function FleetDashboard() {
       return;
     }
     if (modal?.module !== "vehicles") return;
-    const { id: _id, ...payload } = data;
+    const payload = {
+      plate: String(data.plate || "").trim(),
+      brand: String(data.brand || "—"),
+      model: String(data.model || "").trim(),
+      year: String(data.year || ""),
+      color: String(data.color || "—"),
+      mileage: String(data.mileage || "0 كم"),
+      driver: String(data.driver || "—"),
+      driverId: data.driverId ? Number(data.driverId) : null,
+      status: data.status as any,
+      client: String(data.client || "—"),
+      clientId: data.clientId ? Number(data.clientId) : null,
+      contract: String(data.contract || "—"),
+      contractId: data.contractId ? Number(data.contractId) : null,
+      notes: data.notes ? String(data.notes) : undefined,
+    };
     const onSuccess = (saved: Row) => { setVehicles(prev => prev.some(v => v.id === saved.id) ? prev.map(v => v.id === saved.id ? saved as Vehicle : v) : [saved as Vehicle, ...prev]); utils.vehicles.list.invalidate(); setModal(null); toast.success("تم حفظ المركبة"); };
-    if (vehicles.some(v => v.id === data.id)) vehicleUpdate.mutate({ id: data.id, data: payload as any }, { onSuccess });
-    else vehicleCreate.mutate(payload as any, { onSuccess });
+    const onError = (error: { message: string }) => toast.error(`تعذر حفظ المركبة: ${error.message}`);
+    if (vehicles.some(v => v.id === data.id)) vehicleUpdate.mutate({ id: data.id, data: payload as any }, { onSuccess, onError });
+    else vehicleCreate.mutate(payload as any, { onSuccess, onError });
   };
   const saveQuickAction = (value: string) => {
     if (!quickAction) return;
