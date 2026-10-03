@@ -1,4 +1,5 @@
-import { int, mediumtext, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+import { sql } from "drizzle-orm";
+import { int, mediumtext, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
@@ -38,7 +39,7 @@ export const projects = mysqlTable("projects", {
 
 export const vehicles = mysqlTable("vehicles", {
   id: int("id").autoincrement().primaryKey(),
-  plate: varchar("plate", { length: 32 }).notNull().unique(),
+  plate: varchar("plate", { length: 32 }).notNull(),
   brand: varchar("brand", { length: 80 }).notNull(),
   model: varchar("model", { length: 120 }).notNull(),
   year: varchar("year", { length: 8 }).notNull(),
@@ -62,7 +63,8 @@ export const vehicles = mysqlTable("vehicles", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   archivedAt: timestamp("archivedAt"),
-});
+  activePlate: varchar("activePlate", { length: 32 }).generatedAlwaysAs(sql`CASE WHEN archivedAt IS NULL THEN plate ELSE NULL END`, { mode: "stored" }),
+}, (table) => [uniqueIndex("vehicles_active_plate_unique").on(table.activePlate)]);
 
 export const contracts = mysqlTable("contracts", {
   id: int("id").autoincrement().primaryKey(),
