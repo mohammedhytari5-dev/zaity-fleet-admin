@@ -488,6 +488,15 @@ export async function createRepresentative(input: typeof clientRepresentatives.$
 export async function listUsers() { const db = await getDb(); return db ? db.select({ id: users.id, name: users.name, username: users.username, email: users.email, role: users.role, permissions: users.permissions, isActive: users.isActive, createdAt: users.createdAt, lastSignedIn: users.lastSignedIn }).from(users).orderBy(desc(users.createdAt)) : null; }
 export async function countAdmins() { const db = await getDb(); if (!db) return null; const rows = await db.select({ id: users.id }).from(users).where(eq(users.role, "admin")); return rows.length; }
 export async function updateUserRole(id: number, role: "user" | "admin") { const db = await getDb(); if (!db) return null; await db.update(users).set({ role }).where(eq(users.id, id)); return (await db.select({ id: users.id, name: users.name, username: users.username, email: users.email, role: users.role, permissions: users.permissions, isActive: users.isActive, createdAt: users.createdAt, lastSignedIn: users.lastSignedIn }).from(users).where(eq(users.id, id)).limit(1))[0] ?? null; }
+export async function updateUserAccess(id: number, input: { permissions?: string[]; password?: string }) {
+  const db = await getDb();
+  if (!db) return null;
+  const data: Partial<typeof users.$inferInsert> = {};
+  if (input.permissions) data.permissions = JSON.stringify(input.permissions);
+  if (input.password) data.passwordHash = hashPassword(input.password);
+  if (Object.keys(data).length) await db.update(users).set(data).where(eq(users.id, id));
+  return (await db.select({ id: users.id, name: users.name, username: users.username, email: users.email, role: users.role, permissions: users.permissions, isActive: users.isActive, createdAt: users.createdAt, lastSignedIn: users.lastSignedIn }).from(users).where(eq(users.id, id)).limit(1))[0] ?? null;
+}
 export async function listSettings(category?: string) { const db = await getDb(); if (!db) return null; return category ? db.select().from(settingCatalog).where(eq(settingCatalog.category, category)) : db.select().from(settingCatalog); }
 export async function upsertSetting(input: typeof settingCatalog.$inferInsert) { const db = await getDb(); if (!db) return null; const result = await db.insert(settingCatalog).values(input); return Number(result[0].insertId); }
 export async function deleteSetting(id: number) { const db = await getDb(); if (!db) return false; await db.delete(settingCatalog).where(eq(settingCatalog.id, id)); return true; }
