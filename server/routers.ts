@@ -115,7 +115,13 @@ export const appRouter = router({
     }),
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
-      ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
+      // Match the cookie attributes used by local login and production OAuth
+      // so the browser removes the actual session instead of retaining it.
+      ctx.res.clearCookie(COOKIE_NAME, {
+        ...cookieOptions,
+        maxAge: -1,
+        sameSite: cookieOptions.secure ? "none" : "lax",
+      });
       return { success: true } as const;
     }),
   }),
