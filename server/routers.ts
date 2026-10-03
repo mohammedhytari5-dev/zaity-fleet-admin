@@ -3,7 +3,7 @@ import { TRPCError } from "@trpc/server";
 import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
-import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
+import { adminProcedure, permissionProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { ONE_YEAR_MS } from "@shared/const";
 import { sdk } from "./_core/sdk";
 import { archiveClaim, archiveClient, archiveContract, archiveDocument, archiveDriver, archiveMaintenanceRequest, archivePayment, archiveSetting, deleteSetting, archiveVehicle, assignVehicleDriver, authenticateLocalUser, countAdmins, createLocalUser, createAuditLog, createClaim, createClient, createContract, createDocument, createDriver, createMaintenanceRequest, createNotification, createPayment, createRepresentative, createTask, createVehicle, listAuditLogs, listClaims, listClients, listContracts, listDocuments, listDrivers, listMaintenanceRequests, listNotifications, listPayments, listRepresentatives, listSettings, listTasks, listUsers, listVehicles, markNotificationRead, updateClaim, updatePayment, updateSetting, updateClient, updateContract, updateContractStatus, updateUserRole, updateUserAccess, updateDocument, updateDriver, updateMaintenanceRequest, updateTask, updateVehicle, upsertSetting } from "./db";
@@ -130,10 +130,10 @@ export const appRouter = router({
       const records = await listVehicles();
       return records ?? [];
     }),
-    create: adminProcedure.input(vehicleInput).mutation(async ({ input }) => requireRecord(await createVehicle(input), "المركبة")),
-    update: adminProcedure.input(z.object({ id: z.number().int().positive(), data: vehicleInput.partial() })).mutation(async ({ input }) => requireRecord(await updateVehicle(input.id, input.data), "المركبة")),
-    assignDriver: adminProcedure.input(z.object({ vehicleId: z.number().int().positive(), driverId: z.number().int().positive().nullable() })).mutation(async ({ input }) => requireRecord(await assignVehicleDriver(input.vehicleId, input.driverId), "إسناد السائق")),
-    archive: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archiveVehicle(input.id) })),
+    create: permissionProcedure("vehicles").input(vehicleInput).mutation(async ({ input }) => requireRecord(await createVehicle(input), "المركبة")),
+    update: permissionProcedure("vehicles").input(z.object({ id: z.number().int().positive(), data: vehicleInput.partial() })).mutation(async ({ input }) => requireRecord(await updateVehicle(input.id, input.data), "المركبة")),
+    assignDriver: permissionProcedure("vehicles").input(z.object({ vehicleId: z.number().int().positive(), driverId: z.number().int().positive().nullable() })).mutation(async ({ input }) => requireRecord(await assignVehicleDriver(input.vehicleId, input.driverId), "إسناد السائق")),
+    archive: permissionProcedure("vehicles").input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archiveVehicle(input.id) })),
   }),
   drivers: router({
     list: protectedProcedure.query(async () => (await listDrivers()) ?? []),
