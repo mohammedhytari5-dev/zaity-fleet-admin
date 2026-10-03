@@ -1,4 +1,4 @@
-import { Children, useEffect, useMemo, useState } from "react";
+import { Children, Fragment, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
@@ -265,11 +265,27 @@ function VehicleProfileModal({ vehicle, canAccess, maintenance, documents, onClo
   const [expenseOpen, setExpenseOpen] = useState(false);
   const [revenueOpen, setRevenueOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [expandedExpenseId, setExpandedExpenseId] = useState<number | null>(null);
+  const [expandedExpenseGroup, setExpandedExpenseGroup] = useState<string | null>(null);
   const blankExpense = () => ({ category: "أخرى", amount: "", spentAt: new Date().toISOString().slice(0, 10), description: "", vendor: "", notes: "", receiptName: "", receiptUrl: "" });
   const [expense, setExpense] = useState(blankExpense);
   const [revenue, setRevenue] = useState({ paymentId: "", amount: "", receiptName: "", receiptUrl: "", notes: "" });
   const data = profileQuery.data as any;
+  const expenseSummaryRows = useMemo(() => {
+    const groups = new Map<string, { key: string; label: string; total: number; expenses: any[] }>();
+    for (const expense of (data?.expenses ?? []) as any[]) {
+      const amount = Number(expense.amount || 0);
+      if (amount <= 0) continue;
+      const maintenanceItem = String(expense.maintenanceItem || "").trim();
+      const category = String(expense.category || "أخرى");
+      const key = maintenanceItem ? `maintenance:${maintenanceItem}` : `category:${category}`;
+      const label = maintenanceItem || (category === "صيانة" ? "صيانة أخرى" : category);
+      const group = groups.get(key) ?? { key, label, total: 0, expenses: [] };
+      group.total += amount;
+      group.expenses.push(expense);
+      groups.set(key, group);
+    }
+    return Array.from(groups.values()).sort((a, b) => b.total - a.total || a.label.localeCompare(b.label, "ar"));
+  }, [data?.expenses]);
   const linkedMaintenance = maintenance.filter(item => item.vehicleId === vehicle.id || item.vehicle === vehicle.plate);
   const linkedDocuments = documents.filter(item => item.entityType === "مركبة" && item.entityId === vehicle.id);
   const updateExpenseField = (key: string, value: string) => setExpense(current => ({ ...current, [key]: value }));
@@ -305,46 +321,47 @@ function VehicleProfileModal({ vehicle, canAccess, maintenance, documents, onClo
       <div className="metrics-grid finance-metrics" style={{ marginTop: "1rem" }}><MetricCard title="قيمة الشراء" value={formatSAR(data.purchasePrice)} helper={data.vehicle.purchaseDate || "تاريخ الشراء غير مسجل"} icon={CarFront} tone="blue" /><MetricCard title="مصروفات التشغيل" value={formatSAR(data.expenseTotal)} helper="من سجل المصروفات حتى الآن" icon={Wrench} tone="orange" /><MetricCard title="الإيراد المحصل المخصص" value={formatSAR(data.revenueTotal)} helper="من دفعات مسجلة وموزعة على هذا الباص" icon={CircleDollarSign} tone="teal" /><MetricCard title="صافي النقد قبل الإهلاك" value={formatSAR(data.netCashReturn)} helper="الإيراد المحصل − الشراء − التشغيل" icon={Activity} tone={data.netCashReturn >= 0 ? "teal" : "orange"} /></div>
       <div className="quick-metrics"><div><span>إجمالي ما استثمر في الباص</span><strong>{formatSAR(data.investedTotal)}</strong></div><div><span>إجمالي الصيانة المسجلة</span><strong>{formatSAR(data.categoryTotals["صيانة"] || 0)}</strong></div><div><span>عدد عمليات الصرف</span><strong>{data.expenses.length.toLocaleString("ar-SA")}</strong></div><div><span>المشروع/العميل وقت التخصيص</span><strong>{data.project || "—"} / {data.client || "—"}</strong></div></div>
       <section className="surface" style={{ padding: "1rem", marginTop: "1rem" }}><div className="section-head"><div><h3>مصروفات الباص</h3><span>إجمالي مدى الحياة؛ أوامر الصيانة وفواتير المورد المرتبطة بالباص تُزامن تلقائيًا</span></div><div style={{ display: "flex", gap: ".5rem" }}><button className="btn outline" onClick={() => { setEditingId(null); setExpense(blankExpense()); setExpenseOpen(!expenseOpen); setRevenueOpen(false); }}><Plus size={15} />تسجيل مصروف</button><button className="btn primary" onClick={() => { setRevenueOpen(!revenueOpen); setExpenseOpen(false); }}><Plus size={15} />تخصيص إيراد محصل</button></div></div>
-        <div className="quick-metrics">{Object.entries(data.categoryTotals as Record<string, number>).filter(([category, amount]) => Number(amount) > 0 && category !== "صيانة").map(([category, amount]) => <div key={category}><span>{category}</span><strong>{formatSAR(Number(amount))}</strong></div>)}</div>
-        <section className="surface" style={{ padding: "1rem", marginTop: "1rem" }}><div className="section-head"><div><h3>بنود الصيانة الدورية المستخدمة</h3><span>تظهر البنود التي سُجل لها صرف فعلي على هذا الباص فقط</span></div></div>{data.maintenanceItemTotals?.length ? <div className="table-scroll"><table><thead><tr><th>بند الصيانة</th><th>عدد العمليات</th><th>إجمالي التكلفة</th></tr></thead><tbody>{data.maintenanceItemTotals.map((item: any) => <tr key={item.item}><td>{item.item}</td><td>{Number(item.operations).toLocaleString("ar-SA")}</td><td><strong>{formatSAR(item.total)}</strong></td></tr>)}</tbody></table></div> : <div className="empty-state" style={{ padding: "1rem" }}>لا توجد بنود صيانة دورية مستخدمة بتكلفة مسجلة لهذا الباص.</div>}</section>
+        <section className="surface" style={{ padding: "1rem", marginTop: "1rem" }}>
+          <div className="section-head"><div><h3>إجماليات المصروفات</h3><span>يُجمع كل بند مع عملياته؛ اضغط «إظهار التفاصيل» بجانب الإجمالي لعرض السجل</span></div></div>
+          {expenseSummaryRows.length ? <div className="table-scroll"><table><thead><tr><th>البند</th><th>عدد العمليات</th><th>إجمالي التكلفة والتفاصيل</th></tr></thead><tbody>
+            {expenseSummaryRows.map((group: any) => {
+              const expanded = expandedExpenseGroup === group.key;
+              return <Fragment key={group.key}>
+                <tr>
+                  <td>{group.label}</td>
+                  <td>{group.expenses.length.toLocaleString("ar-SA")}</td>
+                  <td><div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: ".5rem", flexWrap: "wrap" }}><strong>{formatSAR(group.total)}</strong><button type="button" className="btn outline" aria-expanded={expanded} onClick={() => setExpandedExpenseGroup(expanded ? null : group.key)}>{expanded ? "إخفاء التفاصيل" : "إظهار التفاصيل"} <ChevronDown size={14} /></button></div></td>
+                </tr>
+                {expanded && <tr><td colSpan={3} style={{ padding: ".6rem", background: "var(--muted)" }}>
+                  <div style={{ display: "grid", gap: ".6rem" }}>
+                    {group.expenses.map((operation: any) => {
+                      const synchronized = Boolean(operation.maintenanceRequestId || operation.payableId);
+                      return <div className="surface" key={operation.id} style={{ padding: ".75rem" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: ".6rem", flexWrap: "wrap", marginBottom: ".5rem" }}><strong>{operation.spentAt} · {formatSAR(operation.amount)}</strong><small>{operation.maintenanceItem || operation.category}</small></div>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: ".6rem" }}>
+                          <div><small>السبب / البيان</small><strong style={{ display: "block" }}>{operation.description || "—"}</strong></div>
+                          <div><small>المورد / الورشة</small><strong style={{ display: "block" }}>{operation.vendor || "—"}</strong></div>
+                          <div><small>أُدخل بواسطة</small><strong style={{ display: "block" }}>{operation.createdByName || "—"}</strong></div>
+                          <div><small>ملاحظات</small><strong style={{ display: "block" }}>{operation.notes || "—"}</strong></div>
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: ".5rem", flexWrap: "wrap", marginTop: ".6rem" }}>
+                          <small>{operation.maintenanceRequestId ? "مزامن من أمر الصيانة" : operation.payableId ? `مزامن من فاتورة المورد #${operation.payableId}` : "مصروف مسجل يدويًا"}</small>
+                          {operation.hasReceipt && <button type="button" className="btn outline" onClick={() => openLedgerAttachment("expense", operation.id, operation.receiptName || "فاتورة")}>فتح المرفق</button>}
+                          {!synchronized && <>
+                            <button type="button" className="btn outline" onClick={() => startEditExpense(operation)}><Pencil size={14} /> تعديل</button>
+                            <button type="button" className="btn outline" onClick={() => toast("أرشفة عملية الصرف؟", { action: { label: "تأكيد", onClick: () => expenseArchive.mutate({ id: operation.id }, { onSuccess: () => { utils.vehicles.financeProfile.invalidate({ vehicleId: vehicle.id }); utils.vehicles.list.invalidate(); toast.success("تمت أرشفة المصروف"); }, onError: error => toast.error(error.message) }) }, cancel: { label: "إلغاء", onClick: () => {} } })}><Archive size={14} /> أرشفة</button>
+                          </>}
+                        </div>
+                      </div>;
+                    })}
+                  </div>
+                </td></tr>}
+              </Fragment>;
+            })}
+          </tbody></table></div> : <div className="empty-state" style={{ padding: "1rem" }}>لا توجد مصروفات مسجلة لهذا الباص.</div>}
+        </section>
         {expenseOpen && <form className="surface" style={{ padding: "1rem", margin: "1rem 0" }} onSubmit={saveExpense}><div className="section-head"><h3>{editingId ? "تعديل عملية صرف" : "إضافة عملية صرف"}</h3><button type="button" className="btn ghost" onClick={() => { setExpenseOpen(false); setEditingId(null); }}>إلغاء</button></div><div className="form-grid"><label className="field"><span>بند الصرف</span><select value={expense.category} onChange={e => updateExpenseField("category", e.target.value)}>{["صيانة", "قطع غيار", "زيوت وفلاتر", "إطارات", "إصلاحات وأعطال", "تأمين", "فحص واستمارة", "مخالفات", "أخرى"].map(item => <option key={item}>{item}</option>)}</select></label><label className="field"><span>المبلغ (ر.س)</span><input type="number" min="1" step="1" required value={expense.amount} onChange={e => updateExpenseField("amount", e.target.value)} /></label><label className="field"><span>تاريخ الصرف</span><input type="date" required value={expense.spentAt} onChange={e => updateExpenseField("spentAt", e.target.value)} /></label><label className="field"><span>المورد / الورشة</span><input value={expense.vendor} onChange={e => updateExpenseField("vendor", e.target.value)} /></label><label className="field"><span>السبب / البيان</span><input required value={expense.description} onChange={e => updateExpenseField("description", e.target.value)} maxLength={300} /></label><label className="field"><span>ملاحظات</span><input value={expense.notes} onChange={e => updateExpenseField("notes", e.target.value)} /></label><label className="field"><span>الفاتورة أو صورة المستند (حد 700 ك.ب)</span><input type="file" accept="image/*,.pdf" onChange={e => readReceipt(e.target.files?.[0])} />{expense.receiptName && <small>{expense.receiptName}</small>}</label></div><div className="detail-footer"><button className="btn primary" disabled={expenseCreate.isPending || expenseUpdate.isPending}>حفظ المصروف</button></div></form>}
         {revenueOpen && <form className="surface" style={{ padding: "1rem", margin: "1rem 0" }} onSubmit={saveRevenue}><div className="section-head"><div><h3>تخصيص إيراد محصل للباص</h3><span>لا يُحسب إيراد العقد كاملًا؛ اختر دفعة مستلمة ووزّع مبلغها، ولن يسمح النظام بتجاوز قيمتها أو تخصيصها لعقد لا يرتبط بالباص.</span></div><button type="button" className="btn ghost" onClick={() => setRevenueOpen(false)}>إلغاء</button></div><div className="form-grid"><label className="field"><span>الدفعة المستلمة</span><select required value={revenue.paymentId} onChange={e => { const item = data.allocatablePayments.find((payment: any) => String(payment.id) === e.target.value); setRevenue(current => ({ ...current, paymentId: e.target.value, amount: item ? String(item.remaining) : current.amount })); }}><option value="">اختر دفعة مرتبطة بعقد هذا الباص</option>{data.allocatablePayments.map((payment: any) => <option key={payment.id} value={payment.id}>{payment.paidAt} · {payment.contractRef} · {payment.client} · متبقٍ للتوزيع {formatSAR(payment.remaining)}</option>)}</select></label><label className="field"><span>المبلغ المخصص (ر.س)</span><input type="number" min="1" step="1" required value={revenue.amount} onChange={e => setRevenue(current => ({ ...current, amount: e.target.value }))} /></label><label className="field"><span>إيصال/مستند اختياري (حد 700 ك.ب)</span><input type="file" accept="image/*,.pdf" onChange={e => { const file=e.target.files?.[0]; if(!file)return; if(file.size>700000){toast.error("الحد الأقصى للمرفق 700 كيلوبايت");return;} const reader=new FileReader(); reader.onload=()=>setRevenue(current=>({...current,receiptName:file.name,receiptUrl:String(reader.result||"")})); reader.readAsDataURL(file); }} />{revenue.receiptName && <small>{revenue.receiptName}</small>}</label><label className="field"><span>ملاحظات</span><input value={revenue.notes} onChange={e => setRevenue(current => ({ ...current, notes: e.target.value }))} /></label></div>{!data.allocatablePayments.length && <div className="empty-state" style={{ padding: "1rem" }}>لا توجد دفعات غير موزعة مرتبطة بعقد هذا الباص.</div>}<div className="detail-footer"><button className="btn primary" disabled={!data.allocatablePayments.length || revenueCreate.isPending}>حفظ تخصيص الإيراد</button></div></form>}
-        {data.expenses.length ? <div style={{ display: "grid", gap: ".6rem", marginTop: ".75rem" }}>
-          {data.expenses.map((item: any) => {
-            const expanded = expandedExpenseId === item.id;
-            const synchronized = Boolean(item.maintenanceRequestId || item.payableId);
-            return <article className="surface" key={item.id} style={{ padding: ".85rem" }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: ".8rem", flexWrap: "wrap" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: ".6rem", flexWrap: "wrap" }}>
-                  <Badge>{item.maintenanceItem || item.category}</Badge>
-                  <strong>{item.description}</strong>
-                  <small>{item.spentAt}</small>
-                  <strong>{formatSAR(item.amount)}</strong>
-                </div>
-                <button type="button" className="btn outline" aria-expanded={expanded} onClick={() => setExpandedExpenseId(expanded ? null : item.id)}>
-                  {expanded ? "إخفاء التفاصيل" : "تفاصيل العملية"} <ChevronDown size={14} />
-                </button>
-              </div>
-              {expanded && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: ".75rem", marginTop: ".8rem", paddingTop: ".8rem", borderTop: "1px solid var(--border)" }}>
-                <div><small>التاريخ</small><strong style={{ display: "block" }}>{item.spentAt}</strong></div>
-                <div><small>بند الصرف</small><strong style={{ display: "block" }}>{item.maintenanceItem || item.category}</strong></div>
-                <div><small>المبلغ</small><strong style={{ display: "block" }}>{formatSAR(item.amount)}</strong></div>
-                <div><small>المورد / الورشة</small><strong style={{ display: "block" }}>{item.vendor || "—"}</strong></div>
-                <div><small>أُدخل بواسطة</small><strong style={{ display: "block" }}>{item.createdByName || "—"}</strong></div>
-                <div><small>السبب / البيان</small><strong style={{ display: "block" }}>{item.description || "—"}</strong></div>
-                <div><small>ملاحظات</small><strong style={{ display: "block" }}>{item.notes || "—"}</strong></div>
-                <div><small>الفاتورة أو المستند</small><div style={{ marginTop: ".25rem" }}>{item.hasReceipt ? <button type="button" className="btn outline" onClick={() => openLedgerAttachment("expense", item.id, item.receiptName || "فاتورة")}>فتح المرفق</button> : <span>لا يوجد مرفق</span>}</div></div>
-                <div style={{ gridColumn: "1 / -1", display: "flex", alignItems: "center", gap: ".5rem", flexWrap: "wrap" }}>
-                  <small>{item.maintenanceRequestId ? "مزامن من أمر الصيانة" : item.payableId ? `مزامن من فاتورة المورد #${item.payableId}` : "مصروف مسجل يدويًا"}</small>
-                  {!synchronized && <>
-                    <button type="button" className="btn outline" onClick={() => startEditExpense(item)}><Pencil size={14} /> تعديل</button>
-                    <button type="button" className="btn outline" onClick={() => toast("أرشفة عملية الصرف؟", { action: { label: "تأكيد", onClick: () => expenseArchive.mutate({ id: item.id }, { onSuccess: () => { utils.vehicles.financeProfile.invalidate({ vehicleId: vehicle.id }); utils.vehicles.list.invalidate(); toast.success("تمت أرشفة المصروف"); }, onError: error => toast.error(error.message) }) }, cancel: { label: "إلغاء", onClick: () => {} } })}><Archive size={14} /> أرشفة</button>
-                  </>}
-                </div>
-              </div>}
-            </article>;
-          })}
-        </div> : <div className="empty-state" style={{ padding: "1.5rem" }}>لم تسجل مصروفات تشغيل لهذا الباص بعد.</div>}
       </section>
       <section className="surface" style={{ padding: "1rem", marginTop: "1rem" }}><div className="section-head"><div><h3>الإيرادات المحصلة المخصصة لهذا الباص</h3><span>سجل زمني لمبالغ من دفعات مالية موثقة؛ لا يعرض قيمة العقود كإيراد محصل.</span></div></div>{data.revenues.length ? <div className="table-scroll"><table><thead><tr><th>تاريخ التحصيل</th><th>العقد / العميل</th><th>مرجع الدفعة</th><th>المبلغ المخصص</th><th>أُدخل بواسطة</th><th>الإيصال</th><th>إجراء</th></tr></thead><tbody>{data.revenues.map((item: any) => <tr key={item.id}><td>{item.paidAt}</td><td>{item.contractRef}<small>{item.client}</small></td><td>{item.reference}</td><td><strong>{formatSAR(item.amount)}</strong></td><td>{item.createdByName}</td><td>{item.hasReceipt ? <button className="btn outline" onClick={() => openLedgerAttachment("revenue", item.id, item.receiptName || "إيصال")}>فتح المرفق</button> : "—"}</td><td><button className="row-menu-btn danger" title="إلغاء التخصيص" onClick={() => toast("إلغاء تخصيص هذا الجزء من الدفعة؟ سيصبح متاحًا لإعادة التوزيع.", { action: { label: "تأكيد", onClick: () => revenueArchive.mutate({ id: item.id }, { onSuccess: () => { utils.vehicles.financeProfile.invalidate({ vehicleId: vehicle.id }); utils.vehicles.list.invalidate(); toast.success("تم إلغاء تخصيص الإيراد"); }, onError: error => toast.error(error.message) }) }, cancel: { label: "إلغاء", onClick: () => {} } })}><Archive size={15} /></button></td></tr>)}</tbody></table></div> : <div className="empty-state" style={{ padding: "1.5rem" }}>لا توجد إيرادات مخصصة بعد. الإيراد لا يظهر هنا حتى يسجل كدفعة ويخصص لهذا الباص.</div>}</section>
       <p className="field-note">صافي النقد المعروض = الإيراد المحصل المخصص − قيمة الشراء − مصروفات التشغيل المسجلة. لا يمثل ربحًا محاسبيًا بعد الإهلاك أو التمويل أو الضرائب، وقد يختلف عن الربح المستحق إذا لم تُسجل الإيرادات أو المصروفات.</p>
