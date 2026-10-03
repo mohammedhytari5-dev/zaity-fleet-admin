@@ -158,6 +158,23 @@ export async function getVehicleFinancialProfile(vehicleId: number) {
     const { receiptUrl, ...safeAllocation } = allocation;
     return { ...safeAllocation, hasReceipt: Boolean(receiptUrl), paidAt: payment?.paidAt ?? "—", method: payment?.method ?? "—", reference: payment?.reference ?? "—", contractRef: contract?.ref ?? "—", client: allocation.clientName || contract?.client || "—" };
   });
+  const autoLinkedPayments = paymentRows.flatMap(payment => {
+    const contractId = payment.contractId ?? (payment.claimId ? claimById.get(payment.claimId)?.contractId : null);
+    if (!contractId) return [];
+    const contract = contractById.get(contractId);
+    if (!contract) return [];
+    const items = contractItemRows.filter(item => item.contractId === contractId);
+    const linkedVehicleIds = Array.from(new Set(items.map(item => item.vehicleId).filter((id): id is number => id !== null)));
+    const linkedToThisVehicle = items.length ? items.some(item => item.vehicleId === vehicleId) : vehicle.contractId === contractId;
+    const isSingleVehicleContract = items.length ? linkedVehicleIds.length === 1 && linkedVehicleIds[0] === vehicleId : vehicle.contractId === contractId;
+    if (!linkedToThisVehicle || !isSingleVehicleContract) return [];
+    const allocated = usedByPayment.get(payment.id) ?? 0;
+    const remaining = Math.max(0, Number(payment.amount || 0) - allocated);
+    if (!remaining) return [];
+    const client = clientRows.find(row => row.id === (payment.clientId ?? contract.clientId));
+    return [{ id: -payment.id, vehicleId, paymentId: payment.id, projectId: vehicle.projectId ?? null, projectName: vehicle.project || "—", clientId: client?.id ?? contract.clientId ?? null, clientName: client?.name ?? contract.client ?? "—", amount: remaining, receiptName: null, notes: "دفعة مرتبطة تلقائيًا بعقد بباص واحد", createdByName: "تلقائي", hasReceipt: false, autoLinked: true, paidAt: payment.paidAt, method: payment.method, reference: payment.reference, contractRef: contract.ref, client: client?.name ?? contract.client ?? "—" }];
+  });
+  const allRevenueDetails = [...revenueDetails, ...autoLinkedPayments].sort((a, b) => String(b.paidAt || "").localeCompare(String(a.paidAt || "")));
   const payableReceipts = new Set(payableRows.filter(row => Boolean(row.receiptUrl)).map(row => row.id));
   const maintenanceTypeByRequestId = new Map(maintenanceRows.map(row => [row.id, row.type]));
   const expensesWithMaintenance = expenses.map(expense => ({
@@ -175,16 +192,18 @@ export async function getVehicleFinancialProfile(vehicleId: number) {
     const linked = items.length ? items.some(item => item.vehicleId === vehicleId) : vehicle.contractId === contractId;
     if (!linked) return [];
     const remaining = Math.max(0, Number(payment.amount || 0) - (usedByPayment.get(payment.id) ?? 0));
-    if (!remaining) return [];
+    const linkedVehicleIds = Array.from(new Set(items.map(item => item.vehicleId).filter((id): id is number => id !== null)));
+    const isSingleVehicleContract = items.length ? linkedVehicleIds.length === 1 && linkedVehicleIds[0] === vehicleId : vehicle.contractId === contractId;
+    if (!remaining || isSingleVehicleContract) return [];
     return [{ id: payment.id, amount: Number(payment.amount), paidAt: payment.paidAt, method: payment.method, reference: payment.reference, contractId, contractRef: contract.ref, client: clientRows.find(client => client.id === (payment.clientId ?? contract.clientId))?.name ?? contract.client, remaining }];
   });
   const categoryTotals: Record<string, number> = {};
   for (const expense of expenses) categoryTotals[expense.category] = (categoryTotals[expense.category] ?? 0) + Number(expense.amount || 0);
   const expenseTotal = expenses.reduce((total, expense) => total + Number(expense.amount || 0), 0);
-  const revenueTotal = revenueRows.reduce((total, revenue) => total + Number(revenue.amount || 0), 0);
+  const revenueTotal = allRevenueDetails.reduce((total, revenue) => total + Number(revenue.amount || 0), 0);
   const purchasePrice = Number(vehicle.purchasePrice || 0);
   return {
-    vehicle, expenses: safeExpenses, revenues: revenueDetails, allocatablePayments, categoryTotals, maintenanceItemTotals,
+    vehicle, expenses: safeExpenses, revenues: allRevenueDetails, allocatablePayments, categoryTotals, maintenanceItemTotals,
     purchasePrice, expenseTotal, investedTotal: purchasePrice + expenseTotal, revenueTotal,
     netCashReturn: revenueTotal - purchasePrice - expenseTotal,
     project: projectRows.find(project => project.id === vehicle.projectId)?.name ?? vehicle.project,
@@ -272,7 +291,7 @@ export async function archiveVehicleRevenue(id: number, actor: LedgerActor) {
 export async function createVehicle(input: InsertVehicle): Promise<Vehicle | null> {
   const db = await getDb();
   if (!db) return null;
-  let normalized = { ...input };
+  let normalized = { ...input, activePlate: input.activePlate ?? input.plate };
   if (input.projectId) {
     const project = (await db.select().from(projects).where(and(eq(projects.id, input.projectId), isNull(projects.archivedAt))).limit(1))[0];
     if (!project) return null;
@@ -293,6 +312,8 @@ export async function updateVehicle(id: number, input: Partial<InsertVehicle>): 
   const db = await getDb();
   if (!db) return null;
   const normalized = { ...input };
+  if (input.plate !== undefined) normalized.activePlate = input.plate;
+  else delete normalized.activePlate;
   if (input.projectId !== undefined) {
     if (input.projectId === null) normalized.project = "—";
     else {
@@ -321,7 +342,7 @@ export async function archiveVehicle(id: number): Promise<boolean> {
     const vehicle = (await tx.select().from(vehicles).where(eq(vehicles.id, id)).limit(1))[0];
     if (!vehicle) return false;
     if (vehicle.driverId) await tx.update(drivers).set({ vehicleId: null, vehicle: "—", status: "متاح" }).where(eq(drivers.id, vehicle.driverId));
-    await tx.update(vehicles).set({ driverId: null, driver: "—", archivedAt: new Date() }).where(eq(vehicles.id, id));
+    await tx.update(vehicles).set({ driverId: null, driver: "—", activePlate: null, archivedAt: new Date() }).where(eq(vehicles.id, id));
     return true;
   });
 }
