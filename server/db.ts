@@ -705,6 +705,13 @@ export async function listContracts(): Promise<Array<Contract & { items: Contrac
   return rows.map(contract => ({ ...contract, items: items.filter(item => item.contractId === contract.id) }));
 }
 
+async function ensureCollectedPayment(tx: DbExecutor, contractId: number, targetCollected: number, clientId: number | null | undefined, ref: string, paidAt: string) {
+  const current = (await tx.select({ total: sql<number>`COALESCE(SUM(${payments.amount}), 0)` }).from(payments).where(and(eq(payments.contractId, contractId), isNull(payments.archivedAt))).limit(1))[0];
+  const gap = Math.max(0, Math.round(targetCollected) - Number(current?.total || 0));
+  if (!gap) return;
+  await tx.insert(payments).values({ contractId, clientId: clientId ?? null, amount: gap, paidAt: paidAt || new Date().toISOString().slice(0, 10), method: "تحويل بنكي", reference: `تحصيل العقد ${ref}`, notes: "دفعة تلقائية من خانة المحصل في العقد" });
+}
+
 export async function createContract(input: InsertContract, items: Omit<InsertContractItem, "contractId">[]): Promise<(Contract & { items: ContractItem[] }) | null> {
   const db = await getDb();
   if (!db) return null;
@@ -713,6 +720,7 @@ export async function createContract(input: InsertContract, items: Omit<InsertCo
     const id = Number(result[0].insertId);
     if (items.length) await tx.insert(contractItems).values(items.map(item => ({ ...item, contractId: id })));
     if (input.clientId) await tx.update(clients).set({ contracts: sql`${clients.contracts} + 1` }).where(eq(clients.id, input.clientId));
+    await ensureCollectedPayment(tx, id, Number(input.collected || 0), input.clientId, input.ref, input.startDate);
     for (const item of items) {
       if (!item.vehicleId) continue;
       const vehicleStatus = item.coverage === "سائق فقط" ? "متاحة" : "مؤجرة";
