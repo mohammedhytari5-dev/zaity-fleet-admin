@@ -295,6 +295,9 @@ function SettingsPage({ settingsCount, auditLogs }: { settingsCount: number; aud
   const { data: users = [], refetch: refetchUsers } = trpc.users.list.useQuery(undefined, { enabled: Boolean(location.includes("/users")) });
   const updateUserRole = trpc.users.updateRole.useMutation();
   const createUser = trpc.users.create.useMutation();
+  const [editingPermissionsId, setEditingPermissionsId] = useState<number | null>(null);
+  const [permissionDraft, setPermissionDraft] = useState<string[]>([]);
+  const updateUserAccess = trpc.users.updateAccess.useMutation();
 
   const cards = [
     { key: "pm", icon: Wrench, group: "المركبات", title: "الصيانات الدورية", text: "إضافة وتعديل قواعد الصيانة الدورية" },
@@ -326,9 +329,6 @@ function SettingsPage({ settingsCount, auditLogs }: { settingsCount: number; aud
   if (selectedCard && selectedCard.key === "users") {
     const permissionOptions = [["dashboard", "لوحة التحكم"], ["vehicles", "المركبات"], ["maintenance", "الصيانة"], ["documents", "المستندات"], ["drivers", "السائقون"], ["clients", "العملاء"], ["finance", "المالية"]] as const;
     const accounts = users ?? [];
-    const [editingPermissionsId, setEditingPermissionsId] = useState<number | null>(null);
-    const [permissionDraft, setPermissionDraft] = useState<string[]>([]);
-    const updateUserAccess = trpc.users.updateAccess.useMutation();
     const readPermissions = (value: string | null | undefined) => { try { return value ? JSON.parse(value) as string[] : []; } catch { return []; } };
     const submitUser = (event: React.FormEvent) => {
       event.preventDefault();
