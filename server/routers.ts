@@ -137,43 +137,43 @@ export const appRouter = router({
   }),
   drivers: router({
     list: protectedProcedure.query(async () => (await listDrivers()) ?? []),
-    create: adminProcedure.input(driverInput).mutation(async ({ input }) => requireRecord(await createDriver(input), "السائق")),
-    update: adminProcedure.input(z.object({ id: z.number().int().positive(), data: driverInput.partial() })).mutation(async ({ input }) => requireRecord(await updateDriver(input.id, input.data), "السائق")),
-    archive: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archiveDriver(input.id) })),
+    create: permissionProcedure("drivers").input(driverInput).mutation(async ({ input }) => requireRecord(await createDriver(input), "السائق")),
+    update: permissionProcedure("drivers").input(z.object({ id: z.number().int().positive(), data: driverInput.partial() })).mutation(async ({ input }) => requireRecord(await updateDriver(input.id, input.data), "السائق")),
+    archive: permissionProcedure("drivers").input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archiveDriver(input.id) })),
   }),
   maintenance: router({
     list: protectedProcedure.query(async () => (await listMaintenanceRequests()) ?? []),
-    create: adminProcedure.input(maintenanceInput).mutation(async ({ input }) => requireRecord(await createMaintenanceRequest(input), "طلب الصيانة")),
-    update: adminProcedure.input(z.object({ id: z.number().int().positive(), data: maintenanceInput.partial() })).mutation(async ({ input }) => requireRecord(await updateMaintenanceRequest(input.id, input.data), "طلب الصيانة")),
-    archive: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archiveMaintenanceRequest(input.id) })),
+    create: permissionProcedure("maintenance").input(maintenanceInput).mutation(async ({ input }) => requireRecord(await createMaintenanceRequest(input), "طلب الصيانة")),
+    update: permissionProcedure("maintenance").input(z.object({ id: z.number().int().positive(), data: maintenanceInput.partial() })).mutation(async ({ input }) => requireRecord(await updateMaintenanceRequest(input.id, input.data), "طلب الصيانة")),
+    archive: permissionProcedure("maintenance").input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archiveMaintenanceRequest(input.id) })),
   }),
   documents: router({
     list: protectedProcedure.query(async () => (await listDocuments()) ?? []),
-    create: adminProcedure.input(documentInput).mutation(async ({ input }) => requireRecord(await createDocument(input), "المستند")),
-    update: adminProcedure.input(z.object({ id: z.number().int().positive(), data: documentInput.partial() })).mutation(async ({ input }) => requireRecord(await updateDocument(input.id, input.data), "المستند")),
-    archive: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archiveDocument(input.id) })),
+    create: permissionProcedure("documents").input(documentInput).mutation(async ({ input }) => requireRecord(await createDocument(input), "المستند")),
+    update: permissionProcedure("documents").input(z.object({ id: z.number().int().positive(), data: documentInput.partial() })).mutation(async ({ input }) => requireRecord(await updateDocument(input.id, input.data), "المستند")),
+    archive: permissionProcedure("documents").input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archiveDocument(input.id) })),
   }),
   clients: router({
     list: protectedProcedure.query(async () => (await listClients()) ?? []),
-    create: adminProcedure.input(clientInput).mutation(async ({ input }) => requireRecord(await createClient(input), "العميل")),
-    update: adminProcedure.input(z.object({ id: z.number().int().positive(), data: clientInput.partial() })).mutation(async ({ input }) => requireRecord(await updateClient(input.id, input.data), "العميل")),
-    archive: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archiveClient(input.id) })),
+    create: permissionProcedure("clients").input(clientInput).mutation(async ({ input }) => requireRecord(await createClient(input), "العميل")),
+    update: permissionProcedure("clients").input(z.object({ id: z.number().int().positive(), data: clientInput.partial() })).mutation(async ({ input }) => requireRecord(await updateClient(input.id, input.data), "العميل")),
+    archive: permissionProcedure("clients").input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archiveClient(input.id) })),
   }),
   claims: router({
     list: protectedProcedure.query(async () => (await listClaims()) ?? []),
-    create: adminProcedure.input(claimInput).mutation(async ({ input }) => requireRecord(await createClaim(input), "المطالبة")),
-    update: adminProcedure.input(z.object({ id: z.number().int().positive(), data: claimInput.partial() })).mutation(async ({ input }) => requireRecord(await updateClaim(input.id, input.data), "المطالبة")),
-    archive: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archiveClaim(input.id) })),
+    create: permissionProcedure("finance").input(claimInput).mutation(async ({ input }) => requireRecord(await createClaim(input), "المطالبة")),
+    update: permissionProcedure("finance").input(z.object({ id: z.number().int().positive(), data: claimInput.partial() })).mutation(async ({ input }) => requireRecord(await updateClaim(input.id, input.data), "المطالبة")),
+    archive: permissionProcedure("finance").input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archiveClaim(input.id) })),
   }),
   contracts: router({
     list: protectedProcedure.query(async () => (await listContracts()) ?? []),
-    create: adminProcedure.input(contractInput).mutation(async ({ input }) => {
+    create: permissionProcedure("finance").input(contractInput).mutation(async ({ input }) => {
       const { items, ...contract } = input;
       return requireRecord(await createContract(contract, items), "العقد");
     }),
-    update: adminProcedure.input(z.object({ id: z.number().int().positive(), data: contractInput.partial() })).mutation(async ({ input }) => { const { items, ...contract } = input.data; return requireRecord(await updateContract(input.id, contract, items), "العقد"); }),
-    updateStatus: adminProcedure.input(z.object({ id: z.number().int().positive(), status: z.enum(["قائم", "مكتمل", "عرض سعر", "ملغي"]) })).mutation(async ({ input }) => requireRecord(await updateContractStatus(input.id, input.status), "العقد")),
-    archive: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archiveContract(input.id) })),
+    update: permissionProcedure("finance").input(z.object({ id: z.number().int().positive(), data: contractInput.partial() })).mutation(async ({ input }) => { const { items, ...contract } = input.data; return requireRecord(await updateContract(input.id, contract, items), "العقد"); }),
+    updateStatus: permissionProcedure("finance").input(z.object({ id: z.number().int().positive(), status: z.enum(["قائم", "مكتمل", "عرض سعر", "ملغي"]) })).mutation(async ({ input }) => requireRecord(await updateContractStatus(input.id, input.status), "العقد")),
+    archive: permissionProcedure("finance").input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archiveContract(input.id) })),
   }),
   tasks: router({
     list: protectedProcedure.query(() => listTasks()),
@@ -185,16 +185,16 @@ export const appRouter = router({
     create: adminProcedure.input(z.object({ type: z.string().max(60), title: z.string().max(200), message: z.string().max(4000), entityType: z.string().max(60).optional(), entityId: z.number().int().positive().optional(), severity: z.enum(["معلومة", "تنبيه", "حرج"]).default("معلومة") })).mutation(({ input }) => createNotification(input)),
     markRead: protectedProcedure.input(z.object({ id: z.number().int().positive() })).mutation(({ input }) => markNotificationRead(input.id)),
   }),
-  payments: router({ list: protectedProcedure.query(() => listPayments()), create: adminProcedure.input(paymentInput).mutation(({ input }) => createPayment(input)), update: adminProcedure.input(z.object({ id: z.number().int().positive(), data: paymentInput.partial() })).mutation(({ input }) => updatePayment(input.id, input.data)), archive: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archivePayment(input.id) })) }),
-  representatives: router({ list: protectedProcedure.input(z.object({ clientId: z.number().int().positive() })).query(({ input }) => listRepresentatives(input.clientId)), create: adminProcedure.input(representativeInput).mutation(({ input }) => createRepresentative(input)) }),
+  payments: router({ list: protectedProcedure.query(() => listPayments()), create: permissionProcedure("finance").input(paymentInput).mutation(({ input }) => createPayment(input)), update: permissionProcedure("finance").input(z.object({ id: z.number().int().positive(), data: paymentInput.partial() })).mutation(({ input }) => updatePayment(input.id, input.data)), archive: permissionProcedure("finance").input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archivePayment(input.id) })) }),
+  representatives: router({ list: protectedProcedure.input(z.object({ clientId: z.number().int().positive() })).query(({ input }) => listRepresentatives(input.clientId)), create: permissionProcedure("clients").input(representativeInput).mutation(({ input }) => createRepresentative(input)) }),
   users: router({
     list: adminProcedure.query(() => listUsers()),
     create: adminProcedure.input(userCreateInput).mutation(async ({ input }) => requireRecord(await createLocalUser(input), "المستخدم")),
     updateRole: adminProcedure.input(z.object({ id: z.number().int().positive(), role: z.enum(["user", "admin"]) })).mutation(async ({ input }) => { if (input.role === "user") { const admins = await countAdmins(); if (admins !== null && admins <= 1) throw new TRPCError({ code: "FORBIDDEN", message: "لا يمكن تخفيض صلاحية آخر مدير في النظام" }); } return requireRecord(await updateUserRole(input.id, input.role), "صلاحية المستخدم"); }),
     updateAccess: adminProcedure.input(z.object({ id: z.number().int().positive(), permissions: z.array(z.string().max(80)).max(30).optional(), password: z.string().min(8).max(200).optional() })).mutation(async ({ input }) => requireRecord(await updateUserAccess(input.id, input), "بيانات المستخدم")),
   }),
-  settingsCatalog: router({ list: protectedProcedure.input(z.object({ category: z.string().optional() }).optional()).query(({ input }) => listSettings(input?.category)), create: adminProcedure.input(settingInput).mutation(async ({ input }) => requireRecord(await upsertSetting(input), "القيمة المرجعية")), update: adminProcedure.input(z.object({ id: z.number().int().positive(), data: settingInput.partial() })).mutation(async ({ input }) => requireRecord(await updateSetting(input.id, input.data), "القيمة المرجعية")), archive: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archiveSetting(input.id) })),
-    delete: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await deleteSetting(input.id) })) }),
+  settingsCatalog: router({ list: protectedProcedure.input(z.object({ category: z.string().optional() }).optional()).query(({ input }) => listSettings(input?.category)), create: permissionProcedure("settings").input(settingInput).mutation(async ({ input }) => requireRecord(await upsertSetting(input), "القيمة المرجعية")), update: permissionProcedure("settings").input(z.object({ id: z.number().int().positive(), data: settingInput.partial() })).mutation(async ({ input }) => requireRecord(await updateSetting(input.id, input.data), "القيمة المرجعية")), archive: permissionProcedure("settings").input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archiveSetting(input.id) })),
+    delete: permissionProcedure("settings").input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await deleteSetting(input.id) })) }),
   audit: router({ list: adminProcedure.query(() => listAuditLogs()), record: adminProcedure.input(z.object({ action: z.string().max(80), entityType: z.string().max(80), entityId: z.number().int().positive().optional(), details: z.string().max(4000).optional() })).mutation(({ ctx, input }) => createAuditLog({ ...input, userId: ctx.user?.id ?? null })) }),
 });
 
