@@ -43,6 +43,7 @@ export function useAuth(options?: UseAuthOptions) {
       // backend cookie is cleared by the logout mutation.
       try {
         sessionStorage.removeItem("manus-cookie");
+        sessionStorage.removeItem("alhaitari-session-token");
       } catch {}
       try {
         localStorage.removeItem("manus-runtime-user-info");

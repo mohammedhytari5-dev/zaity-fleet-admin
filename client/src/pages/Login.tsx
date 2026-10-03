@@ -13,6 +13,9 @@ export default function Login() {
   const utils = trpc.useUtils();
   const login = trpc.auth.login.useMutation({
     onSuccess: async (loggedInUser) => {
+      try {
+        if (loggedInUser.sessionToken) sessionStorage.setItem("alhaitari-session-token", loggedInUser.sessionToken);
+      } catch {}
       utils.auth.me.setData(undefined, loggedInUser);
       toast.success("تم تسجيل الدخول بنجاح");
       navigate("/dashboard");

@@ -43,6 +43,12 @@ const trpcClient = trpc.createClient({
       url: "/api/trpc",
       transformer: superjson,
       headers() {
+        try {
+          const tabToken = sessionStorage.getItem("alhaitari-session-token");
+          if (tabToken) return { Authorization: `Bearer ${tabToken}` };
+        } catch {
+          // sessionStorage unavailable
+        }
         // Preview auto-login fallback: when the browser blocks iframe cookies
         // (Safari ITP / private browsing / WebView), the runtime mirrors the
         // session into sessionStorage so we can forward it as a Bearer token.
