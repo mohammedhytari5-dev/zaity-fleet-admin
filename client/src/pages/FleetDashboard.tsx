@@ -131,7 +131,14 @@ function FormActions({ onCancel, label = "حفظ التغييرات" }: { onCanc
 function DetailModal({ row, module, onClose, onEdit }: { row: Row; module: ModuleKey; onClose: () => void; onEdit: () => void }) {
   const title = module === "vehicles" ? `تفاصيل المركبة · ${row.plate}` : module === "drivers" ? `ملف السائق · ${row.name}` : module === "clients" ? `ملف العميل · ${row.name}` : "تفاصيل السجل";
   const entries = Object.entries(row).filter(([key]) => key !== "id" && key !== "fileUrl");
-  return <Modal title={title} onClose={onClose} wide><div className="detail-grid">{entries.map(([key, value]) => <div className="detail-cell" key={key}><span>{key === "plate" ? "رقم اللوحة" : key === "brand" ? "الشركة" : key === "model" ? "الموديل" : key === "status" ? "الحالة" : key === "driver" ? "السائق" : key === "client" ? "العميل" : key === "phone" ? "رقم الهاتف" : key === "location" ? "الموقع" : key === "vehicle" ? "المركبة الحالية" : key === "contracts" ? "العقود" : key === "fileName" ? "اسم الملف" : key}</span><strong>{typeof value === "number" ? value.toLocaleString("ar-SA") : value}</strong></div>)}</div><div className="detail-footer"><button className="btn ghost" onClick={onClose}>إغلاق</button>{module === "documents" && row.fileUrl && <button className="btn outline" onClick={() => window.open(String(row.fileUrl), "_blank", "noopener,noreferrer")}><BookOpen size={15} />معاينة الملف</button>}<button className="btn primary" onClick={() => { onClose(); onEdit(); }}><Pencil size={15} />تعديل البيانات</button></div></Modal>;
+  const displayValue = (value: unknown) => {
+    if (value instanceof Date) return value.toLocaleString("ar-SA");
+    if (typeof value === "number") return value.toLocaleString("ar-SA");
+    if (value === null || value === undefined || value === "") return "—";
+    if (typeof value === "object") return JSON.stringify(value);
+    return String(value);
+  };
+  return <Modal title={title} onClose={onClose} wide><div className="detail-grid">{entries.map(([key, value]) => <div className="detail-cell" key={key}><span>{key === "plate" ? "رقم اللوحة" : key === "brand" ? "الشركة" : key === "model" ? "الموديل" : key === "status" ? "الحالة" : key === "driver" ? "السائق" : key === "client" ? "العميل" : key === "phone" ? "رقم الهاتف" : key === "location" ? "الموقع" : key === "vehicle" ? "المركبة الحالية" : key === "contracts" ? "العقود" : key === "fileName" ? "اسم الملف" : key}</span><strong>{displayValue(value)}</strong></div>)}</div><div className="detail-footer"><button className="btn ghost" onClick={onClose}>إغلاق</button>{module === "documents" && row.fileUrl && <button className="btn outline" onClick={() => window.open(String(row.fileUrl), "_blank", "noopener,noreferrer")}><BookOpen size={15} />معاينة الملف</button>}<button className="btn primary" onClick={() => { onClose(); onEdit(); }}><Pencil size={15} />تعديل البيانات</button></div></Modal>;
 }
 
 function RecordForm({ module, row, onClose, onSave }: { module: ModuleKey; row?: Row | null; onClose: () => void; onSave: (data: Row) => void }) {
