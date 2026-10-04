@@ -3,6 +3,7 @@ import express from "express";
 import { afterEach, describe, expect, it } from "vitest";
 import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
+import { registerApiNotFound } from "./apiRouting";
 
 const originalNodeEnv = process.env.NODE_ENV;
 
@@ -43,6 +44,25 @@ describe("security-sensitive HTTP routes", () => {
       const response = await fetch(`http://127.0.0.1:${address.port}/manus-storage/private/test.pdf`);
       expect(response.status).toBe(401);
       expect(await response.text()).toBe("Authentication required");
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    }
+  });
+
+  it("returns JSON 404 for unknown API routes instead of the SPA shell", async () => {
+    const app = express();
+    registerApiNotFound(app);
+    app.use((_req, res) => res.status(200).send("SPA shell"));
+    const server = createServer(app);
+    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("No HTTP server address");
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${address.port}/api/unknown`);
+      expect(response.status).toBe(404);
+      expect(response.headers.get("content-type")).toContain("application/json");
+      expect(await response.json()).toEqual({ error: "API route not found" });
     } finally {
       await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
     }
