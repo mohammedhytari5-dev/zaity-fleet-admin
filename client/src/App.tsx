@@ -13,9 +13,21 @@ function Router() {
       <Route path="/login" component={Login} />
       <Route path="/" component={FleetDashboard} />
       <Route path="/dashboard" component={FleetDashboard} />
-      <Route path="/dashboard/:rest*" component={FleetDashboard} />
+      <Route path="/dashboard/vehicles" component={FleetDashboard} />
+      <Route path="/dashboard/projects" component={FleetDashboard} />
+      <Route path="/dashboard/maintenance" component={FleetDashboard} />
+      <Route path="/dashboard/documents" component={FleetDashboard} />
+      <Route path="/dashboard/drivers" component={FleetDashboard} />
+      <Route path="/dashboard/employees" component={FleetDashboard} />
+      <Route path="/dashboard/clients" component={FleetDashboard} />
+      <Route path="/dashboard/financial" component={FleetDashboard} />
+      <Route path="/dashboard/financial/:rest*" component={FleetDashboard} />
+      <Route path="/dashboard/payables" component={FleetDashboard} />
+      <Route path="/dashboard/reports" component={FleetDashboard} />
+      <Route path="/dashboard/settings/:rest*" component={FleetDashboard} />
+      <Route path="/dashboard/settings" component={FleetDashboard} />
       <Route path="/404" component={NotFound} />
-      <Route component={FleetDashboard} />
+      <Route component={NotFound} />
     </Switch>
   );
 }

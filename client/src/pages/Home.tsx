@@ -10,9 +10,7 @@ import { Streamdown } from 'streamdown';
 export default function Home() {
   // The useAuth hook provides authentication state.
   // To implement login/logout, call logout(), or start login from an event
-  // handler: onClick={() => startLogin()} (imported from "@/const"). Never call
-  // startLogin() during render (no href={startLogin()}) — it mints a one-time
-  // nonce cookie and must run only at the moment of navigation.
+  // handler: onClick={() => startLogin()} (imported from "@/const").
   let { user, loading, error, isAuthenticated, logout } = useAuth();
 
   // If theme is switchable in App.tsx, we can implement theme toggling like this:

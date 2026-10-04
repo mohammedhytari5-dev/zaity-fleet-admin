@@ -76,6 +76,16 @@ const navGroups: { label: string; items: { key: ModuleKey; label: string; icon: 
   { label: "النظام", items: [{ key: "settings", label: "الإعدادات", icon: Settings2 }] },
 ];
 
+function moduleForLocation(location: string): ModuleKey {
+  const path = location.replace(/\/+$/, "") || "/";
+  if (path === "/" || path === "/dashboard") return "dashboard";
+  if (path.startsWith("/dashboard/financial/")) return "finance";
+  const segment = path.slice("/dashboard/".length).split("/")[0];
+  return (["vehicles", "projects", "maintenance", "documents", "drivers", "employees", "clients", "payables", "reports", "settings"] as const).includes(segment as any)
+    ? segment as ModuleKey
+    : "dashboard";
+}
+
 const statusTone: Record<string, string> = {
   "متاحة": "green", "متاح": "green", "ساري": "green", "مكتمل": "green", "نشط": "green", "قائم": "green", "مدفوعة": "green", "مدفوعة جزئيًا": "amber", "معتمدة": "blue", "مخطط": "blue", "تم اعتمادها": "blue", "تم صرفها": "green",
   "مؤجرة": "blue", "مشغولة": "blue", "جاري العمل": "amber", "قريبًا": "amber", "مستحقة": "amber", "جديد": "amber", "جديدة": "amber", "غير مرفوعة": "gray", "تحت الإجراء": "amber", "قيد التجهيز": "amber", "إجازة": "amber", "منتهي الخدمة": "gray",
@@ -699,7 +709,7 @@ function SettingsPage({ settingsCount, auditLogs }: { settingsCount: number; aud
 
 export default function FleetDashboard() {
   const { user, loading: authLoading, logout } = useAuth({ redirectOnUnauthenticated: true, redirectPath: "/login" });
-  const [, navigate] = useLocation();
+  const [location, navigate] = useLocation();
   const utils = trpc.useUtils();
   const userPermissions = new Set(user?.role === "admin" ? ["dashboard", "vehicles", "projects", "maintenance", "documents", "drivers", "employees", "clients", "finance", "payables", "reports", "settings"] : (() => { try { return JSON.parse(user?.permissions || "[]") as string[]; } catch { return []; } })());
   const canAccess = (key: ModuleKey) => userPermissions.has(key);
@@ -747,7 +757,8 @@ export default function FleetDashboard() {
   const contractUpdate = trpc.contracts.update.useMutation();
   const contractStatusUpdate = trpc.contracts.updateStatus.useMutation();
   const contractArchive = trpc.contracts.archive.useMutation();
-  const [active, setActive] = useState<ModuleKey>(() => { const path = window.location.pathname; if (path.includes("vehicle")) return "vehicles"; if (path.includes("project")) return "projects"; if (path.includes("payable")) return "payables"; if (path.includes("maintenance")) return "maintenance"; if (path.includes("document")) return "documents"; if (path.includes("driver")) return "drivers"; if (path.includes("employee")) return "employees"; if (path.includes("report")) return "reports"; if (path.includes("client")) return "clients"; if (path.includes("financial")) return "finance"; if (path.includes("setting")) return "settings"; return "dashboard"; });
+  const [active, setActive] = useState<ModuleKey>(() => moduleForLocation(window.location.pathname));
+  useEffect(() => setActive(moduleForLocation(location)), [location]);
   useEffect(() => { if (!user || canAccess(active)) return; const fallback = navGroups.flatMap(group => group.items).find(item => canAccess(item.key))?.key ?? "dashboard"; setActive(fallback); navigate(fallback === "dashboard" ? "/dashboard" : `/dashboard/${fallback === "finance" ? "financial/contracts" : fallback}`); }, [active, user?.id, user?.role, user?.permissions]);
   const [collapsed, setCollapsed] = useState(false); const [mobileOpen, setMobileOpen] = useState(false); const [commandOpen, setCommandOpen] = useState(false); const [modal, setModal] = useState<{ module: ModuleKey; row?: Row } | null>(null); const [detail, setDetail] = useState<{ module: ModuleKey; row: Row } | null>(null); const [vehicleProfile, setVehicleProfile] = useState<Vehicle | null>(null); const [driverDetail, setDriverDetail] = useState<Driver | null>(null); const [assignmentVehicle, setAssignmentVehicle] = useState<Vehicle | null>(null); const [assignmentDriver, setAssignmentDriver] = useState<Driver | null>(null); const [quickAction, setQuickAction] = useState<{ action: string; row: Row } | null>(null);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);

@@ -11,24 +11,28 @@ function getQueryParam(req: Request, key: string): string | undefined {
 }
 
 export function registerOAuthRoutes(app: Express) {
-  app.get("/api/oauth/mock", async (req: Request, res: Response) => {
-    const openId = "mock-admin";
-    await db.upsertUser({
-      openId,
-      name: "Local Admin",
-      email: "admin@local.test",
-      loginMethod: "local",
-      lastSignedIn: new Date(),
-      role: "admin",
+  // This route creates a privileged synthetic account and must never exist in
+  // the production route table, even when an environment is misconfigured.
+  if (process.env.NODE_ENV !== "production") {
+    app.get("/api/oauth/mock", async (req: Request, res: Response) => {
+      const openId = "mock-admin";
+      await db.upsertUser({
+        openId,
+        name: "Local Admin",
+        email: "admin@local.test",
+        loginMethod: "local",
+        lastSignedIn: new Date(),
+        role: "admin",
+      });
+      const sessionToken = await sdk.createSessionToken(openId, {
+        name: "Local Admin",
+        expiresInMs: ONE_YEAR_MS,
+      });
+      const cookieOptions = getSessionCookieOptions(req);
+      res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS, sameSite: "lax", secure: false });
+      res.redirect(302, "/");
     });
-    const sessionToken = await sdk.createSessionToken(openId, {
-      name: "Local Admin",
-      expiresInMs: ONE_YEAR_MS,
-    });
-    const cookieOptions = getSessionCookieOptions(req);
-    res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS, sameSite: "lax", secure: false });
-    res.redirect(302, "/");
-  });
+  }
 
   app.get("/api/oauth/callback", async (req: Request, res: Response) => {
     const code = getQueryParam(req, "code");

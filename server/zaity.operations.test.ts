@@ -75,6 +75,27 @@ describe("Zaity operations", () => {
     await expect(caller.notifications.list()).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
+  it("requires module access before linking projects to clients or contracts", async () => {
+    const ctx: TrpcContext = { user: { ...adminUser, role: "user" as const, permissions: JSON.stringify(["projects"]) }, req: { protocol: "https", headers: {} } as TrpcContext["req"], res: {} as TrpcContext["res"] };
+    const caller = appRouter.createCaller(ctx);
+    await expect(caller.projects.create({ ref: "PR-LINK", name: "مشروع اختبار", clientId: 4, client: "عميل", contractId: null, contract: "—", managerEmployeeId: null, manager: "—", startDate: "—", endDate: "—", requiredVehicles: 0, status: "مخطط" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("requires both vehicle and driver access to assign a driver", async () => {
+    const ctx: TrpcContext = { user: { ...adminUser, role: "user" as const, permissions: JSON.stringify(["vehicles"]) }, req: { protocol: "https", headers: {} } as TrpcContext["req"], res: {} as TrpcContext["res"] };
+    await expect(appRouter.createCaller(ctx).vehicles.assignDriver({ vehicleId: 1, driverId: 2 })).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("requires vehicle access when a financial contract links vehicles", async () => {
+    const ctx: TrpcContext = { user: { ...adminUser, role: "user" as const, permissions: JSON.stringify(["finance"]) }, req: { protocol: "https", headers: {} } as TrpcContext["req"], res: {} as TrpcContext["res"] };
+    await expect(appRouter.createCaller(ctx).contracts.create({ ref: "CT-LINK", client: "عميل", clientId: null, type: "تشغيل", startDate: "2026-10-04", expiry: "2027-10-04", total: 100, collected: 0, status: "قائم", items: [{ vehicleId: 3, vehiclePlate: "1234", quantity: 1, driver: "—", coverage: "مركبة فقط", description: "خدمة" }] })).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("requires vehicle access when a driver record is linked to a vehicle", async () => {
+    const ctx: TrpcContext = { user: { ...adminUser, role: "user" as const, permissions: JSON.stringify(["drivers"]) }, req: { protocol: "https", headers: {} } as TrpcContext["req"], res: {} as TrpcContext["res"] };
+    await expect(appRouter.createCaller(ctx).drivers.create({ name: "سائق اختبار", vehicleId: 5 })).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
   it("allows an explicitly authorized projects read", async () => {
     const ctx: TrpcContext = {
       user: { ...adminUser, role: "user" as const, permissions: JSON.stringify(["projects"]) },

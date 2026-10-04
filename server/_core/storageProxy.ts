@@ -1,11 +1,44 @@
 import type { Express } from "express";
 import { ENV } from "./env";
+import { sdk } from "./sdk";
+import { getStoredFilePermissions } from "../db";
+import { isSafeFileReference } from "./fileReferences";
 
 export function registerStorageProxy(app: Express) {
   app.get("/manus-storage/*", async (req, res) => {
+    let user: Awaited<ReturnType<typeof sdk.authenticateRequest>>;
+    try {
+      user = await sdk.authenticateRequest(req);
+    } catch {
+      res.status(401).send("Authentication required");
+      return;
+    }
+
     const key = (req.params as Record<string, string>)[0];
-    if (!key) {
-      res.status(400).send("Missing storage key");
+    if (!key || !isSafeFileReference(`/manus-storage/${key}`)) {
+      res.status(404).send("File not found");
+      return;
+    }
+    let requiredPermissions: string[] | null;
+    try {
+      requiredPermissions = await getStoredFilePermissions(key);
+    } catch (error) {
+      console.error("[StorageProxy] permission lookup failed:", error);
+      res.status(503).send("File authorization unavailable");
+      return;
+    }
+    if (requiredPermissions === null) {
+      res.status(503).send("File authorization unavailable");
+      return;
+    }
+    if (!requiredPermissions.length) {
+      res.status(404).send("File not found");
+      return;
+    }
+    let permissions: string[] = [];
+    try { permissions = JSON.parse(user.permissions || "[]"); } catch { permissions = []; }
+    if (user.role !== "admin" && !requiredPermissions.every(permission => permissions.includes(permission))) {
+      res.status(403).send("Insufficient permissions");
       return;
     }
 
