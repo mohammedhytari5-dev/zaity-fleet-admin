@@ -221,14 +221,22 @@ export const appRouter = router({
   }),
   maintenance: router({
     list: permissionProcedure("maintenance").query(async ({ ctx }) => { const rows = await listMaintenanceRequests() ?? []; return hasModulePermission(ctx.user, "finance") ? rows.map(({ receiptUrl: _receiptUrl, ...row }) => row) : rows.map(({ cost: _cost, receiptName: _receiptName, receiptUrl: _receiptUrl, ...row }) => row); }),
-    create: permissionProcedure("maintenance").input(maintenanceInput).mutation(async ({ ctx, input }) => { if (input.cost !== undefined || input.receiptUrl !== undefined) requireReferencePermission(ctx.user, "finance"); return requireRecord(await createMaintenanceRequest(input, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }), "طلب الصيانة"); }),
-    update: permissionProcedure("maintenance").input(z.object({ id: z.number().int().positive(), data: maintenanceInput.partial() })).mutation(async ({ ctx, input }) => { if (input.data.cost !== undefined || input.data.receiptUrl !== undefined) requireReferencePermission(ctx.user, "finance"); return requireRecord(await updateMaintenanceRequest(input.id, input.data, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }), "طلب الصيانة"); }),
-    archive: permissionProcedure("maintenance").input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archiveMaintenanceRequest(input.id) })),
+    create: permissionProcedure("maintenance").input(maintenanceInput).mutation(async ({ ctx, input }) => { if (input.vehicleId !== null) requireReferencePermission(ctx.user, "vehicles"); if (input.cost !== undefined || input.receiptUrl !== undefined) requireReferencePermission(ctx.user, "finance"); return requireRecord(await createMaintenanceRequest(input, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }), "طلب الصيانة"); }),
+    update: permissionProcedure("maintenance").input(z.object({ id: z.number().int().positive(), data: maintenanceInput.partial() })).mutation(async ({ ctx, input }) => { if (input.data.vehicleId !== undefined || input.data.status !== undefined) requireReferencePermission(ctx.user, "vehicles"); if (input.data.cost !== undefined || input.data.receiptUrl !== undefined) requireReferencePermission(ctx.user, "finance"); return requireRecord(await updateMaintenanceRequest(input.id, input.data, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }), "طلب الصيانة"); }),
+    archive: permissionProcedure("maintenance").input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => { requireReferencePermission(ctx.user, "vehicles"); return { success: await archiveMaintenanceRequest(input.id) }; }),
   }),
   documents: router({
     list: permissionProcedure("documents").query(async () => (await listDocuments()) ?? []),
     create: permissionProcedure("documents").input(documentInput).mutation(async ({ ctx, input }) => { const module = ({ "مركبة": "vehicles", "سائق": "drivers", "موظف": "employees", "مشروع": "projects", "عميل": "clients" } as const)[input.entityType]; if (input.entityId) requireReferencePermission(ctx.user, module); return requireRecord(await createDocument(input), "المستند"); }),
-    update: permissionProcedure("documents").input(z.object({ id: z.number().int().positive(), data: documentInput.partial().refine(value => value.entityId === undefined || value.entityType !== undefined, { message: "حدد نوع الكيان عند تغيير ارتباط المستند" }) })).mutation(async ({ ctx, input }) => { const entityType = input.data.entityType; const module = entityType ? ({ "مركبة": "vehicles", "سائق": "drivers", "موظف": "employees", "مشروع": "projects", "عميل": "clients" } as const)[entityType] : undefined; if (input.data.entityId && module) requireReferencePermission(ctx.user, module); return requireRecord(await updateDocument(input.id, input.data), "المستند"); }),
+    update: permissionProcedure("documents").input(z.object({ id: z.number().int().positive(), data: documentInput.partial().refine(value => value.entityId === undefined || value.entityType !== undefined, { message: "حدد نوع الكيان عند تغيير ارتباط المستند" }) })).mutation(async ({ ctx, input }) => {
+      const modules = { "مركبة": "vehicles", "سائق": "drivers", "موظف": "employees", "مشروع": "projects", "عميل": "clients" } as const;
+      if (input.data.entityId !== undefined || input.data.entityType !== undefined) {
+        const current = (await listDocuments() ?? []).find(row => row.id === input.id);
+        if (current?.entityId) requireReferencePermission(ctx.user, modules[current.entityType as keyof typeof modules]);
+        if (input.data.entityId) requireReferencePermission(ctx.user, modules[input.data.entityType!]);
+      }
+      return requireRecord(await updateDocument(input.id, input.data), "المستند");
+    }),
     archive: permissionProcedure("documents").input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archiveDocument(input.id) })),
   }),
   clients: router({

@@ -211,4 +211,13 @@ describe("Zaity operations", () => {
     const ctx: TrpcContext = { user: { ...adminUser, role: "user" as const, permissions: JSON.stringify(["maintenance"]) }, req: { protocol: "https", headers: {} } as TrpcContext["req"], res: {} as TrpcContext["res"] };
     await expect(appRouter.createCaller(ctx).maintenance.create({ ref: "MT-TEST", vehicleId: 1, vehicle: "1234", type: "إصلاح", manager: "اختبار", start: "2026-10-03", due: "2026-10-03", status: "جديد", cost: "500 ر.س" })).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
+
+  it("requires vehicle permission when maintenance actions link to or change a vehicle", async () => {
+    const ctx: TrpcContext = { user: { ...adminUser, role: "user" as const, permissions: JSON.stringify(["maintenance"]) }, req: { protocol: "https", headers: {} } as TrpcContext["req"], res: {} as TrpcContext["res"] };
+    const caller = appRouter.createCaller(ctx);
+    await expect(caller.maintenance.create({ ref: "MT-VEHICLE-LINK", vehicleId: 1, vehicle: "1234", type: "إصلاح", manager: "اختبار", start: "2026-10-04", due: "2026-10-04", status: "جديد" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(caller.maintenance.update({ id: 1, data: { vehicleId: 1 } })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(caller.maintenance.update({ id: 1, data: { status: "مكتمل" } })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(caller.maintenance.archive({ id: 1 })).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
 });
