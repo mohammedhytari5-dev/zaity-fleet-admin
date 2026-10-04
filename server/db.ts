@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, ne, sql } from "drizzle-orm";
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { drizzle } from "drizzle-orm/mysql2";
 import { createPool } from "mysql2";
@@ -293,8 +293,6 @@ export async function archiveVehicleRevenue(id: number, actor: LedgerActor) {
 export async function createVehicle(input: InsertVehicle): Promise<Vehicle | null> {
   const db = await getDb();
   if (!db) return null;
-  // Contract-to-vehicle links must be created together with a contract item.
-  if (input.contractId) return null;
   const normalized = { ...input };
   let linkedProject: Project | undefined;
   if (input.projectId) {
@@ -335,10 +333,21 @@ export async function createVehicle(input: InsertVehicle): Promise<Vehicle | nul
     if (!employee || employee.status !== "نشط") return null;
     normalized.employee = employee.name;
   } else normalized.employee = "—";
-  const result = await db.insert(vehicles).values(normalized);
-  const id = Number(result[0].insertId);
-  const created = await db.select().from(vehicles).where(eq(vehicles.id, id)).limit(1);
-  return created[0] ?? null;
+  return db.transaction(async tx => {
+    const linkedContractId = normalized.contractId ?? null;
+    if (linkedContractId) {
+      const contract = (await tx.select().from(contracts).where(and(eq(contracts.id, linkedContractId), isNull(contracts.archivedAt))).limit(1).for("update"))[0];
+      if (!contract) return null;
+      normalized.contract = contract.ref;
+      normalized.clientId = contract.clientId ?? input.clientId ?? null;
+      normalized.client = contract.client;
+      normalized.status = "مؤجرة";
+    }
+    const result = await tx.insert(vehicles).values(normalized);
+    const id = Number(result[0].insertId);
+    if (linkedContractId) await tx.insert(contractItems).values({ contractId: linkedContractId, vehicleId: id, vehiclePlate: normalized.plate, driver: normalized.driver || "—", coverage: "مركبة وسائق", description: "خدمة تشغيل" });
+    return (await tx.select().from(vehicles).where(eq(vehicles.id, id)).limit(1))[0] ?? null;
+  });
 }
 
 export async function updateVehicle(id: number, input: Partial<InsertVehicle>): Promise<Vehicle | null> {
@@ -346,20 +355,18 @@ export async function updateVehicle(id: number, input: Partial<InsertVehicle>): 
   if (!db) return null;
   const current = (await db.select().from(vehicles).where(and(eq(vehicles.id, id), isNull(vehicles.archivedAt))).limit(1))[0];
   if (!current) return null;
-  // Contract-to-vehicle links are owned by contract item mutations.
-  if (input.contractId !== undefined && input.contractId !== current.contractId) return null;
   const relationshipChanged = input.projectId !== undefined || input.clientId !== undefined || input.contractId !== undefined;
   if (relationshipChanged) {
     const nextProjectId = input.projectId === undefined ? current.projectId : input.projectId;
-    const nextClientId = input.clientId === undefined ? current.clientId : input.clientId;
-    const nextContractId = input.contractId === undefined ? current.contractId : input.contractId;
     const project = nextProjectId ? (await db.select().from(projects).where(and(eq(projects.id, nextProjectId), isNull(projects.archivedAt))).limit(1))[0] : undefined;
-    const client = nextClientId ? (await db.select().from(clients).where(and(eq(clients.id, nextClientId), isNull(clients.archivedAt))).limit(1))[0] : undefined;
+    const nextContractId = input.contractId ? input.contractId : project?.contractId ?? (input.contractId === null ? null : current.contractId);
     const contract = nextContractId ? (await db.select().from(contracts).where(and(eq(contracts.id, nextContractId), isNull(contracts.archivedAt))).limit(1))[0] : undefined;
+    const nextClientId = input.clientId ? input.clientId : project?.clientId ?? contract?.clientId ?? (input.clientId === null ? null : current.clientId);
+    const client = nextClientId ? (await db.select().from(clients).where(and(eq(clients.id, nextClientId), isNull(clients.archivedAt))).limit(1))[0] : undefined;
     if ((nextProjectId && !project) || (nextClientId && !client) || (nextContractId && !contract)) return null;
-    if (project?.clientId && project.clientId !== nextClientId) return null;
+    if (project?.clientId && nextClientId && project.clientId !== nextClientId) return null;
     if (project?.contractId && project.contractId !== nextContractId) return null;
-    if (contract?.clientId && contract.clientId !== nextClientId) return null;
+    if (contract?.clientId && nextClientId && contract.clientId !== nextClientId) return null;
   }
   const normalized = { ...input };
   let linkedProject: Project | undefined;
@@ -413,9 +420,37 @@ export async function updateVehicle(id: number, input: Partial<InsertVehicle>): 
       normalized.employee = employee.name;
     }
   } else delete normalized.employee;
-  await db.update(vehicles).set(normalized).where(and(eq(vehicles.id, id), isNull(vehicles.archivedAt)));
-  const updated = await db.select().from(vehicles).where(eq(vehicles.id, id)).limit(1);
-  return updated[0] ?? null;
+  return db.transaction(async tx => {
+    const locked = (await tx.select().from(vehicles).where(and(eq(vehicles.id, id), isNull(vehicles.archivedAt))).limit(1).for("update"))[0];
+    if (!locked) return null;
+    const nextContractId = normalized.contractId === undefined ? locked.contractId : normalized.contractId;
+    if (nextContractId !== locked.contractId) {
+      const nextContract = nextContractId ? (await tx.select().from(contracts).where(and(eq(contracts.id, nextContractId), isNull(contracts.archivedAt))).limit(1).for("update"))[0] : undefined;
+      if (nextContractId && !nextContract) return null;
+      if (nextContractId) {
+        const conflictingItem = (await tx.select({ id: contractItems.id }).from(contractItems).where(and(eq(contractItems.vehicleId, id), ne(contractItems.contractId, nextContractId))).limit(1))[0];
+        if (conflictingItem) return null;
+      }
+      if (locked.contractId) await tx.delete(contractItems).where(and(eq(contractItems.contractId, locked.contractId), eq(contractItems.vehicleId, id)));
+      if (nextContract) {
+        const existingItem = (await tx.select({ id: contractItems.id }).from(contractItems).where(and(eq(contractItems.contractId, nextContract.id), eq(contractItems.vehicleId, id))).limit(1))[0];
+        if (!existingItem) await tx.insert(contractItems).values({ contractId: nextContract.id, vehicleId: id, vehiclePlate: input.plate ?? locked.plate, driver: input.driver ?? locked.driver ?? "—", coverage: "مركبة وسائق", description: "خدمة تشغيل" });
+        normalized.contract = nextContract.ref;
+        normalized.clientId = nextContract.clientId ?? input.clientId ?? locked.clientId ?? null;
+        normalized.client = nextContract.client;
+        if (input.status === undefined) normalized.status = "مؤجرة";
+      } else {
+        normalized.contract = "—";
+        normalized.contractId = null;
+        if (input.status === undefined) normalized.status = "متاحة";
+      }
+    }
+    if (locked.contractId && (input.plate !== undefined || input.driver !== undefined)) {
+      await tx.update(contractItems).set({ ...(input.plate !== undefined ? { vehiclePlate: input.plate } : {}), ...(input.driver !== undefined ? { driver: input.driver } : {}) }).where(and(eq(contractItems.contractId, locked.contractId), eq(contractItems.vehicleId, id)));
+    }
+    await tx.update(vehicles).set(normalized).where(eq(vehicles.id, id));
+    return (await tx.select().from(vehicles).where(eq(vehicles.id, id)).limit(1))[0] ?? null;
+  });
 }
 
 export async function archiveVehicle(id: number): Promise<boolean> {
@@ -507,6 +542,10 @@ export async function updateProject(id: number, input: Partial<InsertProject>): 
   const normalized = { ...input };
   const nextClientId = input.clientId === undefined ? current.clientId : input.clientId;
   const nextContractId = input.contractId === undefined ? current.contractId : input.contractId;
+  if (input.contractId !== undefined && nextContractId !== current.contractId) {
+    const assignedVehicles = await db.select({ id: vehicles.id }).from(vehicles).where(and(eq(vehicles.projectId, id), isNull(vehicles.archivedAt))).limit(1);
+    if (assignedVehicles.length) return null;
+  }
   if (input.clientId !== undefined) {
     if (input.clientId === null) normalized.client = input.client ?? "—";
     else {
@@ -530,6 +569,14 @@ export async function updateProject(id: number, input: Partial<InsertProject>): 
   if (nextClientId && nextContractId) {
     const contract = (await db.select().from(contracts).where(and(eq(contracts.id, nextContractId), isNull(contracts.archivedAt))).limit(1))[0];
     if (!contract || (contract.clientId && contract.clientId !== nextClientId)) return null;
+  }
+  if (input.clientId !== undefined && input.clientId !== current.clientId) {
+    const assignedVehicles = await db.select({ contractId: vehicles.contractId }).from(vehicles).where(and(eq(vehicles.projectId, id), isNull(vehicles.archivedAt)));
+    for (const vehicle of assignedVehicles) {
+      if (!vehicle.contractId) continue;
+      const vehicleContract = (await db.select({ clientId: contracts.clientId }).from(contracts).where(and(eq(contracts.id, vehicle.contractId), isNull(contracts.archivedAt))).limit(1))[0];
+      if (vehicleContract?.clientId && vehicleContract.clientId !== nextClientId) return null;
+    }
   }
   if (input.managerEmployeeId !== undefined) {
     if (input.managerEmployeeId === null) normalized.manager = input.manager ?? "—";
