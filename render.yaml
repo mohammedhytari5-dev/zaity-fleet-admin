@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: zaity-fleet-admin-preview
+    runtime: node
+    plan: free
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm run build
+    startCommand: pnpm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: VITE_APP_ID
+        value: zaity-fleet-admin-preview
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false
