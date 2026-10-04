@@ -9,6 +9,7 @@ import { InsertPayable, Payable, PayablePayment, InsertPayablePayment, payables,
 import { ENV } from './_core/env';
 import { summarizeMaintenanceItems } from "./vehicle-maintenance-summary";
 import { canUpdateClaim, validatePaymentLinkConsistency } from "./finance-domain";
+import { isProtectedLastAdminDemotion } from "./user-role-domain";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 let _authSchemaReady: Promise<void> | null = null;
@@ -1270,8 +1271,24 @@ export async function archiveSetting(id: number) { const db = await getDb(); if 
 export async function listRepresentatives(clientId: number) { const db = await getDb(); return db ? db.select().from(clientRepresentatives).where(and(eq(clientRepresentatives.clientId, clientId), isNull(clientRepresentatives.archivedAt))) : null; }
 export async function createRepresentative(input: typeof clientRepresentatives.$inferInsert) { const db = await getDb(); if (!db) return null; const result = await db.insert(clientRepresentatives).values(input); const rows = await db.select().from(clientRepresentatives).where(eq(clientRepresentatives.id, Number(result[0].insertId))).limit(1); return rows[0] ?? null; }
 export async function listUsers() { const db = await getDb(); return db ? db.select({ id: users.id, name: users.name, username: users.username, email: users.email, role: users.role, permissions: users.permissions, isActive: users.isActive, createdAt: users.createdAt, lastSignedIn: users.lastSignedIn }).from(users).orderBy(desc(users.createdAt)) : null; }
-export async function countAdmins() { const db = await getDb(); if (!db) return null; const rows = await db.select({ id: users.id }).from(users).where(eq(users.role, "admin")); return rows.length; }
-export async function updateUserRole(id: number, role: "user" | "admin") { const db = await getDb(); if (!db) return null; await db.update(users).set({ role }).where(eq(users.id, id)); return (await db.select({ id: users.id, name: users.name, username: users.username, email: users.email, role: users.role, permissions: users.permissions, isActive: users.isActive, createdAt: users.createdAt, lastSignedIn: users.lastSignedIn }).from(users).where(eq(users.id, id)).limit(1))[0] ?? null; }
+export class LastActiveAdminDemotionError extends Error {
+  constructor() { super("لا يمكن تخفيض صلاحية آخر مدير نشط في النظام"); this.name = "LastActiveAdminDemotionError"; }
+}
+export async function updateUserRole(id: number, role: "user" | "admin") {
+  const db = await getDb();
+  if (!db) return null;
+  return db.transaction(async tx => {
+    // Lock users in a stable order so simultaneous demotions cannot both pass
+    // a stale administrator count and leave the system without an active admin.
+    const lockedUsers = await tx.select({ id: users.id, role: users.role, isActive: users.isActive }).from(users).orderBy(users.id).for("update");
+    const current = lockedUsers.find(user => user.id === id);
+    if (!current) return null;
+    const activeAdminCount = lockedUsers.filter(user => user.role === "admin" && user.isActive === 1).length;
+    if (isProtectedLastAdminDemotion({ targetRole: current.role, targetActive: current.isActive, nextRole: role, activeAdminCount })) throw new LastActiveAdminDemotionError();
+    await tx.update(users).set({ role }).where(eq(users.id, id));
+    return (await tx.select({ id: users.id, name: users.name, username: users.username, email: users.email, role: users.role, permissions: users.permissions, isActive: users.isActive, createdAt: users.createdAt, lastSignedIn: users.lastSignedIn }).from(users).where(eq(users.id, id)).limit(1))[0] ?? null;
+  });
+}
 export async function updateUserAccess(id: number, input: { permissions?: string[]; password?: string }) {
   const db = await getDb();
   if (!db) return null;
