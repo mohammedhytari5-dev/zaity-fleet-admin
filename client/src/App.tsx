@@ -1,11 +1,13 @@
+import { lazy, Suspense } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
-import FleetDashboard from "./pages/FleetDashboard";
-import Login from "./pages/Login";
-import NotFound from "./pages/NotFound";
+
+const FleetDashboard = lazy(() => import("./pages/FleetDashboard"));
+const Login = lazy(() => import("./pages/Login"));
+const NotFound = lazy(() => import("./pages/NotFound"));
 
 function Router() {
   return (
@@ -38,7 +40,9 @@ export default function App() {
       <ThemeProvider defaultTheme="light">
         <TooltipProvider>
           <Toaster position="bottom-left" richColors />
-          <Router />
+          <Suspense fallback={<div className="auth-state" dir="rtl">جارٍ تحميل الصفحة...</div>}>
+            <Router />
+          </Suspense>
         </TooltipProvider>
       </ThemeProvider>
     </ErrorBoundary>
