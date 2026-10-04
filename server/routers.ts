@@ -102,7 +102,7 @@ const documentInput = z.object({
   name: z.string().min(2).max(160),
   entity: z.string().max(160).default("—"),
   entityId: z.number().int().positive().nullable().default(null),
-  entityType: z.enum(["مركبة", "سائق", "موظف", "مشروع", "عميل"]).default("مركبة"),
+  entityType: z.enum(["مركبة", "سائق", "موظف", "مشروع", "عميل", "عقد", "مطالبة", "صيانة"]).default("مركبة"),
   type: z.string().max(80).default("مركبة"),
   expiry: z.string().max(32).default("—"),
   status: z.enum(["ساري", "قريبًا", "متأخر", "منتهي"]).default("ساري"),
@@ -227,9 +227,9 @@ export const appRouter = router({
   }),
   documents: router({
     list: permissionProcedure("documents").query(async () => (await listDocuments()) ?? []),
-    create: permissionProcedure("documents").input(documentInput).mutation(async ({ ctx, input }) => { const module = ({ "مركبة": "vehicles", "سائق": "drivers", "موظف": "employees", "مشروع": "projects", "عميل": "clients" } as const)[input.entityType]; if (input.entityId) requireReferencePermission(ctx.user, module); return requireRecord(await createDocument(input), "المستند"); }),
+    create: permissionProcedure("documents").input(documentInput).mutation(async ({ ctx, input }) => { const module = ({ "مركبة": "vehicles", "سائق": "drivers", "موظف": "employees", "مشروع": "projects", "عميل": "clients", "عقد": "finance", "مطالبة": "finance", "صيانة": "maintenance" } as const)[input.entityType]; if (input.entityId) requireReferencePermission(ctx.user, module); return requireRecord(await createDocument(input), "المستند"); }),
     update: permissionProcedure("documents").input(z.object({ id: z.number().int().positive(), data: documentInput.partial().refine(value => value.entityId === undefined || value.entityType !== undefined, { message: "حدد نوع الكيان عند تغيير ارتباط المستند" }) })).mutation(async ({ ctx, input }) => {
-      const modules = { "مركبة": "vehicles", "سائق": "drivers", "موظف": "employees", "مشروع": "projects", "عميل": "clients" } as const;
+      const modules = { "مركبة": "vehicles", "سائق": "drivers", "موظف": "employees", "مشروع": "projects", "عميل": "clients", "عقد": "finance", "مطالبة": "finance", "صيانة": "maintenance" } as const;
       if (input.data.entityId !== undefined || input.data.entityType !== undefined) {
         const current = (await listDocuments() ?? []).find(row => row.id === input.id);
         if (current?.entityId) requireReferencePermission(ctx.user, modules[current.entityType as keyof typeof modules]);
