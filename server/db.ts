@@ -308,7 +308,7 @@ export async function createVehicle(input: InsertVehicle): Promise<Vehicle | nul
     normalized.client = client.name;
   } else normalized.client = "—";
   if (input.contractId) {
-    const contract = (await db.select().from(contracts).where(and(eq(contracts.id, input.contractId), isNull(contracts.archivedAt))).limit(1))[0];
+    const contract = (await db.select().from(contracts).where(and(eq(contracts.id, input.contractId), isNull(contracts.archivedAt))).limit(1).for("update"))[0];
     if (!contract || (input.clientId && contract.clientId && input.clientId !== contract.clientId)) return null;
     normalized.contract = contract.ref;
     normalized.clientId = contract.clientId ?? input.clientId ?? null;
@@ -464,7 +464,7 @@ export async function createProject(input: InsertProject): Promise<Project | nul
     normalized.client = client.name;
   }
   if (input.contractId) {
-    const contract = (await db.select().from(contracts).where(and(eq(contracts.id, input.contractId), isNull(contracts.archivedAt))).limit(1))[0];
+    const contract = (await db.select().from(contracts).where(and(eq(contracts.id, input.contractId), isNull(contracts.archivedAt))).limit(1).for("update"))[0];
     if (!contract || (input.clientId && contract.clientId && input.clientId !== contract.clientId)) return null;
     normalized.contract = contract.ref;
     if (contract.clientId) normalized.clientId = contract.clientId;
@@ -775,19 +775,25 @@ export async function updateClaim(id: number, input: Partial<InsertClaim>): Prom
   const db = await getDb();
   if (!db) return null;
   if (input.paid !== undefined) return null;
-  const current = (await db.select().from(claims).where(and(eq(claims.id, id), isNull(claims.archivedAt))).limit(1))[0];
-  if (!current) return null;
-  if (!canUpdateClaim({ currentStatus: current.status, currentAmount: current.amount, paid: current.paid, nextStatus: input.status, nextAmount: input.amount })) return null;
-  await db.update(claims).set(input).where(and(eq(claims.id, id), isNull(claims.archivedAt)));
-  const updated = await db.select().from(claims).where(eq(claims.id, id)).limit(1);
-  return updated[0] ?? null;
+  return db.transaction(async tx => {
+    // Coordinate amount/status edits with payments that update this claim's paid total.
+    await tx.execute(sql`SELECT id FROM claims WHERE id = ${id} FOR UPDATE`);
+    const current = (await tx.select().from(claims).where(and(eq(claims.id, id), isNull(claims.archivedAt))).limit(1))[0];
+    if (!current) return null;
+    if (!canUpdateClaim({ currentStatus: current.status, currentAmount: current.amount, paid: current.paid, nextStatus: input.status, nextAmount: input.amount })) return null;
+    await tx.update(claims).set(input).where(and(eq(claims.id, id), isNull(claims.archivedAt)));
+    return (await tx.select().from(claims).where(eq(claims.id, id)).limit(1))[0] ?? null;
+  });
 }
 
 export async function archiveClaim(id: number): Promise<boolean> {
   const db = await getDb();
   if (!db) return false;
-  await db.update(claims).set({ archivedAt: new Date() }).where(eq(claims.id, id));
-  return true;
+  return db.transaction(async tx => {
+    await tx.execute(sql`SELECT id FROM claims WHERE id = ${id} FOR UPDATE`);
+    await tx.update(claims).set({ archivedAt: new Date() }).where(and(eq(claims.id, id), isNull(claims.archivedAt)));
+    return true;
+  });
 }
 
 export async function listContracts(): Promise<Array<Contract & { items: ContractItem[] }> | null> {
@@ -842,6 +848,7 @@ export async function updateContract(id: number, input: Partial<InsertContract>,
   const db = await getDb();
   if (!db) return null;
   return db.transaction(async tx => {
+    await tx.execute(sql`SELECT id FROM contracts WHERE id = ${id} FOR UPDATE`);
     const current = (await tx.select().from(contracts).where(and(eq(contracts.id, id), isNull(contracts.archivedAt))).limit(1))[0];
     if (!current) return null;
     const oldItems = await tx.select().from(contractItems).where(eq(contractItems.contractId, id));
@@ -896,6 +903,7 @@ export async function archiveContract(id: number) {
   const db = await getDb();
   if (!db) return false;
   return db.transaction(async tx => {
+    await tx.execute(sql`SELECT id FROM contracts WHERE id = ${id} FOR UPDATE`);
     const current = (await tx.select().from(contracts).where(and(eq(contracts.id, id), isNull(contracts.archivedAt))).limit(1))[0];
     if (!current) return false;
     const items = await tx.select().from(contractItems).where(eq(contractItems.contractId, id));
@@ -909,9 +917,11 @@ export async function archiveContract(id: number) {
 export async function updateContractStatus(id: number, status: Contract["status"]): Promise<Contract | null> {
   const db = await getDb();
   if (!db) return null;
-  await db.update(contracts).set({ status }).where(and(eq(contracts.id, id), isNull(contracts.archivedAt)));
-  const updated = await db.select().from(contracts).where(eq(contracts.id, id)).limit(1);
-  return updated[0] ?? null;
+  return db.transaction(async tx => {
+    await tx.execute(sql`SELECT id FROM contracts WHERE id = ${id} FOR UPDATE`);
+    await tx.update(contracts).set({ status }).where(and(eq(contracts.id, id), isNull(contracts.archivedAt)));
+    return (await tx.select().from(contracts).where(eq(contracts.id, id)).limit(1))[0] ?? null;
+  });
 }
 
 export async function listTasks() { const db = await getDb(); return db ? db.select().from(tasks).where(isNull(tasks.archivedAt)).orderBy(desc(tasks.createdAt)) : null; }
@@ -999,6 +1009,8 @@ export async function updatePayable(id: number, input: Partial<InsertPayable>, a
   if (!db) return null;
   if (input.paid !== undefined || input.status !== undefined) return null;
   return db.transaction(async tx => {
+    // Serialize edits with payments so amount/status checks use the latest ledger state.
+    await tx.execute(sql`SELECT id FROM payables WHERE id = ${id} FOR UPDATE`);
     const current = (await tx.select().from(payables).where(and(eq(payables.id, id), isNull(payables.archivedAt))).limit(1))[0];
     if (!current || Number(input.amount ?? current.amount) < current.paid) return null;
     if (current.vehicleId && current.paid > 0 && (input.vehicleId !== undefined && input.vehicleId !== current.vehicleId || input.vehicleCategory !== undefined && input.vehicleCategory !== current.vehicleCategory)) throw new Error("لا يمكن نقل فاتورة باص أو تغيير فئتها بعد تسجيل دفعة عليها");
@@ -1012,6 +1024,8 @@ export async function updatePayableStatus(id: number, status: Payable["status"],
   const db = await getDb();
   if (!db) return null;
   return db.transaction(async tx => {
+    // Status changes (especially cancellation/approval) must not race a payment.
+    await tx.execute(sql`SELECT id FROM payables WHERE id = ${id} FOR UPDATE`);
     const current = (await tx.select().from(payables).where(and(eq(payables.id, id), isNull(payables.archivedAt))).limit(1))[0];
     if (!current) return null;
     const allowed: Record<Payable["status"], Payable["status"][]> = { "جديدة": ["معتمدة", "ملغاة"], "معتمدة": ["ملغاة"], "مدفوعة جزئيًا": ["ملغاة"], "مدفوعة": [], "ملغاة": [] };
@@ -1028,6 +1042,9 @@ export async function registerPayablePayment(input: InsertPayablePayment): Promi
   const db = await getDb();
   if (!db) return null;
   return db.transaction(async tx => {
+    // InnoDB holds this row lock through commit. Concurrent payment attempts
+    // for the same payable then re-read the updated paid balance in sequence.
+    await tx.execute(sql`SELECT id FROM payables WHERE id = ${input.payableId} FOR UPDATE`);
     const payable = (await tx.select().from(payables).where(and(eq(payables.id, input.payableId), isNull(payables.archivedAt))).limit(1))[0];
     if (!payable) return null;
     if (!["معتمدة", "مدفوعة جزئيًا"].includes(payable.status)) throw new Error("يجب اعتماد فاتورة المورد قبل تسجيل الصرف");
@@ -1162,19 +1179,25 @@ export async function getCompanyReport(from: string, to: string) {
 }
 
 type DbExecutor = any;
+async function lockPaymentReferences(db: DbExecutor, ...inputs: Array<{ contractId?: number | null; claimId?: number | null }>) {
+  const contractIds = Array.from(new Set(inputs.map(input => input.contractId).filter((id): id is number => Boolean(id)))).sort((a, b) => a - b);
+  const claimIds = Array.from(new Set(inputs.map(input => input.claimId).filter((id): id is number => Boolean(id)))).sort((a, b) => a - b);
+  for (const id of contractIds) await db.execute(sql`SELECT id FROM contracts WHERE id = ${id} FOR UPDATE`);
+  for (const id of claimIds) await db.execute(sql`SELECT id FROM claims WHERE id = ${id} FOR UPDATE`);
+}
 async function validatePaymentReferences(db: DbExecutor, input: { contractId?: number | null; claimId?: number | null; clientId?: number | null; amount?: number }) {
   if (!input.contractId && !input.claimId && !input.clientId) throw new Error("يجب ربط الدفعة بعقد أو مطالبة أو عميل");
   if (input.contractId) {
     const contract = (await db.select().from(contracts).where(and(eq(contracts.id, input.contractId), isNull(contracts.archivedAt))).limit(1))[0];
     if (!contract) throw new Error("العقد المرتبط بالدفعة غير موجود");
-    const claim = input.claimId ? (await db.select().from(claims).where(and(eq(claims.id, input.claimId), isNull(claims.archivedAt))).limit(1))[0] : undefined;
+    const claim = input.claimId ? (await db.select().from(claims).where(and(eq(claims.id, input.claimId), isNull(claims.archivedAt))).limit(1).for("update"))[0] : undefined;
     validatePaymentLinkConsistency({ paymentClientId: input.clientId, contractClientId: contract.clientId, claimClientId: claim?.clientId, paymentContractId: input.contractId, claimContractId: claim?.contractId });
   }
   if (input.claimId) {
-    const claim = (await db.select().from(claims).where(and(eq(claims.id, input.claimId), isNull(claims.archivedAt))).limit(1))[0];
+    const claim = (await db.select().from(claims).where(and(eq(claims.id, input.claimId), isNull(claims.archivedAt))).limit(1).for("update"))[0];
     if (!claim) throw new Error("المطالبة المرتبطة بالدفعة غير موجودة");
     if (claim.status !== "تم اعتمادها" && claim.status !== "تم صرفها") throw new Error("لا يمكن تسجيل دفعة قبل اعتماد المطالبة");
-    const contract = input.contractId ? (await db.select().from(contracts).where(and(eq(contracts.id, input.contractId), isNull(contracts.archivedAt))).limit(1))[0] : undefined;
+    const contract = input.contractId ? (await db.select().from(contracts).where(and(eq(contracts.id, input.contractId), isNull(contracts.archivedAt))).limit(1).for("update"))[0] : undefined;
     validatePaymentLinkConsistency({ paymentClientId: input.clientId, contractClientId: contract?.clientId, claimClientId: claim.clientId, paymentContractId: input.contractId, claimContractId: claim.contractId });
     if (Number(input.amount ?? 0) > claim.amount - claim.paid) throw new Error("قيمة الدفعة تتجاوز المتبقي من المطالبة");
   }
@@ -1187,7 +1210,7 @@ async function applyPaymentImpact(db: DbExecutor, input: { contractId?: number |
   const amount = Number(input.amount ?? 0) * direction;
   if (input.contractId && amount) await db.update(contracts).set({ collected: sql`GREATEST(0, ${contracts.collected} + ${amount})` }).where(and(eq(contracts.id, input.contractId), isNull(contracts.archivedAt)));
   if (input.claimId && amount) {
-    const claim = (await db.select().from(claims).where(and(eq(claims.id, input.claimId), isNull(claims.archivedAt))).limit(1))[0];
+    const claim = (await db.select().from(claims).where(and(eq(claims.id, input.claimId), isNull(claims.archivedAt))).limit(1).for("update"))[0];
     if (claim) {
       const paid = Math.max(0, claim.paid + amount);
       const status = paid >= claim.amount ? "تم صرفها" : claim.status === "تم صرفها" ? "تم اعتمادها" : claim.status;
@@ -1199,6 +1222,7 @@ export async function createPayment(input: typeof payments.$inferInsert) {
   const db = await getDb();
   if (!db) return null;
   return db.transaction(async tx => {
+    await lockPaymentReferences(tx, input);
     await validatePaymentReferences(tx, input);
     const result = await tx.insert(payments).values(input);
     const paymentId = Number(result[0].insertId);
@@ -1213,6 +1237,7 @@ export async function updatePayment(id: number, input: Partial<typeof payments.$
     await tx.execute(sql`SELECT id FROM payments WHERE id = ${id} FOR UPDATE`);
     const current = (await tx.select().from(payments).where(and(eq(payments.id, id), isNull(payments.archivedAt))).limit(1))[0];
     if (!current) return null;
+    await lockPaymentReferences(tx, current, input);
     const next = { ...current, ...input };
     const allocations = await tx.select({ amount: vehicleRevenues.amount }).from(vehicleRevenues).where(and(eq(vehicleRevenues.paymentId, id), isNull(vehicleRevenues.archivedAt)));
     const allocated = allocations.reduce((total, row) => total + Number(row.amount || 0), 0);
