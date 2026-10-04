@@ -7,7 +7,8 @@ import { isSafeFileReference } from "./_core/fileReferences";
 import { adminProcedure, permissionProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { ONE_YEAR_MS } from "@shared/const";
 import { sdk } from "./_core/sdk";
-import { archiveClaim, archiveClient, archiveContract, archiveDocument, archiveDriver, archiveMaintenanceRequest, archivePayment, archiveVehicleExpense, archiveVehicleRevenue, archiveProject, archiveSetting, deleteSetting, archiveVehicle, assignVehicleDriver, authenticateLocalUser, LastActiveAdminDemotionError, createLocalUser, createAuditLog, createClaim, createClient, createContract, createDocument, createDriver, createEmployee, updateEmployee, archiveEmployee, listEmployees, createMaintenanceRequest, createNotification, createPayment, createProject, createPayable, registerPayablePayment, updatePayable, updatePayableStatus, listPayables, getPayableReceipt, createRepresentative, createTask, createVehicle, createVehicleExpense, createVehicleRevenue, getVehicleFinancialProfile, getVehicleReceipt, listVehicleFinancialSummaries, updateVehicleExpense, listAuditLogs, listClaims, listClients, listContracts, listDocuments, listDrivers, listMaintenanceRequests, listNotifications, listPayments, listProjects, listRepresentatives, listSettings, listTasks, listUsers, listVehicles, getCompanyReport, markNotificationRead, updateClaim, updatePayment, updateSetting, updateClient, updateContract, updateContractStatus, updateProject, updateUserRole, updateUserAccess, updateDocument, updateDriver, updateMaintenanceRequest, updateTask, updateVehicle, upsertSetting } from "./db";
+import { documentModuleByType, resolveDocumentLink, type DocumentEntityType } from "./document-relations";
+import { archiveClaim, archiveClient, archiveContract, archiveDocument, archiveDriver, archiveMaintenanceRequest, archivePayment, archiveVehicleExpense, archiveVehicleRevenue, archiveProject, archiveSetting, deleteSetting, archiveVehicle, assignVehicleDriver, authenticateLocalUser, LastActiveAdminDemotionError, createLocalUser, createAuditLog, createClaim, createClient, createContract, createDocument, createDriver, createEmployee, updateEmployee, archiveEmployee, listEmployees, createMaintenanceRequest, createNotification, createPayment, createProject, createPayable, registerPayablePayment, updatePayable, updatePayableStatus, listPayables, getPayableReceipt, createRepresentative, createTask, createVehicle, createVehicleExpense, createVehicleRevenue, getVehicleFinancialProfile, getVehicleReceipt, listVehicleFinancialSummaries, updateVehicleExpense, listAuditLogs, listClaims, listClients, listContracts, listDocuments, listDrivers, listMaintenanceRequests, listNotifications, listPayments, listProjects, listRepresentatives, listSettings, listTasks, listUsers, listVehicles, getCompanyReport, markNotificationRead, updateClaim, updatePayment, updateSetting, updateClient, updateContract, updateContractStatus, updateProject, updateUserRole, updateUserAccess, updateDocument, updateDriver, updateMaintenanceRequest, updateTask, updateVehicle, upsertSetting, getDocument } from "./db";
 
 function requireRecord<T>(record: T | null | undefined, entity: string): T {
   if (!record) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `قاعدة البيانات غير متصلة؛ تعذر حفظ ${entity}` });
@@ -168,7 +169,7 @@ export const appRouter = router({
       const token = await sdk.createSessionToken(user.openId, { name: user.name || user.username || "", expiresInMs: ONE_YEAR_MS });
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.cookie(COOKIE_NAME, token, { ...cookieOptions, maxAge: ONE_YEAR_MS, sameSite: "lax" });
-      return { ...user, passwordHash: undefined, sessionToken: token };
+      return { ...user, passwordHash: undefined };
     }),
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
@@ -227,17 +228,16 @@ export const appRouter = router({
   }),
   documents: router({
     list: permissionProcedure("documents").query(async () => (await listDocuments()) ?? []),
-    create: permissionProcedure("documents").input(documentInput).mutation(async ({ ctx, input }) => { const module = ({ "مركبة": "vehicles", "سائق": "drivers", "موظف": "employees", "مشروع": "projects", "عميل": "clients", "عقد": "finance", "مطالبة": "finance", "صيانة": "maintenance" } as const)[input.entityType]; if (input.entityId) requireReferencePermission(ctx.user, module); return requireRecord(await createDocument(input), "المستند"); }),
+    create: permissionProcedure("documents").input(documentInput).mutation(async ({ ctx, input }) => { if (input.entityId) requireReferencePermission(ctx.user, documentModuleByType[input.entityType]); return requireRecord(await createDocument(input), "المستند"); }),
     update: permissionProcedure("documents").input(z.object({ id: z.number().int().positive(), data: documentInput.partial().refine(value => value.entityId === undefined || value.entityType !== undefined, { message: "حدد نوع الكيان عند تغيير ارتباط المستند" }) })).mutation(async ({ ctx, input }) => {
-      const modules = { "مركبة": "vehicles", "سائق": "drivers", "موظف": "employees", "مشروع": "projects", "عميل": "clients", "عقد": "finance", "مطالبة": "finance", "صيانة": "maintenance" } as const;
-      if (input.data.entityId !== undefined || input.data.entityType !== undefined) {
-        const current = (await listDocuments() ?? []).find(row => row.id === input.id);
-        if (current?.entityId) requireReferencePermission(ctx.user, modules[current.entityType as keyof typeof modules]);
-        if (input.data.entityId) requireReferencePermission(ctx.user, modules[input.data.entityType!]);
-      }
+      const current = requireRecord(await getDocument(input.id), "المستند");
+      const currentType = current.entityType as DocumentEntityType;
+      if (current.entityId) requireReferencePermission(ctx.user, documentModuleByType[currentType]);
+      const finalLink = resolveDocumentLink({ entityType: currentType, entityId: current.entityId }, input.data as { entityType?: DocumentEntityType; entityId?: number | null });
+      if (finalLink.entityId) requireReferencePermission(ctx.user, documentModuleByType[finalLink.entityType]);
       return requireRecord(await updateDocument(input.id, input.data), "المستند");
     }),
-    archive: permissionProcedure("documents").input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archiveDocument(input.id) })),
+    archive: permissionProcedure("documents").input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => { const document = requireRecord(await getDocument(input.id), "المستند"); if (document.entityId) requireReferencePermission(ctx.user, documentModuleByType[document.entityType as DocumentEntityType]); return { success: await archiveDocument(input.id) }; }),
   }),
   clients: router({
     list: permissionProcedure("clients").query(async () => (await listClients()) ?? []),

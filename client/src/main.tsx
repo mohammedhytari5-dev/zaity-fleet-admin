@@ -8,6 +8,13 @@ import App from "./App";
 import { startLogin } from "./const";
 import "./index.css";
 
+// Remove the legacy app token previously exposed to JavaScript storage.
+try {
+  sessionStorage.removeItem("alhaitari-session-token");
+} catch {
+  // sessionStorage unavailable
+}
+
 const queryClient = new QueryClient();
 
 const redirectToLoginIfUnauthorized = (error: unknown) => {
@@ -43,16 +50,11 @@ const trpcClient = trpc.createClient({
       url: "/api/trpc",
       transformer: superjson,
       headers() {
-        try {
-          const tabToken = sessionStorage.getItem("alhaitari-session-token");
-          if (tabToken) return { Authorization: `Bearer ${tabToken}` };
-        } catch {
-          // sessionStorage unavailable
-        }
         // Preview auto-login fallback: when the browser blocks iframe cookies
         // (Safari ITP / private browsing / WebView), the runtime mirrors the
         // session into sessionStorage so we can forward it as a Bearer token.
-        // The regular OAuth cookie flow keeps working and takes priority server-side.
+        // Local and production OAuth login use the HTTP-only cookie below and
+        // never expose the app's session token to JavaScript storage.
         try {
           const raw = sessionStorage.getItem("manus-cookie");
           if (raw) {

@@ -743,12 +743,21 @@ export async function listDocuments(): Promise<Document[] | null> {
   return db.select().from(documents).where(isNull(documents.archivedAt)).orderBy(desc(documents.createdAt));
 }
 
+export async function getDocument(id: number): Promise<Document | null> {
+  const db = await getDb();
+  if (!db) return null;
+  return (await db.select().from(documents).where(and(eq(documents.id, id), isNull(documents.archivedAt))).limit(1))[0] ?? null;
+}
+
 async function documentEntityName(db: DbExecutor, entityType: string, entityId: number) {
   if (entityType === "مركبة") return (await db.select({ name: vehicles.plate }).from(vehicles).where(and(eq(vehicles.id, entityId), isNull(vehicles.archivedAt))).limit(1))[0]?.name ?? null;
   if (entityType === "سائق") return (await db.select({ name: drivers.name }).from(drivers).where(and(eq(drivers.id, entityId), isNull(drivers.archivedAt))).limit(1))[0]?.name ?? null;
   if (entityType === "موظف") return (await db.select({ name: employees.name }).from(employees).where(and(eq(employees.id, entityId), isNull(employees.archivedAt))).limit(1))[0]?.name ?? null;
   if (entityType === "مشروع") return (await db.select({ name: projects.name }).from(projects).where(and(eq(projects.id, entityId), isNull(projects.archivedAt))).limit(1))[0]?.name ?? null;
   if (entityType === "عميل") return (await db.select({ name: clients.name }).from(clients).where(and(eq(clients.id, entityId), isNull(clients.archivedAt))).limit(1))[0]?.name ?? null;
+  if (entityType === "عقد") return (await db.select({ name: contracts.ref }).from(contracts).where(and(eq(contracts.id, entityId), isNull(contracts.archivedAt))).limit(1))[0]?.name ?? null;
+  if (entityType === "مطالبة") return (await db.select({ name: claims.ref }).from(claims).where(and(eq(claims.id, entityId), isNull(claims.archivedAt))).limit(1))[0]?.name ?? null;
+  if (entityType === "صيانة") return (await db.select({ name: maintenanceRequests.ref }).from(maintenanceRequests).where(and(eq(maintenanceRequests.id, entityId), isNull(maintenanceRequests.archivedAt))).limit(1))[0]?.name ?? null;
   return null;
 }
 
