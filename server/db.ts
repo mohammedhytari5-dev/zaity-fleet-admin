@@ -273,7 +273,7 @@ export async function createVehicleRevenue(input: Pick<InsertVehicleRevenue, "ve
     if (items.length ? !items.some(item => item.vehicleId === vehicle.id) : vehicle.contractId !== contractId) throw new Error("هذا الباص غير مرتبط بالعقد المصدر للإيراد؛ لا يمكن نسبته إليه تلقائيًا");
     const allocations = await tx.select({ amount: vehicleRevenues.amount }).from(vehicleRevenues).where(and(eq(vehicleRevenues.paymentId, payment.id), isNull(vehicleRevenues.archivedAt)));
     const allocated = allocations.reduce((total, row) => total + Number(row.amount || 0), 0);
-    if (Number(input.amount) > Number(payment.amount) - allocated) throw new Error(`المبلغ يتجاوز الجزء غير الموزع من الدفعة (${Math.max(0, Number(payment.amount) - allocated)} ر.س)`);
+    if (Number(input.amount) > Number(payment.amount) - allocated) throw new Error(`المبلغ يتجاوز الجزء غير الموزع من الدفعة (${Math.max(0, Number(payment.amount) - allocated)} SAR)`);
     const project = (await tx.select().from(projects).where(and(eq(projects.contractId, contractId), isNull(projects.archivedAt))).limit(1))[0];
     const clientId = payment.clientId ?? contract.clientId ?? (vehicle.contractId === contractId ? vehicle.clientId : null);
     const client = clientId ? (await tx.select({ name: clients.name }).from(clients).where(eq(clients.id, clientId)).limit(1))[0] : undefined;
@@ -1318,7 +1318,7 @@ export async function updatePayment(id: number, input: Partial<typeof payments.$
     const next = { ...current, ...input };
     const allocations = await tx.select({ amount: vehicleRevenues.amount }).from(vehicleRevenues).where(and(eq(vehicleRevenues.paymentId, id), isNull(vehicleRevenues.archivedAt)));
     const allocated = allocations.reduce((total, row) => total + Number(row.amount || 0), 0);
-    if (input.amount !== undefined && Number(next.amount) < allocated) throw new Error(`لا يمكن خفض الدفعة عن الإيرادات المخصصة للباصات (${allocated} ر.س)`);
+    if (input.amount !== undefined && Number(next.amount) < allocated) throw new Error(`لا يمكن خفض الدفعة عن الإيرادات المخصصة للباصات (${allocated} SAR)`);
     if (allocations.length && ((input.contractId !== undefined && input.contractId !== current.contractId) || (input.claimId !== undefined && input.claimId !== current.claimId))) throw new Error("لا يمكن نقل الدفعة إلى عقد أو مطالبة أخرى بعد تخصيص جزء منها لباص");
     await applyPaymentImpact(tx, current, -1);
     await validatePaymentReferences(tx, next);
