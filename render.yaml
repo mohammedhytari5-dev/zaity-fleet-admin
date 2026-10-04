@@ -3,7 +3,7 @@ services:
     name: zaity-fleet-admin-preview
     runtime: node
     plan: free
-    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm run build
+    buildCommand: corepack enable && pnpm install --frozen-lockfile --prod=false && pnpm run db:push && pnpm run db:seed && pnpm run db:bootstrap-admin && pnpm run build
     startCommand: pnpm start
     healthCheckPath: /healthz
     envVars:
@@ -15,3 +15,9 @@ services:
         generateValue: true
       - key: DATABASE_URL
         sync: false
+      - key: BOOTSTRAP_ADMIN_USERNAME
+        sync: false
+      - key: BOOTSTRAP_ADMIN_PASSWORD
+        sync: false
+      - key: BOOTSTRAP_ADMIN_NAME
+        value: مدير بيئة الاختبار
