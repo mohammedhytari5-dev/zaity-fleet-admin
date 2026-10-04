@@ -96,7 +96,7 @@ function Badge({ children }: { children: string }) {
   return <span className={`status-badge ${statusTone[children] || "gray"}`}><i />{children}</span>;
 }
 function Logo({ compact = false }: { compact?: boolean }) {
-  return <div className={`brand-mark ${compact ? "compact" : ""}`}><span className="drop-logo">⌄</span>{!compact && <span><strong>الهتاري</strong><small>plus</small></span>}</div>;
+  return <div className={`brand-mark ${compact ? "compact" : ""}`}><span className="brand-monogram">هـ</span>{!compact && <span><strong>الهتاري</strong><small>PLUS</small></span>}</div>;
 }
 function formatSAR(value: number) { return `${value.toLocaleString("en-US")} ر.س`; }
 function exportCsv(rows: Row[], columns: string[], filename: string) {
@@ -121,9 +121,9 @@ function Chart({ maintenance }: { maintenance: Maintenance[] }) {
   return <div className="chart-wrap">
     <div className="chart-y"><span>{max}</span><span>{Math.round(max * .75)}</span><span>{Math.round(max * .5)}</span><span>{Math.round(max * .25)}</span><span>٠</span></div>
     <svg viewBox="0 0 600 160" preserveAspectRatio="none" className="chart-svg" role="img" aria-label="توزيع طلبات الصيانة">
-      <defs><linearGradient id="chartFill" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stopColor="#0b8f7b" stopOpacity=".18"/><stop offset="1" stopColor="#0b8f7b" stopOpacity="0"/></linearGradient></defs>
+      <defs><linearGradient id="chartFill" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stopColor="#a9814d" stopOpacity=".18"/><stop offset="1" stopColor="#a9814d" stopOpacity="0"/></linearGradient></defs>
       {[28,58,88,118,148].map(y => <line key={y} x1="0" y1={y} x2="600" y2={y} stroke="#e9eeec" strokeWidth="1" />)}
-      {counts.map((count, i) => { const x = 75 + i * 150; const y = 148 - (count / max) * 120; return <g key={labels[i]}><rect x={x - 24} y={y} width="48" height={148 - y} rx="8" fill="#0b8f7b" opacity=".82" /><text x={x} y={Math.max(16, y - 8)} textAnchor="middle" fill="#38534c" fontSize="12">{count}</text></g>; })}
+      {counts.map((count, i) => { const x = 75 + i * 150; const y = 148 - (count / max) * 120; return <g key={labels[i]}><rect x={x - 24} y={y} width="48" height={148 - y} rx="8" fill="#a9814d" opacity=".82" /><text x={x} y={Math.max(16, y - 8)} textAnchor="middle" fill="#25364c" fontSize="12">{count}</text></g>; })}
     </svg>
     <div className="chart-x">{labels.map(label => <span key={label}>{label}</span>)}</div>
   </div>;

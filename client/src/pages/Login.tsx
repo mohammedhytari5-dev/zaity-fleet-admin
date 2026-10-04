@@ -43,7 +43,7 @@ export default function Login() {
   return (
     <main className="login-page" dir="rtl">
       <section className="login-card">
-        <div className="login-brand"><span className="login-logo">ه</span><div><strong>الهتاري بلس</strong><small>إدارة الأسطول</small></div></div>
+        <div className="login-brand"><span className="login-logo">هـ</span><div><strong>الهتاري بلس</strong><small>إدارة الأسطول</small></div></div>
         <div className="login-heading"><span className="login-icon"><ShieldCheck size={22} /></span><h1>تسجيل الدخول</h1><p>أدخل بيانات حسابك للوصول إلى لوحة التحكم.</p></div>
         <form onSubmit={submit} className="login-form">
           <label className="login-field"><span>اسم المستخدم</span><div><UserRound size={17} /><input type="text" value={username} onChange={event => setUsername(event.target.value)} placeholder="username" autoComplete="username" autoFocus /></div></label>
