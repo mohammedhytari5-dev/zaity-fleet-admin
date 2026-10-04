@@ -243,7 +243,10 @@ export const appRouter = router({
     list: permissionProcedure("clients").query(async () => (await listClients()) ?? []),
     create: permissionProcedure("clients").input(clientInput).mutation(async ({ input }) => requireRecord(await createClient(input), "العميل")),
     update: permissionProcedure("clients").input(z.object({ id: z.number().int().positive(), data: clientInput.partial() })).mutation(async ({ input }) => requireRecord(await updateClient(input.id, input.data), "العميل")),
-    archive: permissionProcedure("clients").input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archiveClient(input.id) })),
+    archive: permissionProcedure("clients").input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => {
+      if (!await archiveClient(input.id)) throw new TRPCError({ code: "CONFLICT", message: "لا يمكن أرشفة العميل قبل فك ارتباط المشاريع والمركبات والعقود النشطة" });
+      return { success: true };
+    }),
   }),
   payables: router({
     list: permissionProcedure("payables").query(async () => (await listPayables()) ?? []),
