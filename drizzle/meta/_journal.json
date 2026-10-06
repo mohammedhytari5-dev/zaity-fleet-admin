@@ -169,6 +169,13 @@
       "when": 1791268318124,
       "tag": "0023_maintenance_vehicle_status_restore",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "5",
+      "when": 1791272000000,
+      "tag": "0024_maintenance_funding_flow",
+      "breakpoints": true
     }
   ]
 }

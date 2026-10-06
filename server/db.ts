@@ -731,7 +731,7 @@ export async function advanceMaintenanceRequest(id: number, toStage: Maintenance
   });
 }
 
-export async function decideMaintenanceApproval(id: number, approved: boolean, notes: string | undefined, actor: LedgerActor = {}) {
+export async function decideMaintenanceApproval(id: number, approved: boolean, decision: { notes?: string; fundingType?: "عهدة" | "تحويل مباشر"; fundingReference?: string; fundingAmount?: number; fundingRecipient?: string }, actor: LedgerActor = {}) {
   const db = await getDb();
   if (!db) return null;
   return db.transaction(async tx => {
@@ -741,9 +741,25 @@ export async function decideMaintenanceApproval(id: number, approved: boolean, n
     if (current.workflowStage !== "اعتماد" || current.approvalStatus !== "بانتظار الاعتماد") throw new Error("الطلب ليس بانتظار الاعتماد");
     const toStage = approved ? "تنفيذ" : "مرفوض";
     const status = statusForMaintenanceStage(toStage);
-    await tx.update(maintenanceRequests).set({ workflowStage: toStage, status, approvalStatus: approved ? "معتمد" : "مرفوض", approvedByUserId: actor.id ?? null, approvedByName: actor.name || "—", approvedAt: new Date(), approvalNotes: notes || null }).where(eq(maintenanceRequests.id, id));
-    await tx.insert(maintenanceEvents).values({ maintenanceRequestId: id, eventType: approved ? "اعتماد التكلفة" : "رفض التكلفة", fromStage: current.workflowStage, toStage, details: notes || null, actorUserId: actor.id ?? null, actorName: actor.name || "—" });
+    if (approved && (!decision.fundingType || !decision.fundingReference || !decision.fundingAmount || !decision.fundingRecipient)) throw new Error("بيانات اعتماد وطريقة الصرف غير مكتملة");
+    const fundingDetails = approved ? `طريقة الصرف: ${decision.fundingType} · المرجع: ${decision.fundingReference} · المبلغ: ${decision.fundingAmount} SAR · المستلم: ${decision.fundingRecipient}` : "";
+    await tx.update(maintenanceRequests).set({ workflowStage: toStage, status, approvalStatus: approved ? "معتمد" : "مرفوض", approvedByUserId: actor.id ?? null, approvedByName: actor.name || "—", approvedAt: new Date(), approvalNotes: decision.notes || null, fundingType: approved ? decision.fundingType! : null, fundingReference: approved ? decision.fundingReference! : null, fundingAmount: approved ? decision.fundingAmount! : null, fundingRecipient: approved ? decision.fundingRecipient! : null, advanceStatus: approved && decision.fundingType === "عهدة" ? "مفتوحة" : null, fundingIssuedAt: approved ? new Date() : null, fundingIssuedByUserId: approved ? actor.id ?? null : null, fundingIssuedByName: approved ? actor.name || "—" : null }).where(eq(maintenanceRequests.id, id));
+    await tx.insert(maintenanceEvents).values({ maintenanceRequestId: id, eventType: approved ? `اعتماد الصيانة · ${decision.fundingType}` : "رفض الطلب", fromStage: current.workflowStage, toStage, details: [fundingDetails, decision.notes].filter(Boolean).join(" · ") || null, actorUserId: actor.id ?? null, actorName: actor.name || "—" });
     if (current.vehicleId) await refreshVehicleMaintenanceStatus(tx, current.vehicleId);
+    return (await tx.select().from(maintenanceRequests).where(eq(maintenanceRequests.id, id)).limit(1))[0] ?? null;
+  });
+}
+
+export async function settleMaintenanceAdvance(id: number, reference: string, actor: LedgerActor = {}) {
+  const db = await getDb();
+  if (!db) return null;
+  return db.transaction(async tx => {
+    await tx.execute(sql`SELECT id FROM maintenance_requests WHERE id = ${id} FOR UPDATE`);
+    const current = (await tx.select().from(maintenanceRequests).where(and(eq(maintenanceRequests.id, id), isNull(maintenanceRequests.archivedAt))).limit(1))[0];
+    if (!current) return null;
+    if (current.fundingType !== "عهدة" || current.advanceStatus !== "مفتوحة") throw new Error("لا توجد عهدة مفتوحة لتسويتها");
+    await tx.update(maintenanceRequests).set({ advanceStatus: "مسواة", advanceSettledAt: new Date(), advanceSettlementReference: reference }).where(eq(maintenanceRequests.id, id));
+    await tx.insert(maintenanceEvents).values({ maintenanceRequestId: id, eventType: "تسوية العهدة", fromStage: current.workflowStage, toStage: current.workflowStage, details: `مرجع التسوية: ${reference}`, actorUserId: actor.id ?? null, actorName: actor.name || "—" });
     return (await tx.select().from(maintenanceRequests).where(eq(maintenanceRequests.id, id)).limit(1))[0] ?? null;
   });
 }
@@ -762,8 +778,8 @@ export async function updateMaintenanceRequest(id: number, input: Partial<Insert
     const current = (await tx.select().from(maintenanceRequests).where(and(eq(maintenanceRequests.id, id), isNull(maintenanceRequests.archivedAt))).limit(1))[0];
     if (!current) return null;
     if (["مغلق", "مرفوض"].includes(current.workflowStage)) throw new Error("لا يمكن تعديل طلب مغلق أو مرفوض؛ أنشئ طلبًا جديدًا عند الحاجة");
-    if (input.estimatedCost !== undefined && current.workflowStage !== "تقدير تكلفة") throw new Error("لا يمكن تعديل التقدير إلا في مرحلة تقدير التكلفة");
-    if ((input.cost !== undefined || input.laborCost !== undefined || input.partsCost !== undefined || input.receiptUrl !== undefined) && (current.approvalStatus !== "معتمد" || !["تنفيذ", "فحص بعد الإصلاح"].includes(current.workflowStage))) throw new Error("يجب اعتماد التكلفة وأن يكون الطلب قيد التنفيذ قبل تسجيل المصروف الفعلي");
+    if ((input.estimatedCost !== undefined || input.quotedPartsCost !== undefined || input.quoteUrl !== undefined || input.quoteName !== undefined) && current.approvalStatus !== "بانتظار الاعتماد") throw new Error("يمكن تعديل عرض السعر قبل اعتماد المالية فقط");
+    if ((input.cost !== undefined || input.laborCost !== undefined || input.partsCost !== undefined || input.receiptUrl !== undefined) && (current.approvalStatus !== "معتمد" || current.workflowStage !== "تنفيذ")) throw new Error("يجب اعتماد الطلب وبدء التنفيذ قبل تسجيل المصروف الفعلي");
     const targetVehicleId = input.vehicleId !== undefined ? input.vehicleId : current.vehicleId;
     const changes: Partial<InsertMaintenanceRequest> = { ...input };
     if (targetVehicleId && targetVehicleId !== current.vehicleId) {
