@@ -3,7 +3,8 @@ import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { drizzle } from "drizzle-orm/mysql2";
 import { createPool } from "mysql2";
 import { getMysqlConnectionOptions } from "./db-connection";
-import { AuditLog, Claim, Client, Contract, ContractItem, Document, Driver, Employee, InsertEmployee, InsertClaim, InsertClient, InsertContract, InsertContractItem, InsertDocument, InsertDriver, InsertMaintenanceRequest, InsertUser, InsertVehicle, InsertVehicleExpense, VehicleExpense, InsertVehicleRevenue, VehicleRevenue, MaintenanceRequest, User, Vehicle, auditLogs, claims, clientRepresentatives, clients, contractItems, contracts, documents, drivers, employees, maintenanceRequests, notifications, payments, vehicleExpenses, vehicleRevenues, settingCatalog, tasks, users, vehicles } from "../drizzle/schema";
+import { AuditLog, Claim, Client, Contract, ContractItem, Document, Driver, Employee, InsertEmployee, InsertClaim, InsertClient, InsertContract, InsertContractItem, InsertDocument, InsertDriver, InsertMaintenanceRequest, InsertUser, InsertVehicle, InsertVehicleExpense, VehicleExpense, InsertVehicleRevenue, VehicleRevenue, MaintenanceRequest, User, Vehicle, auditLogs, claims, clientRepresentatives, clients, contractItems, contracts, documents, drivers, employees, maintenanceEvents, maintenanceRequests, notifications, payments, vehicleExpenses, vehicleRevenues, settingCatalog, tasks, users, vehicles } from "../drizzle/schema";
+import { canAdvanceMaintenance, statusForMaintenanceStage, type MaintenanceStage } from "../shared/maintenance-domain";
 import { InsertProject, Project, projects } from "../drizzle/schema";
 import { InsertPayable, Payable, PayablePayment, InsertPayablePayment, payables, payablePayments } from "../drizzle/schema";
 import { ENV } from './_core/env';
@@ -684,38 +685,97 @@ export async function listMaintenanceRequests(): Promise<MaintenanceRequest[] | 
   return db.select().from(maintenanceRequests).where(isNull(maintenanceRequests.archivedAt)).orderBy(desc(maintenanceRequests.createdAt));
 }
 
+async function refreshVehicleMaintenanceStatus(tx: DbExecutor, vehicleId: number) {
+  const requests: MaintenanceRequest[] = await tx.select().from(maintenanceRequests).where(and(eq(maintenanceRequests.vehicleId, vehicleId), isNull(maintenanceRequests.archivedAt)));
+  const active = requests.filter(request => !["مغلق", "مرفوض"].includes(request.workflowStage));
+  const inRepair = active.some(request => ["تنفيذ", "فحص بعد الإصلاح"].includes(request.workflowStage));
+  const stoppedForSafety = active.some(request => request.priority === "طارئ");
+  const priorStatus = requests.find(request => request.vehicleStatusBefore && !["في الصيانة", "متوقفة"].includes(request.vehicleStatusBefore))?.vehicleStatusBefore;
+  const status = stoppedForSafety ? "متوقفة" : inRepair ? "في الصيانة" : priorStatus;
+  if (status) await tx.update(vehicles).set({ status }).where(eq(vehicles.id, vehicleId));
+}
+
 export async function createMaintenanceRequest(input: InsertMaintenanceRequest, actor: LedgerActor = {}): Promise<MaintenanceRequest | null> {
   const db = await getDb();
   if (!db) return null;
   return db.transaction(async tx => {
+    let vehicleStatusBefore: Vehicle["status"] | null = null;
     if (input.vehicleId) {
-      const vehicle = (await tx.select({ id: vehicles.id }).from(vehicles).where(and(eq(vehicles.id, input.vehicleId), isNull(vehicles.archivedAt))).limit(1))[0];
+      const vehicle = (await tx.select({ id: vehicles.id, status: vehicles.status }).from(vehicles).where(and(eq(vehicles.id, input.vehicleId), isNull(vehicles.archivedAt))).limit(1))[0];
       if (!vehicle) return null;
+      if (!(["في الصيانة", "متوقفة"] as string[]).includes(vehicle.status)) vehicleStatusBefore = vehicle.status;
     }
-    const result = await tx.insert(maintenanceRequests).values(input);
+    const result = await tx.insert(maintenanceRequests).values({ ...input, vehicleStatusBefore });
     const id = Number(result[0].insertId);
-    if (input.vehicleId && input.status !== "مكتمل") await tx.update(vehicles).set({ status: "في الصيانة" }).where(eq(vehicles.id, input.vehicleId));
+    await tx.insert(maintenanceEvents).values({ maintenanceRequestId: id, eventType: "إنشاء الطلب", toStage: input.workflowStage || "بلاغ", details: `الأولوية: ${input.priority || "متوسط"}`, actorUserId: actor.id ?? null, actorName: actor.name || "—" });
+    if (input.vehicleId && input.priority === "طارئ") await tx.update(vehicles).set({ status: "متوقفة" }).where(eq(vehicles.id, input.vehicleId));
     const created = (await tx.select().from(maintenanceRequests).where(eq(maintenanceRequests.id, id)).limit(1))[0] ?? null;
     if (created) await syncMaintenanceExpense(tx, created, actor);
     return created;
   });
 }
 
+export async function advanceMaintenanceRequest(id: number, toStage: MaintenanceStage, actor: LedgerActor = {}) {
+  const db = await getDb();
+  if (!db) return null;
+  return db.transaction(async tx => {
+    await tx.execute(sql`SELECT id FROM maintenance_requests WHERE id = ${id} FOR UPDATE`);
+    const current = (await tx.select().from(maintenanceRequests).where(and(eq(maintenanceRequests.id, id), isNull(maintenanceRequests.archivedAt))).limit(1))[0];
+    if (!current) return null;
+    if (!canAdvanceMaintenance({ from: current.workflowStage as MaintenanceStage, to: toStage, approvalStatus: current.approvalStatus })) throw new Error("لا يمكن نقل الطلب إلى هذه المرحلة قبل استكمال المرحلة الحالية أو اعتماد التكلفة");
+    const status = statusForMaintenanceStage(toStage);
+    await tx.update(maintenanceRequests).set({ workflowStage: toStage, status, ...(toStage === "اعتماد" ? { approvalStatus: "بانتظار الاعتماد" as const } : {}), ...(toStage === "مغلق" ? { closedAt: new Date() } : {}) }).where(eq(maintenanceRequests.id, id));
+    await tx.insert(maintenanceEvents).values({ maintenanceRequestId: id, eventType: "تغيير المرحلة", fromStage: current.workflowStage, toStage, actorUserId: actor.id ?? null, actorName: actor.name || "—" });
+    if (current.vehicleId) await refreshVehicleMaintenanceStatus(tx, current.vehicleId);
+    return (await tx.select().from(maintenanceRequests).where(eq(maintenanceRequests.id, id)).limit(1))[0] ?? null;
+  });
+}
+
+export async function decideMaintenanceApproval(id: number, approved: boolean, notes: string | undefined, actor: LedgerActor = {}) {
+  const db = await getDb();
+  if (!db) return null;
+  return db.transaction(async tx => {
+    await tx.execute(sql`SELECT id FROM maintenance_requests WHERE id = ${id} FOR UPDATE`);
+    const current = (await tx.select().from(maintenanceRequests).where(and(eq(maintenanceRequests.id, id), isNull(maintenanceRequests.archivedAt))).limit(1))[0];
+    if (!current) return null;
+    if (current.workflowStage !== "اعتماد" || current.approvalStatus !== "بانتظار الاعتماد") throw new Error("الطلب ليس بانتظار الاعتماد");
+    const toStage = approved ? "تنفيذ" : "مرفوض";
+    const status = statusForMaintenanceStage(toStage);
+    await tx.update(maintenanceRequests).set({ workflowStage: toStage, status, approvalStatus: approved ? "معتمد" : "مرفوض", approvedByUserId: actor.id ?? null, approvedByName: actor.name || "—", approvedAt: new Date(), approvalNotes: notes || null }).where(eq(maintenanceRequests.id, id));
+    await tx.insert(maintenanceEvents).values({ maintenanceRequestId: id, eventType: approved ? "اعتماد التكلفة" : "رفض التكلفة", fromStage: current.workflowStage, toStage, details: notes || null, actorUserId: actor.id ?? null, actorName: actor.name || "—" });
+    if (current.vehicleId) await refreshVehicleMaintenanceStatus(tx, current.vehicleId);
+    return (await tx.select().from(maintenanceRequests).where(eq(maintenanceRequests.id, id)).limit(1))[0] ?? null;
+  });
+}
+
+export async function listMaintenanceEvents(id: number) {
+  const db = await getDb();
+  if (!db) return null;
+  return db.select().from(maintenanceEvents).where(eq(maintenanceEvents.maintenanceRequestId, id)).orderBy(maintenanceEvents.createdAt);
+}
+
 export async function updateMaintenanceRequest(id: number, input: Partial<InsertMaintenanceRequest>, actor: LedgerActor = {}): Promise<MaintenanceRequest | null> {
   const db = await getDb();
   if (!db) return null;
   return db.transaction(async tx => {
+    await tx.execute(sql`SELECT id FROM maintenance_requests WHERE id = ${id} FOR UPDATE`);
     const current = (await tx.select().from(maintenanceRequests).where(and(eq(maintenanceRequests.id, id), isNull(maintenanceRequests.archivedAt))).limit(1))[0];
     if (!current) return null;
-    await tx.update(maintenanceRequests).set(input).where(eq(maintenanceRequests.id, id));
-    const vehicleId = input.vehicleId ?? current.vehicleId;
-    const refreshVehicleStatus = async (targetVehicleId: number) => {
-      const activeRequests = await tx.select({ status: maintenanceRequests.status }).from(maintenanceRequests).where(and(eq(maintenanceRequests.vehicleId, targetVehicleId), isNull(maintenanceRequests.archivedAt)));
-      const hasOpenRequest = activeRequests.some(request => request.status !== "مكتمل");
-      await tx.update(vehicles).set({ status: hasOpenRequest ? "في الصيانة" : "متاحة" }).where(eq(vehicles.id, targetVehicleId));
-    };
-    if (current.vehicleId && input.vehicleId !== undefined && input.vehicleId !== current.vehicleId) await refreshVehicleStatus(current.vehicleId);
-    if (vehicleId) await refreshVehicleStatus(vehicleId);
+    if (["مغلق", "مرفوض"].includes(current.workflowStage)) throw new Error("لا يمكن تعديل طلب مغلق أو مرفوض؛ أنشئ طلبًا جديدًا عند الحاجة");
+    if (input.estimatedCost !== undefined && current.workflowStage !== "تقدير تكلفة") throw new Error("لا يمكن تعديل التقدير إلا في مرحلة تقدير التكلفة");
+    if ((input.cost !== undefined || input.laborCost !== undefined || input.partsCost !== undefined || input.receiptUrl !== undefined) && (current.approvalStatus !== "معتمد" || !["تنفيذ", "فحص بعد الإصلاح"].includes(current.workflowStage))) throw new Error("يجب اعتماد التكلفة وأن يكون الطلب قيد التنفيذ قبل تسجيل المصروف الفعلي");
+    const targetVehicleId = input.vehicleId !== undefined ? input.vehicleId : current.vehicleId;
+    const changes: Partial<InsertMaintenanceRequest> = { ...input };
+    if (targetVehicleId && targetVehicleId !== current.vehicleId) {
+      const targetVehicle = (await tx.select({ id: vehicles.id, status: vehicles.status }).from(vehicles).where(and(eq(vehicles.id, targetVehicleId), isNull(vehicles.archivedAt))).limit(1))[0];
+      if (!targetVehicle) throw new Error("المركبة المرتبطة غير موجودة أو مؤرشفة");
+      changes.vehicleStatusBefore = (["في الصيانة", "متوقفة"] as string[]).includes(targetVehicle.status) ? null : targetVehicle.status;
+    }
+    await tx.update(maintenanceRequests).set(changes).where(eq(maintenanceRequests.id, id));
+    const changedFields = Object.keys(input).filter(key => !["receiptUrl"].includes(key));
+    if (changedFields.length) await tx.insert(maintenanceEvents).values({ maintenanceRequestId: id, eventType: "تعديل الطلب", fromStage: current.workflowStage, toStage: current.workflowStage, details: `الحقول المعدلة: ${changedFields.join("، ")}`, actorUserId: actor.id ?? null, actorName: actor.name || "—" });
+    if (current.vehicleId && current.vehicleId !== targetVehicleId) await refreshVehicleMaintenanceStatus(tx, current.vehicleId);
+    if (targetVehicleId) await refreshVehicleMaintenanceStatus(tx, targetVehicleId);
     const updated = (await tx.select().from(maintenanceRequests).where(eq(maintenanceRequests.id, id)).limit(1))[0] ?? null;
     if (updated) await syncMaintenanceExpense(tx, updated, actor);
     return updated;
@@ -729,10 +789,7 @@ export async function archiveMaintenanceRequest(id: number): Promise<boolean> {
     const current = (await tx.select().from(maintenanceRequests).where(and(eq(maintenanceRequests.id, id), isNull(maintenanceRequests.archivedAt))).limit(1))[0];
     if (!current) return false;
     await tx.update(maintenanceRequests).set({ archivedAt: new Date() }).where(eq(maintenanceRequests.id, id));
-    if (current.vehicleId) {
-      const remaining = await tx.select({ status: maintenanceRequests.status }).from(maintenanceRequests).where(and(eq(maintenanceRequests.vehicleId, current.vehicleId), isNull(maintenanceRequests.archivedAt)));
-      await tx.update(vehicles).set({ status: remaining.some(request => request.status !== "مكتمل") ? "في الصيانة" : "متاحة" }).where(eq(vehicles.id, current.vehicleId));
-    }
+    if (current.vehicleId) await refreshVehicleMaintenanceStatus(tx, current.vehicleId);
     return true;
   });
 }

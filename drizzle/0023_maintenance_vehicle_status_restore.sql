@@ -1,0 +1,1 @@
+ALTER TABLE `maintenance_requests` ADD `vehicleStatusBefore` enum('متاحة','مؤجرة','مشغولة','في الصيانة','قيد التجهيز','متوقفة');

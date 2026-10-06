@@ -150,22 +150,51 @@ export const maintenanceRequests = mysqlTable("maintenance_requests", {
   id: int("id").autoincrement().primaryKey(),
   ref: varchar("ref", { length: 40 }).notNull().unique(),
   vehicleId: int("vehicleId"),
+  vehicleStatusBefore: mysqlEnum("vehicleStatusBefore", ["متاحة", "مؤجرة", "مشغولة", "في الصيانة", "قيد التجهيز", "متوقفة"]),
   vehicle: varchar("vehicle", { length: 80 }).notNull(),
   type: varchar("type", { length: 160 }).notNull(),
+  priority: mysqlEnum("priority", ["طارئ", "عاجل", "متوسط", "عادي"]).notNull().default("متوسط"),
+  workflowStage: mysqlEnum("workflowStage", ["بلاغ", "فحص", "تشخيص", "تقدير تكلفة", "اعتماد", "تنفيذ", "فحص بعد الإصلاح", "مغلق", "مرفوض"]).notNull().default("بلاغ"),
+  reportedBy: varchar("reportedBy", { length: 160 }).notNull().default("—"),
   reason: varchar("reason", { length: 500 }).notNull().default("—"),
+  diagnosis: text("diagnosis"),
   workDone: text("workDone"),
   parts: text("parts"),
+  technician: varchar("technician", { length: 160 }).notNull().default("—"),
+  workshop: varchar("workshop", { length: 200 }).notNull().default("—"),
   manager: varchar("manager", { length: 160 }).notNull().default("—"),
   start: varchar("start", { length: 32 }).notNull().default("—"),
   due: varchar("due", { length: 32 }).notNull().default("—"),
   expectedReturn: varchar("expectedReturn", { length: 32 }).notNull().default("—"),
   status: mysqlEnum("status", ["جديد", "جاري العمل", "بانتظار الفحص", "مكتمل", "متوقف"]).notNull().default("جديد"),
   cost: varchar("cost", { length: 40 }).notNull().default("0 ر.س"),
+  estimatedCost: int("estimatedCost").notNull().default(0),
+  laborCost: int("laborCost").notNull().default(0),
+  partsCost: int("partsCost").notNull().default(0),
+  approvalStatus: mysqlEnum("approvalStatus", ["غير مطلوب", "بانتظار الاعتماد", "معتمد", "مرفوض"]).notNull().default("غير مطلوب"),
+  approvedByUserId: int("approvedByUserId"),
+  approvedByName: varchar("approvedByName", { length: 160 }),
+  approvedAt: timestamp("approvedAt"),
+  approvalNotes: text("approvalNotes"),
+  warrantyUntil: varchar("warrantyUntil", { length: 32 }).notNull().default("—"),
+  closedAt: timestamp("closedAt"),
   receiptName: varchar("receiptName", { length: 255 }),
   receiptUrl: mediumtext("receiptUrl"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   archivedAt: timestamp("archivedAt"),
+});
+
+export const maintenanceEvents = mysqlTable("maintenance_events", {
+  id: int("id").autoincrement().primaryKey(),
+  maintenanceRequestId: int("maintenanceRequestId").notNull(),
+  eventType: varchar("eventType", { length: 60 }).notNull(),
+  fromStage: varchar("fromStage", { length: 80 }),
+  toStage: varchar("toStage", { length: 80 }),
+  details: text("details"),
+  actorUserId: int("actorUserId"),
+  actorName: varchar("actorName", { length: 160 }).notNull().default("—"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
 export const documents = mysqlTable("documents", {
@@ -368,6 +397,7 @@ export type Driver = typeof drivers.$inferSelect;
 export type InsertDriver = typeof drivers.$inferInsert;
 export type MaintenanceRequest = typeof maintenanceRequests.$inferSelect;
 export type InsertMaintenanceRequest = typeof maintenanceRequests.$inferInsert;
+export type MaintenanceEvent = typeof maintenanceEvents.$inferSelect;
 export type Document = typeof documents.$inferSelect;
 export type InsertDocument = typeof documents.$inferInsert;
 export type Client = typeof clients.$inferSelect;

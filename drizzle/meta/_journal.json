@@ -155,6 +155,20 @@
       "when": 1791017963435,
       "tag": "0021_archived_plate_reuse",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "5",
+      "when": 1791267466879,
+      "tag": "0022_maintenance_governance",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "5",
+      "when": 1791268318124,
+      "tag": "0023_maintenance_vehicle_status_restore",
+      "breakpoints": true
     }
   ]
 }

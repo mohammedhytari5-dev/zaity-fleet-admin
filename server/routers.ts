@@ -8,7 +8,8 @@ import { adminProcedure, permissionProcedure, protectedProcedure, publicProcedur
 import { ONE_YEAR_MS } from "@shared/const";
 import { sdk } from "./_core/sdk";
 import { documentModuleByType, resolveDocumentLink, type DocumentEntityType } from "./document-relations";
-import { archiveClaim, archiveClient, archiveContract, archiveDocument, archiveDriver, archiveMaintenanceRequest, archivePayment, archiveVehicleExpense, archiveVehicleRevenue, archiveProject, archiveSetting, deleteSetting, archiveVehicle, assignVehicleDriver, authenticateLocalUser, LastActiveAdminDemotionError, createLocalUser, createAuditLog, createClaim, createClient, createContract, createDocument, createDriver, createEmployee, updateEmployee, archiveEmployee, listEmployees, createMaintenanceRequest, createNotification, createPayment, createProject, createPayable, registerPayablePayment, updatePayable, updatePayableStatus, listPayables, getPayableReceipt, createRepresentative, createTask, createVehicle, createVehicleExpense, createVehicleRevenue, getVehicleFinancialProfile, getVehicleReceipt, listVehicleFinancialSummaries, updateVehicleExpense, listAuditLogs, listClaims, listClients, listContracts, listDocuments, listDrivers, listMaintenanceRequests, listNotifications, listPayments, listProjects, listRepresentatives, listSettings, listTasks, listUsers, listVehicles, getCompanyReport, markNotificationRead, updateClaim, updatePayment, updateSetting, updateClient, updateContract, updateContractStatus, updateProject, updateUserRole, updateUserAccess, updateDocument, updateDriver, updateMaintenanceRequest, updateTask, updateVehicle, upsertSetting, getDocument } from "./db";
+import { archiveClaim, archiveClient, archiveContract, archiveDocument, archiveDriver, archiveMaintenanceRequest, advanceMaintenanceRequest, decideMaintenanceApproval, listMaintenanceEvents, archivePayment, archiveVehicleExpense, archiveVehicleRevenue, archiveProject, archiveSetting, deleteSetting, archiveVehicle, assignVehicleDriver, authenticateLocalUser, LastActiveAdminDemotionError, createLocalUser, createAuditLog, createClaim, createClient, createContract, createDocument, createDriver, createEmployee, updateEmployee, archiveEmployee, listEmployees, createMaintenanceRequest, createNotification, createPayment, createProject, createPayable, registerPayablePayment, updatePayable, updatePayableStatus, listPayables, getPayableReceipt, createRepresentative, createTask, createVehicle, createVehicleExpense, createVehicleRevenue, getVehicleFinancialProfile, getVehicleReceipt, listVehicleFinancialSummaries, updateVehicleExpense, listAuditLogs, listClaims, listClients, listContracts, listDocuments, listDrivers, listMaintenanceRequests, listNotifications, listPayments, listProjects, listRepresentatives, listSettings, listTasks, listUsers, listVehicles, getCompanyReport, markNotificationRead, updateClaim, updatePayment, updateSetting, updateClient, updateContract, updateContractStatus, updateProject, updateUserRole, updateUserAccess, updateDocument, updateDriver, updateMaintenanceRequest, updateTask, updateVehicle, upsertSetting, getDocument } from "./db";
+import { maintenanceStages, type MaintenanceStage } from "../shared/maintenance-domain";
 
 function requireRecord<T>(record: T | null | undefined, entity: string): T {
   if (!record) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `قاعدة البيانات غير متصلة؛ تعذر حفظ ${entity}` });
@@ -88,15 +89,24 @@ const maintenanceInput = z.object({
   vehicle: z.string().min(2).max(80),
   vehicleId: z.number().int().positive().nullable().default(null),
   type: z.string().min(2).max(160),
+  priority: z.enum(["طارئ", "عاجل", "متوسط", "عادي"]).default("متوسط"),
+  reportedBy: z.string().max(160).default("—"),
   reason: z.string().max(500).default("—"),
+  diagnosis: z.string().max(4000).optional(),
   workDone: z.string().max(4000).optional(),
   parts: z.string().max(4000).optional(),
+  technician: z.string().max(160).default("—"),
+  workshop: z.string().max(200).default("—"),
   manager: z.string().max(160).default("—"),
   start: z.string().max(32).default("—"),
   due: z.string().max(32).default("—"),
   expectedReturn: z.string().max(32).default("—"),
   status: z.enum(["جديد", "جاري العمل", "بانتظار الفحص", "مكتمل", "متوقف"]).default("جديد"),
   cost: z.string().max(40).optional(),
+  estimatedCost: z.number().int().nonnegative().default(0),
+  laborCost: z.number().int().nonnegative().optional(),
+  partsCost: z.number().int().nonnegative().optional(),
+  warrantyUntil: z.string().max(32).default("—"),
   receiptName: z.string().max(255).optional(), receiptUrl: z.string().max(1200000).refine(isSafeFileReference, "مرجع ملف غير صالح").optional(),
 });
 const documentInput = z.object({
@@ -221,9 +231,12 @@ export const appRouter = router({
     archive: permissionProcedure("employees").input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archiveEmployee(input.id) })),
   }),
   maintenance: router({
-    list: permissionProcedure("maintenance").query(async ({ ctx }) => { const rows = await listMaintenanceRequests() ?? []; return hasModulePermission(ctx.user, "finance") ? rows.map(({ receiptUrl: _receiptUrl, ...row }) => row) : rows.map(({ cost: _cost, receiptName: _receiptName, receiptUrl: _receiptUrl, ...row }) => row); }),
-    create: permissionProcedure("maintenance").input(maintenanceInput).mutation(async ({ ctx, input }) => { if (input.vehicleId !== null) requireReferencePermission(ctx.user, "vehicles"); if (input.cost !== undefined || input.receiptUrl !== undefined) requireReferencePermission(ctx.user, "finance"); return requireRecord(await createMaintenanceRequest(input, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }), "طلب الصيانة"); }),
-    update: permissionProcedure("maintenance").input(z.object({ id: z.number().int().positive(), data: maintenanceInput.partial() })).mutation(async ({ ctx, input }) => { if (input.data.vehicleId !== undefined || input.data.status !== undefined) requireReferencePermission(ctx.user, "vehicles"); if (input.data.cost !== undefined || input.data.receiptUrl !== undefined) requireReferencePermission(ctx.user, "finance"); return requireRecord(await updateMaintenanceRequest(input.id, input.data, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }), "طلب الصيانة"); }),
+    list: permissionProcedure("maintenance").query(async ({ ctx }) => { const rows = await listMaintenanceRequests() ?? []; return hasModulePermission(ctx.user, "finance") ? rows.map(({ receiptUrl: _receiptUrl, ...row }) => row) : rows.map(({ cost: _cost, estimatedCost: _estimatedCost, laborCost: _laborCost, partsCost: _partsCost, receiptName: _receiptName, receiptUrl: _receiptUrl, ...row }) => row); }),
+    create: permissionProcedure("maintenance").input(maintenanceInput).mutation(async ({ ctx, input }) => { if (input.vehicleId !== null) requireReferencePermission(ctx.user, "vehicles"); if (input.cost !== undefined || input.laborCost !== undefined || input.partsCost !== undefined || input.receiptName !== undefined || input.receiptUrl !== undefined) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "المصروف الفعلي يسجل بعد اعتماد التكلفة" }); return requireRecord(await createMaintenanceRequest({ ...input, reportedBy: ctx.user.name || ctx.user.username || "—", workflowStage: "بلاغ", approvalStatus: "غير مطلوب" }, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }), "طلب الصيانة"); }),
+    update: permissionProcedure("maintenance").input(z.object({ id: z.number().int().positive(), data: maintenanceInput.omit({ status: true, reportedBy: true }).partial() })).mutation(async ({ ctx, input }) => { if (input.data.vehicleId !== undefined) requireReferencePermission(ctx.user, "vehicles"); if (input.data.cost !== undefined || input.data.laborCost !== undefined || input.data.partsCost !== undefined || input.data.receiptUrl !== undefined) requireReferencePermission(ctx.user, "finance"); const current = (await listMaintenanceRequests() ?? []).find(row => row.id === input.id); if (input.data.estimatedCost !== undefined && current?.workflowStage !== "تقدير تكلفة") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "لا يمكن تعديل التقدير إلا في مرحلة تقدير التكلفة" }); if (input.data.cost !== undefined || input.data.laborCost !== undefined || input.data.partsCost !== undefined || input.data.receiptUrl !== undefined) { if (current?.approvalStatus !== "معتمد" || !["تنفيذ", "فحص بعد الإصلاح"].includes(String(current.workflowStage))) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "يجب اعتماد التكلفة وأن يكون الطلب قيد التنفيذ قبل تسجيل المصروف الفعلي" }); } return requireRecord(await updateMaintenanceRequest(input.id, input.data, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }), "طلب الصيانة"); }),
+    advance: permissionProcedure("maintenance").input(z.object({ id: z.number().int().positive(), toStage: z.enum(maintenanceStages) })).mutation(async ({ ctx, input }) => { requireReferencePermission(ctx.user, "vehicles"); return requireRecord(await advanceMaintenanceRequest(input.id, input.toStage as MaintenanceStage, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }), "طلب الصيانة"); }),
+    decideApproval: permissionProcedure("finance").input(z.object({ id: z.number().int().positive(), approved: z.boolean(), notes: z.string().max(4000).optional() })).mutation(async ({ ctx, input }) => requireRecord(await decideMaintenanceApproval(input.id, input.approved, input.notes, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }), "قرار اعتماد الصيانة")),
+    history: permissionProcedure("maintenance").input(z.object({ id: z.number().int().positive() })).query(async ({ input }) => (await listMaintenanceEvents(input.id)) ?? []),
     archive: permissionProcedure("maintenance").input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => { requireReferencePermission(ctx.user, "vehicles"); return { success: await archiveMaintenanceRequest(input.id) }; }),
   }),
   documents: router({
