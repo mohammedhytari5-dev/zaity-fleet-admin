@@ -92,9 +92,9 @@ const maintenanceInput = z.object({
   priority: z.enum(["طارئ", "عاجل", "متوسط", "عادي"]).default("متوسط"),
   reportedBy: z.string().max(160).default("—"),
   reason: z.string().max(500).default("—"),
-  diagnosis: z.string().max(4000).optional(),
-  workDone: z.string().max(4000).optional(),
-  parts: z.string().max(4000).optional(),
+  diagnosis: z.string().max(4000).nullable().optional(),
+  workDone: z.string().max(4000).nullable().optional(),
+  parts: z.string().max(4000).nullable().optional(),
   technician: z.string().max(160).default("—"),
   workshop: z.string().max(200).default("—"),
   manager: z.string().max(160).default("—"),
@@ -107,7 +107,7 @@ const maintenanceInput = z.object({
   laborCost: z.number().int().nonnegative().optional(),
   partsCost: z.number().int().nonnegative().optional(),
   warrantyUntil: z.string().max(32).default("—"),
-  receiptName: z.string().max(255).optional(), receiptUrl: z.string().max(1200000).refine(isSafeFileReference, "مرجع ملف غير صالح").optional(),
+  receiptName: z.string().max(255).nullable().optional(), receiptUrl: z.string().max(1200000).refine(isSafeFileReference, "مرجع ملف غير صالح").nullable().optional(),
 });
 const documentInput = z.object({
   name: z.string().min(2).max(160),
