@@ -722,6 +722,7 @@ export async function advanceMaintenanceRequest(id: number, toStage: Maintenance
     await tx.execute(sql`SELECT id FROM maintenance_requests WHERE id = ${id} FOR UPDATE`);
     const current = (await tx.select().from(maintenanceRequests).where(and(eq(maintenanceRequests.id, id), isNull(maintenanceRequests.archivedAt))).limit(1))[0];
     if (!current) return null;
+    if (toStage === "مغلق" && current.approvalStatus === "معتمد" && parseRiyalAmount(current.cost) <= 0) throw new Error("أدخل التكلفة الفعلية قبل إغلاق طلب الصيانة");
     if (!canAdvanceMaintenance({ from: current.workflowStage as MaintenanceStage, to: toStage, approvalStatus: current.approvalStatus })) throw new Error("لا يمكن نقل الطلب إلى هذه المرحلة قبل استكمال المرحلة الحالية أو اعتماد التكلفة");
     const status = statusForMaintenanceStage(toStage);
     await tx.update(maintenanceRequests).set({ workflowStage: toStage, status, ...(toStage === "اعتماد" ? { approvalStatus: "بانتظار الاعتماد" as const } : {}), ...(toStage === "مغلق" ? { closedAt: new Date() } : {}) }).where(eq(maintenanceRequests.id, id));
