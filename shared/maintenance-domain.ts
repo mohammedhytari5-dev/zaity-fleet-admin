@@ -11,7 +11,8 @@ export function nextMaintenanceStages(stage: MaintenanceStage): MaintenanceStage
 
 export function canAdvanceMaintenance(input: { from: MaintenanceStage; to: MaintenanceStage; approvalStatus: MaintenanceApprovalStatus }): boolean {
   if (!transitions[input.from].includes(input.to)) return false;
-  if (input.from === "اعتماد" || input.from === "تقدير تكلفة") return false;
+  if (input.from === "اعتماد") return false;
+  if (input.to === "اعتماد") return input.from === "تقدير تكلفة";
   if (input.to === "تنفيذ" && input.from === "فحص بعد الإصلاح") return input.approvalStatus === "معتمد";
   if (input.to === "مغلق") return input.approvalStatus === "معتمد" || input.approvalStatus === "غير مطلوب";
   return true;
