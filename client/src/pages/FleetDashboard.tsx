@@ -925,7 +925,7 @@ export default function FleetDashboard() {
       delete payload.workflowStage;
       delete payload.approvalStatus;
       if (currentMaintenance?.approvalStatus !== "معتمد" || !["تنفيذ", "فحص بعد الإصلاح"].includes(String(currentMaintenance.workflowStage))) { delete payload.cost; delete payload.laborCost; delete payload.partsCost; delete payload.receiptName; delete payload.receiptUrl; }
-      if (!currentMaintenance || currentMaintenance.approvalStatus !== "بانتظار الاعتماد") { delete payload.estimatedCost; delete payload.quotedPartsCost; delete payload.quoteName; delete payload.quoteUrl; }
+      if (currentMaintenance && currentMaintenance.approvalStatus !== "بانتظار الاعتماد") { delete payload.estimatedCost; delete payload.quotedPartsCost; delete payload.quoteName; delete payload.quoteUrl; }
       payload.ref = String(payload.ref || `MT-${Date.now()}`);
       const onSuccess = (saved: Row) => { setMaintenance(prev => prev.some(item => item.id === saved.id) ? prev.map(item => item.id === saved.id ? saved as Maintenance : item) : [saved as Maintenance, ...prev]); utils.maintenance.list.invalidate(); setModal(null); toast.success("تم حفظ طلب الصيانة"); };
       if (maintenance.some(item => item.id === data.id)) maintenanceUpdate.mutate({ id: data.id, data: payload as any }, { onSuccess, onError: error => toast.error(`تعذر تعديل طلب الصيانة: ${error.message}`) });
