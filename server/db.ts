@@ -779,7 +779,12 @@ export async function updateMaintenanceRequest(id: number, input: Partial<Insert
     const current = (await tx.select().from(maintenanceRequests).where(and(eq(maintenanceRequests.id, id), isNull(maintenanceRequests.archivedAt))).limit(1))[0];
     if (!current) return null;
     if (["مغلق", "مرفوض"].includes(current.workflowStage)) throw new Error("لا يمكن تعديل طلب مغلق أو مرفوض؛ أنشئ طلبًا جديدًا عند الحاجة");
-    if ((input.estimatedCost !== undefined || input.quotedPartsCost !== undefined || input.quoteUrl !== undefined || input.quoteName !== undefined) && current.approvalStatus !== "بانتظار الاعتماد") throw new Error("يمكن تعديل عرض السعر قبل اعتماد المالية فقط");
+    const quoteChanged =
+      (input.estimatedCost !== undefined && Number(input.estimatedCost) !== Number(current.estimatedCost)) ||
+      (input.quotedPartsCost !== undefined && Number(input.quotedPartsCost) !== Number(current.quotedPartsCost)) ||
+      (input.quoteUrl !== undefined && input.quoteUrl !== current.quoteUrl) ||
+      (input.quoteName !== undefined && input.quoteName !== current.quoteName);
+    if (quoteChanged && current.approvalStatus !== "بانتظار الاعتماد") throw new Error("لا يمكن تغيير عرض السعر بعد اعتماد المالية");
     if ((input.cost !== undefined || input.laborCost !== undefined || input.partsCost !== undefined || input.receiptUrl !== undefined) && (current.approvalStatus !== "معتمد" || !["تنفيذ", "فحص بعد الإصلاح"].includes(current.workflowStage))) throw new Error("يجب اعتماد الطلب وبدء التنفيذ قبل تسجيل المصروف الفعلي");
     const targetVehicleId = input.vehicleId !== undefined ? input.vehicleId : current.vehicleId;
     const changes: Partial<InsertMaintenanceRequest> = { ...input };
