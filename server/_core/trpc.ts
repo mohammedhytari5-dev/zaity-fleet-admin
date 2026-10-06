@@ -5,6 +5,18 @@ import type { TrpcContext } from "./context";
 
 const t = initTRPC.context<TrpcContext>().create({
   transformer: superjson,
+  errorFormatter({ shape, error }) {
+    // Database driver errors can contain the complete SQL parameters, including
+    // base64 encoded attachments. Never return those details to API clients.
+    if (/Failed query:|\bparams:\s|\b(?:insert into|update\s+`|delete from)\b/i.test(error.message)) {
+      return {
+        ...shape,
+        message: "تعذر حفظ البيانات. تحقق من تحديث قاعدة البيانات ثم أعد المحاولة.",
+        data: { ...shape.data, stack: undefined },
+      };
+    }
+    return shape;
+  },
 });
 
 export const router = t.router;
