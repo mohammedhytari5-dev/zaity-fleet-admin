@@ -780,7 +780,7 @@ export async function updateMaintenanceRequest(id: number, input: Partial<Insert
     if (!current) return null;
     if (["مغلق", "مرفوض"].includes(current.workflowStage)) throw new Error("لا يمكن تعديل طلب مغلق أو مرفوض؛ أنشئ طلبًا جديدًا عند الحاجة");
     if ((input.estimatedCost !== undefined || input.quotedPartsCost !== undefined || input.quoteUrl !== undefined || input.quoteName !== undefined) && current.approvalStatus !== "بانتظار الاعتماد") throw new Error("يمكن تعديل عرض السعر قبل اعتماد المالية فقط");
-    if ((input.cost !== undefined || input.laborCost !== undefined || input.partsCost !== undefined || input.receiptUrl !== undefined) && (current.approvalStatus !== "معتمد" || current.workflowStage !== "تنفيذ")) throw new Error("يجب اعتماد الطلب وبدء التنفيذ قبل تسجيل المصروف الفعلي");
+    if ((input.cost !== undefined || input.laborCost !== undefined || input.partsCost !== undefined || input.receiptUrl !== undefined) && (current.approvalStatus !== "معتمد" || !["تنفيذ", "فحص بعد الإصلاح"].includes(current.workflowStage))) throw new Error("يجب اعتماد الطلب وبدء التنفيذ قبل تسجيل المصروف الفعلي");
     const targetVehicleId = input.vehicleId !== undefined ? input.vehicleId : current.vehicleId;
     const changes: Partial<InsertMaintenanceRequest> = { ...input };
     if (targetVehicleId && targetVehicleId !== current.vehicleId) {
