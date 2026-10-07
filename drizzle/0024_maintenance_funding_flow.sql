@@ -12,6 +12,7 @@ ALTER TABLE `maintenance_requests`
   ADD `fundingIssuedAt` timestamp NULL,
   ADD `fundingIssuedByUserId` int,
   ADD `fundingIssuedByName` varchar(160);
+--> statement-breakpoint
 
 UPDATE `maintenance_requests`
 SET `workflowStage` = 'اعتماد', `approvalStatus` = 'بانتظار الاعتماد'
