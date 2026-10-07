@@ -4,7 +4,10 @@ export type MaintenanceApprovalStatus = "غير مطلوب" | "بانتظار ا
 
 const transitions: Record<MaintenanceStage, MaintenanceStage[]> = {
   "بلاغ": [], "فحص": [], "تشخيص": [], "تقدير تكلفة": [], "اعتماد": [],
-  "تنفيذ": ["مغلق"], "فحص بعد الإصلاح": ["مغلق"], "مغلق": [], "مرفوض": [],
+  // The finance approval starts execution. Inspection is optional so the
+  // everyday purchase/invoice flow can close directly, while operations can
+  // still record a post-repair inspection when the vehicle requires it.
+  "تنفيذ": ["فحص بعد الإصلاح", "مغلق"], "فحص بعد الإصلاح": ["مغلق"], "مغلق": [], "مرفوض": [],
 };
 
 export function nextMaintenanceStages(stage: MaintenanceStage): MaintenanceStage[] { return transitions[stage]; }
