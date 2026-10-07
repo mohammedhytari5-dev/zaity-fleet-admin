@@ -14,6 +14,7 @@ import { archiveClaim, archiveClient, archiveContract, archiveDocument, archiveD
 import { maintenanceStages, type MaintenanceStage } from "../shared/maintenance-domain";
 import { maintenanceEventForViewer, maintenanceRecordForViewer } from "./maintenance-access";
 import { scopeCompanyReport } from "./report-access";
+import { isValidReportPeriod } from "./report-period";
 
 function requireRecord<T>(record: T | null | undefined, entity: string): T {
   if (!record) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `قاعدة البيانات غير متصلة؛ تعذر حفظ ${entity}` });
@@ -296,7 +297,7 @@ export const appRouter = router({
   }),
   reports: router({
     summary: permissionProcedure("reports").input(z.object({ from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) })).query(async ({ ctx, input }) => {
-      if (input.from > input.to) throw new TRPCError({ code: "BAD_REQUEST", message: "تاريخ البداية يجب أن يسبق تاريخ النهاية" });
+      if (!isValidReportPeriod(input.from, input.to)) throw new TRPCError({ code: "BAD_REQUEST", message: "أدخل نطاقًا صحيحًا؛ يجب أن يكون التاريخان صالحين والبداية قبل النهاية أو مساوية لها" });
       const report = requireRecord(await getCompanyReport(input.from, input.to), "التقرير");
       const sourceModules = ["finance", "vehicles", "maintenance", "projects", "documents", "employees", "drivers"];
       return scopeCompanyReport(report, sourceModules.filter(module => hasModulePermission(ctx.user, module)));

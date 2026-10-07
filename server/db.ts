@@ -1272,7 +1272,7 @@ export async function registerPayablePayment(input: InsertPayablePayment): Promi
 export async function getCompanyReport(from: string, to: string) {
   const db = await getDb();
   if (!db) return null;
-  const [vehicleRows, contractRows, claimRows, incomingRows, payableRows, outgoingRows, maintenanceRows, projectRows, documentRows, employeeRows, driverRows, vehicleExpenseRows, vehicleRevenueRows, clientRows, contractItemRows] = await Promise.all([
+  const [vehicleRows, contractRows, claimRows, incomingRows, payableRows, outgoingRows, maintenanceRows, projectRows, documentRows, employeeRows, driverRows, vehicleExpenseRows, vehicleRevenueRows, clientRows] = await Promise.all([
     db.select().from(vehicles).where(isNull(vehicles.archivedAt)),
     db.select().from(contracts).where(isNull(contracts.archivedAt)),
     db.select().from(claims).where(isNull(claims.archivedAt)),
@@ -1287,7 +1287,6 @@ export async function getCompanyReport(from: string, to: string) {
     db.select().from(vehicleExpenses).where(isNull(vehicleExpenses.archivedAt)),
     db.select().from(vehicleRevenues).where(isNull(vehicleRevenues.archivedAt)),
     db.select().from(clients).where(isNull(clients.archivedAt)),
-    db.select().from(contractItems),
   ]);
   const inRange = (value: unknown) => { const date = value instanceof Date ? value.toISOString().slice(0, 10) : String(value ?? "").slice(0, 10); return date >= from && date <= to; };
   const periodClaims = claimRows.filter(row => inRange(row.submittedAt));
