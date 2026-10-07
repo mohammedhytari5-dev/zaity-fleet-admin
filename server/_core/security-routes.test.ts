@@ -32,6 +32,14 @@ describe("security-sensitive HTTP routes", () => {
     expect(registeredPaths(app)).toContain("/api/oauth/mock");
   });
 
+  it.each(["staging", "preview", undefined])("does not register mock OAuth for NODE_ENV=%s", nodeEnv => {
+    if (nodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = nodeEnv;
+    const app = express();
+    registerOAuthRoutes(app);
+    expect(registeredPaths(app)).not.toContain("/api/oauth/mock");
+  });
+
   it("requires authentication before serving stored files", async () => {
     const app = express();
     registerStorageProxy(app);

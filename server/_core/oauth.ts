@@ -11,9 +11,10 @@ function getQueryParam(req: Request, key: string): string | undefined {
 }
 
 export function registerOAuthRoutes(app: Express) {
-  // This route creates a privileged synthetic account and must never exist in
-  // the production route table, even when an environment is misconfigured.
-  if (process.env.NODE_ENV !== "production") {
+  // This route creates a privileged synthetic account. Keep it available only
+  // for explicit local development and tests; unknown deployment environments
+  // must fail closed and never register it.
+  if (process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test") {
     app.get("/api/oauth/mock", async (req: Request, res: Response) => {
       const openId = "mock-admin";
       await db.upsertUser({
