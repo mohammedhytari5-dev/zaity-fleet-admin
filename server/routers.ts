@@ -8,6 +8,7 @@ import { adminProcedure, permissionProcedure, protectedProcedure, publicProcedur
 import { ONE_YEAR_MS } from "@shared/const";
 import { sdk } from "./_core/sdk";
 import { documentModuleByType, resolveDocumentLink, type DocumentEntityType } from "./document-relations";
+import { documentsVisibleTo } from "./document-access";
 import { archiveClaim, archiveClient, archiveContract, archiveDocument, archiveDriver, archiveMaintenanceRequest, advanceMaintenanceRequest, decideMaintenanceApproval, settleMaintenanceAdvance, listMaintenanceEvents, archivePayment, archiveVehicleExpense, archiveVehicleRevenue, archiveProject, archiveSetting, deleteSetting, archiveVehicle, assignVehicleDriver, authenticateLocalUser, LastActiveAdminDemotionError, createLocalUser, createAuditLog, createClaim, createClient, createContract, createDocument, createDriver, createEmployee, updateEmployee, archiveEmployee, listEmployees, createMaintenanceRequest, createNotification, createPayment, createProject, createPayable, registerPayablePayment, updatePayable, updatePayableStatus, listPayables, getPayableReceipt, createRepresentative, createTask, createVehicle, createVehicleExpense, createVehicleRevenue, getVehicleFinancialProfile, getVehicleReceipt, listVehicleFinancialSummaries, updateVehicleExpense, listAuditLogs, listClaims, listClients, listContracts, listDocuments, listDrivers, listMaintenanceRequests, listNotifications, listPayments, listProjects, listRepresentatives, listSettings, listTasks, listUsers, listVehicles, getCompanyReport, markNotificationRead, updateClaim, updatePayment, updateSetting, updateClient, updateContract, updateContractStatus, updateProject, updateUserRole, updateUserAccess, updateDocument, updateDriver, updateMaintenanceRequest, updateTask, updateVehicle, upsertSetting, getDocument } from "./db";
 import { maintenanceStages, type MaintenanceStage } from "../shared/maintenance-domain";
 import { maintenanceEventForViewer, maintenanceRecordForViewer } from "./maintenance-access";
@@ -260,7 +261,7 @@ export const appRouter = router({
     archive: permissionProcedure("maintenance").input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => { requireReferencePermission(ctx.user, "vehicles"); return { success: await archiveMaintenanceRequest(input.id) }; }),
   }),
   documents: router({
-    list: permissionProcedure("documents").query(async () => (await listDocuments()) ?? []),
+    list: permissionProcedure("documents").query(async ({ ctx }) => documentsVisibleTo((await listDocuments()) ?? [], module => hasModulePermission(ctx.user, module))),
     create: permissionProcedure("documents").input(documentInput).mutation(async ({ ctx, input }) => { if (input.entityId) requireReferencePermission(ctx.user, documentModuleByType[input.entityType]); return requireRecord(await createDocument(input), "المستند"); }),
     update: permissionProcedure("documents").input(z.object({ id: z.number().int().positive(), data: documentInput.partial().refine(value => value.entityId === undefined || value.entityType !== undefined, { message: "حدد نوع الكيان عند تغيير ارتباط المستند" }) })).mutation(async ({ ctx, input }) => {
       const current = requireRecord(await getDocument(input.id), "المستند");
