@@ -42,6 +42,8 @@ export function useAuth(options?: UseAuthOptions) {
         sessionStorage.removeItem("manus-cookie");
         sessionStorage.removeItem("alhaitari-session-token");
       } catch {}
+      // Remove the legacy cached profile. The authenticated user is fetched
+      // from the server and does not need to be mirrored into localStorage.
       try {
         localStorage.removeItem("manus-runtime-user-info");
       } catch {}
@@ -52,10 +54,6 @@ export function useAuth(options?: UseAuthOptions) {
   }, [logoutMutation, redirectPath, utils]);
 
   const state = useMemo(() => {
-    localStorage.setItem(
-      "manus-runtime-user-info",
-      JSON.stringify(meQuery.data)
-    );
     return {
       user: meQuery.data ?? null,
       loading: meQuery.isLoading || logoutMutation.isPending,
