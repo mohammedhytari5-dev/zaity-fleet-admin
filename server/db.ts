@@ -1327,6 +1327,14 @@ export async function getCompanyReport(from: string, to: string) {
   const periodContracts = contractRows.filter(row => inRange(row.startDate));
   const periodIncoming = incomingRows.filter(row => inRange(row.paidAt));
   const periodOutgoing = outgoingRows.filter(row => inRange(row.paidAt));
+  const incomingByClaimInPeriod = new Map<number, number>();
+  const incomingByContractInPeriod = new Map<number, number>();
+  const outgoingByPayableInPeriod = new Map<number, number>();
+  for (const payment of periodIncoming) {
+    if (payment.claimId !== null) incomingByClaimInPeriod.set(payment.claimId, (incomingByClaimInPeriod.get(payment.claimId) ?? 0) + payment.amount);
+    if (payment.contractId !== null) incomingByContractInPeriod.set(payment.contractId, (incomingByContractInPeriod.get(payment.contractId) ?? 0) + payment.amount);
+  }
+  for (const payment of periodOutgoing) outgoingByPayableInPeriod.set(payment.payableId, (outgoingByPayableInPeriod.get(payment.payableId) ?? 0) + payment.amount);
   const periodMaintenance = maintenanceRows.filter(row => inRange(row.start));
   const periodProjects = projectRows.filter(row => inRange(row.startDate));
   const periodDocuments = documentRows.filter(row => inRange(row.expiry));
@@ -1413,9 +1421,9 @@ export async function getCompanyReport(from: string, to: string) {
       availableDrivers: driverRows.filter(row => row.status === "متاح").length,
     },
     details: {
-      claims: periodClaims.map(row => ({ id: row.id, ref: row.ref, client: row.client, status: row.status, amount: row.amount, paid: row.paid, due: row.due })),
-      contracts: periodContracts.map(row => ({ id: row.id, ref: row.ref, client: row.client, status: row.status, total: row.total, collected: row.collected, startDate: row.startDate, expiry: row.expiry })),
-      payables: activePayables.map(row => ({ id: row.id, ref: row.ref, supplier: row.supplier, status: row.status, amount: row.amount, paid: row.paid, remaining: Math.max(0, row.amount - row.paid), dueDate: row.dueDate })),
+      claims: periodClaims.map(row => ({ id: row.id, ref: row.ref, client: row.client, status: row.status, amount: row.amount, paidInPeriod: incomingByClaimInPeriod.get(row.id) ?? 0, outstandingNow: Math.max(0, row.amount - row.paid), due: row.due })),
+      contracts: periodContracts.map(row => ({ id: row.id, ref: row.ref, client: row.client, status: row.status, total: row.total, collectedInPeriod: incomingByContractInPeriod.get(row.id) ?? 0, startDate: row.startDate, expiry: row.expiry })),
+      payables: activePayables.filter(row => inRange(row.issueDate)).map(row => ({ id: row.id, ref: row.ref, supplier: row.supplier, status: row.status, amount: row.amount, paidInPeriod: outgoingByPayableInPeriod.get(row.id) ?? 0, remainingNow: Math.max(0, row.amount - row.paid), issueDate: row.issueDate, dueDate: row.dueDate })),
       maintenance: periodMaintenance.map(row => ({ id: row.id, ref: row.ref, vehicle: row.vehicle, status: row.status, cost: row.cost, start: row.start, expectedReturn: row.expectedReturn })),
       vehicleProfitability,
       projectProfitability,
