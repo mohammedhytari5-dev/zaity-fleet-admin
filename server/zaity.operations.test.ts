@@ -207,6 +207,12 @@ describe("Zaity operations", () => {
     await expect(appRouter.createCaller(ctx).payables.create({ ref: "AP-TEST", supplier: "ورشة اختبار", description: "فاتورة إطارات", amount: 1000, issueDate: "2026-10-03", dueDate: "2026-10-20", vehicleId: 1, vehicleCategory: "إطارات" })).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
+  it("requires maintenance permission to link an accounts-payable invoice to a maintenance request", async () => {
+    const vehicleFinanceUser = { ...adminUser, role: "user" as const, permissions: JSON.stringify(["payables", "vehicles", "finance"]) };
+    const caller = appRouter.createCaller({ user: vehicleFinanceUser, req: { protocol: "https", headers: {} } as TrpcContext["req"], res: {} as TrpcContext["res"] });
+    await expect(caller.payables.create({ ref: "AP-MT-PERM", supplier: "ورشة اختبار", description: "فاتورة صيانة", amount: 1000, issueDate: "2026-10-03", dueDate: "2026-10-20", vehicleId: 1, maintenanceRequestId: 1, vehicleCategory: "صيانة" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
   it("does not allow maintenance-only users to enter invoice amounts or financial attachments", async () => {
     const ctx: TrpcContext = { user: { ...adminUser, role: "user" as const, permissions: JSON.stringify(["maintenance"]) }, req: { protocol: "https", headers: {} } as TrpcContext["req"], res: {} as TrpcContext["res"] };
     await expect(appRouter.createCaller(ctx).maintenance.create({ ref: "MT-TEST", vehicleId: 1, vehicle: "1234", type: "إصلاح", manager: "اختبار", start: "2026-10-03", due: "2026-10-03", status: "جديد", cost: "500 ر.س" })).rejects.toMatchObject({ code: "FORBIDDEN" });

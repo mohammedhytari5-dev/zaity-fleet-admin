@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { int, mediumtext, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
+import { index, int, mediumtext, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
@@ -324,13 +324,14 @@ export const payables = mysqlTable("payables", {
   status: mysqlEnum("status", ["جديدة", "معتمدة", "مدفوعة جزئيًا", "مدفوعة", "ملغاة"]).notNull().default("جديدة"),
   notes: text("notes"),
   vehicleId: int("vehicleId"),
+  maintenanceRequestId: int("maintenanceRequestId"),
   vehicleCategory: mysqlEnum("vehicleCategory", ["صيانة", "قطع غيار", "زيوت وفلاتر", "إطارات", "إصلاحات وأعطال", "تأمين", "فحص واستمارة", "مخالفات", "أخرى"]),
   receiptName: varchar("receiptName", { length: 255 }),
   receiptUrl: mediumtext("receiptUrl"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   archivedAt: timestamp("archivedAt"),
-});
+}, (table) => [index("payables_maintenance_request_idx").on(table.maintenanceRequestId)]);
 
 export const payablePayments = mysqlTable("payable_payments", {
   id: int("id").autoincrement().primaryKey(),

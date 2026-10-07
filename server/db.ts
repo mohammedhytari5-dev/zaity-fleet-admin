@@ -11,6 +11,7 @@ import { ENV } from './_core/env';
 import { summarizeMaintenanceItems } from "./vehicle-maintenance-summary";
 import { canUpdateClaim, validatePaymentLinkConsistency } from "./finance-domain";
 import { isPayableExpensePosted } from "./payable-expense-policy";
+import { maintenanceInvoiceTotal } from "./maintenance-invoice-total";
 import { isProtectedLastAdminDemotion } from "./user-role-domain";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -150,7 +151,7 @@ export async function getVehicleFinancialProfile(vehicleId: number) {
     db.select().from(payments).where(isNull(payments.archivedAt)).orderBy(desc(payments.paidAt)),
     db.select().from(contracts), db.select().from(contractItems), db.select().from(claims), db.select().from(projects), db.select().from(clients),
     db.select({ paymentId: vehicleRevenues.paymentId, amount: vehicleRevenues.amount }).from(vehicleRevenues).where(isNull(vehicleRevenues.archivedAt)),
-    db.select({ id: payables.id, receiptUrl: payables.receiptUrl, status: payables.status }).from(payables).where(and(eq(payables.vehicleId, vehicleId), isNull(payables.archivedAt))),
+    db.select({ id: payables.id, receiptUrl: payables.receiptUrl, status: payables.status, maintenanceRequestId: payables.maintenanceRequestId }).from(payables).where(and(eq(payables.vehicleId, vehicleId), isNull(payables.archivedAt))),
     db.select({ id: maintenanceRequests.id, type: maintenanceRequests.type }).from(maintenanceRequests).where(eq(maintenanceRequests.vehicleId, vehicleId)),
   ]);
   const paymentById = new Map(paymentRows.map(row => [row.id, row]));
@@ -183,12 +184,13 @@ export async function getVehicleFinancialProfile(vehicleId: number) {
   });
   const allRevenueDetails = [...revenueDetails, ...autoLinkedPayments].sort((a, b) => String(b.paidAt || "").localeCompare(String(a.paidAt || "")));
   const payableReceipts = new Set(payableRows.filter(row => Boolean(row.receiptUrl)).map(row => row.id));
+  const payableById = new Map(payableRows.map(row => [row.id, row]));
   const maintenanceTypeByRequestId = new Map(maintenanceRows.map(row => [row.id, row.type]));
   const postedPayableIds = new Set(payableRows.filter(row => isPayableExpensePosted(row.status)).map(row => row.id));
   const postedExpenses = expenses.filter(expense => expense.payableId === null || postedPayableIds.has(expense.payableId));
   const expensesWithMaintenance = postedExpenses.map(expense => ({
     ...expense,
-    maintenanceItem: expense.maintenanceRequestId ? maintenanceTypeByRequestId.get(expense.maintenanceRequestId) ?? null : null,
+    maintenanceItem: expense.maintenanceRequestId ? maintenanceTypeByRequestId.get(expense.maintenanceRequestId) ?? null : expense.payableId ? maintenanceTypeByRequestId.get(payableById.get(expense.payableId)?.maintenanceRequestId ?? -1) ?? null : null,
   }));
   const safeExpenses = expensesWithMaintenance.map(({ receiptUrl, ...expense }) => ({ ...expense, hasReceipt: Boolean(receiptUrl) || Boolean(expense.payableId && payableReceipts.has(expense.payableId)) }));
   const maintenanceItemTotals = summarizeMaintenanceItems(expensesWithMaintenance);
@@ -669,10 +671,17 @@ function parseRiyalAmount(value: unknown) {
 }
 async function syncMaintenanceExpense(tx: DbExecutor, request: MaintenanceRequest, actor: LedgerActor = {}) {
   if (!request.vehicleId) return;
-  const amount = parseRiyalAmount(request.cost);
+  const linkedPayables = await tx.select({ amount: payables.amount, status: payables.status }).from(payables).where(and(eq(payables.maintenanceRequestId, request.id), isNull(payables.archivedAt)));
+  const linkedInvoiceTotal = maintenanceInvoiceTotal(linkedPayables);
+  const amount = linkedPayables.length ? linkedInvoiceTotal : parseRiyalAmount(request.cost);
   const existing = (await tx.select().from(vehicleExpenses).where(eq(vehicleExpenses.maintenanceRequestId, request.id)).limit(1))[0];
   const vehicle = (await tx.select().from(vehicles).where(eq(vehicles.id, request.vehicleId)).limit(1))[0];
   if (!vehicle) return;
+  if (linkedPayables.length) {
+    await tx.update(maintenanceRequests).set({ cost: `${amount} SAR` }).where(eq(maintenanceRequests.id, request.id));
+    if (existing && !existing.archivedAt) await tx.update(vehicleExpenses).set({ archivedAt: new Date(), archivedByUserId: actor.id ?? null, archivedByName: actor.name || "—" }).where(eq(vehicleExpenses.id, existing.id));
+    return;
+  }
   const reason = [request.type, request.reason !== "—" ? request.reason : ""].filter(Boolean).join(" · ").slice(0, 300) || "تكلفة أمر صيانة";
   const sameVehicle = existing?.vehicleId === request.vehicleId;
   const snapshot = {
@@ -791,6 +800,9 @@ export async function updateMaintenanceRequest(id: number, input: Partial<Insert
       (input.quoteUrl !== undefined && input.quoteUrl !== current.quoteUrl) ||
       (input.quoteName !== undefined && input.quoteName !== current.quoteName);
     if (quoteChanged && current.approvalStatus !== "بانتظار الاعتماد") throw new Error("لا يمكن تغيير عرض السعر بعد اعتماد المالية");
+    const linkedInvoices = await tx.select({ id: payables.id }).from(payables).where(and(eq(payables.maintenanceRequestId, id), isNull(payables.archivedAt)));
+    if (linkedInvoices.length && (input.cost !== undefined || input.laborCost !== undefined || input.partsCost !== undefined || input.receiptName !== undefined || input.receiptUrl !== undefined)) throw new Error("التكلفة والفواتير الفعلية لهذا الطلب تُحسب من فواتير المورد المرتبطة به");
+    if (linkedInvoices.length && input.vehicleId !== undefined && input.vehicleId !== current.vehicleId) throw new Error("لا يمكن تغيير مركبة طلب الصيانة بعد ربط فواتير مورد به");
     if ((input.cost !== undefined || input.laborCost !== undefined || input.partsCost !== undefined || input.receiptUrl !== undefined) && (current.approvalStatus !== "معتمد" || !["تنفيذ", "فحص بعد الإصلاح"].includes(current.workflowStage))) throw new Error("يجب اعتماد الطلب وبدء التنفيذ قبل تسجيل المصروف الفعلي");
     const targetVehicleId = input.vehicleId !== undefined ? input.vehicleId : current.vehicleId;
     const changes: Partial<InsertMaintenanceRequest> = { ...input };
@@ -806,7 +818,7 @@ export async function updateMaintenanceRequest(id: number, input: Partial<Insert
     if (targetVehicleId) await refreshVehicleMaintenanceStatus(tx, targetVehicleId);
     const updated = (await tx.select().from(maintenanceRequests).where(eq(maintenanceRequests.id, id)).limit(1))[0] ?? null;
     if (updated) await syncMaintenanceExpense(tx, updated, actor);
-    return updated;
+    return updated ? (await tx.select().from(maintenanceRequests).where(eq(maintenanceRequests.id, id)).limit(1))[0] ?? null : null;
   });
 }
 
@@ -816,6 +828,8 @@ export async function archiveMaintenanceRequest(id: number): Promise<boolean> {
   return db.transaction(async tx => {
     const current = (await tx.select().from(maintenanceRequests).where(and(eq(maintenanceRequests.id, id), isNull(maintenanceRequests.archivedAt))).limit(1))[0];
     if (!current) return false;
+    const linkedInvoices = await tx.select({ id: payables.id }).from(payables).where(and(eq(payables.maintenanceRequestId, id), isNull(payables.archivedAt)));
+    if (linkedInvoices.length) throw new Error("لا يمكن أرشفة طلب صيانة مرتبط بفواتير؛ ألغ الفواتير أو احتفظ بالطلب كسجل مالي");
     await tx.update(maintenanceRequests).set({ archivedAt: new Date() }).where(eq(maintenanceRequests.id, id));
     if (current.vehicleId) await refreshVehicleMaintenanceStatus(tx, current.vehicleId);
     return true;
@@ -1151,6 +1165,23 @@ function isVehiclePurchasePayable(payable: Pick<Payable, "description">) {
   return /(?:شراء|قيمة شراء).*(?:باص|مركبة|سيارة)|(?:باص|مركبة|سيارة).*شراء/.test(String(payable.description || ""));
 }
 
+async function validateMaintenancePayableLink(tx: DbExecutor, input: { maintenanceRequestId?: number | null; vehicleId?: number | null; vehicleCategory?: string | null; description?: string }, current?: Payable) {
+  const requestId = input.maintenanceRequestId ?? null;
+  if (!requestId) return;
+  if (current && current.maintenanceRequestId !== requestId && (current.maintenanceRequestId || isPayableExpensePosted(current.status))) throw new Error("لا يمكن تغيير ربط فاتورة موجودة بطلب صيانة آخر");
+  const request = (await tx.select().from(maintenanceRequests).where(and(eq(maintenanceRequests.id, requestId), isNull(maintenanceRequests.archivedAt))).limit(1))[0];
+  if (!request) throw new Error("طلب الصيانة المرتبط غير موجود أو مؤرشف");
+  if (!input.vehicleId || request.vehicleId !== input.vehicleId) throw new Error("المركبة في الفاتورة لا تطابق مركبة طلب الصيانة");
+  if (input.vehicleCategory !== "صيانة" || (input.description && isVehiclePurchasePayable({ description: input.description }))) throw new Error("فاتورة طلب الصيانة يجب أن تكون من فئة صيانة وليست فاتورة شراء مركبة");
+  if (request.approvalStatus !== "معتمد" || !["تنفيذ", "فحص بعد الإصلاح"].includes(request.workflowStage)) throw new Error("يمكن ربط الفاتورة بطلب صيانة معتمد وقيد التنفيذ أو الفحص فقط");
+}
+
+async function syncLinkedMaintenanceRequest(tx: DbExecutor, requestId: number | null | undefined, actor: LedgerActor) {
+  if (!requestId) return;
+  const request = (await tx.select().from(maintenanceRequests).where(and(eq(maintenanceRequests.id, requestId), isNull(maintenanceRequests.archivedAt))).limit(1))[0];
+  if (request) await syncMaintenanceExpense(tx, request, actor);
+}
+
 async function syncPayableVehicleExpense(tx: DbExecutor, payable: Payable, actor: LedgerActor = {}) {
   const existing = (await tx.select().from(vehicleExpenses).where(eq(vehicleExpenses.payableId, payable.id)).limit(1))[0];
   if (!isPayableExpensePosted(payable.status) || isVehiclePurchasePayable(payable) || !payable.vehicleId || !payable.vehicleCategory) {
@@ -1168,10 +1199,12 @@ export async function createPayable(input: InsertPayable, actor: LedgerActor = {
   const db = await getDb();
   if (!db) return null;
   return db.transaction(async tx => {
+    await validateMaintenancePayableLink(tx, input);
     const result = await tx.insert(payables).values({ ...input, paid: 0, status: "جديدة" });
     const id = Number(result[0].insertId);
     const payable = (await tx.select().from(payables).where(eq(payables.id, id)).limit(1))[0] ?? null;
     if (payable?.vehicleId) await syncPayableVehicleExpense(tx, payable, actor);
+    await syncLinkedMaintenanceRequest(tx, payable?.maintenanceRequestId, actor);
     return payable;
   });
 }
@@ -1185,9 +1218,15 @@ export async function updatePayable(id: number, input: Partial<InsertPayable>, a
     const current = (await tx.select().from(payables).where(and(eq(payables.id, id), isNull(payables.archivedAt))).limit(1))[0];
     if (!current || Number(input.amount ?? current.amount) < current.paid) return null;
     if (current.vehicleId && current.paid > 0 && (input.vehicleId !== undefined && input.vehicleId !== current.vehicleId || input.vehicleCategory !== undefined && input.vehicleCategory !== current.vehicleCategory)) throw new Error("لا يمكن نقل فاتورة باص أو تغيير فئتها بعد تسجيل دفعة عليها");
+    const nextVehicleId = input.vehicleId !== undefined ? input.vehicleId : current.vehicleId;
+    const nextMaintenanceRequestId = input.maintenanceRequestId !== undefined ? input.maintenanceRequestId : current.maintenanceRequestId;
+    await validateMaintenancePayableLink(tx, { vehicleId: nextVehicleId, maintenanceRequestId: nextMaintenanceRequestId, vehicleCategory: input.vehicleCategory ?? current.vehicleCategory, description: input.description ?? current.description }, current);
+    if (current.maintenanceRequestId && current.maintenanceRequestId !== nextMaintenanceRequestId) throw new Error("لا يمكن فك فاتورة مورد مرتبطة بطلب صيانة؛ ألغ الفاتورة واترك الربط التاريخي محفوظًا");
     await tx.update(payables).set(input).where(eq(payables.id, id));
     const updated = (await tx.select().from(payables).where(eq(payables.id, id)).limit(1))[0] ?? null;
     if (updated && (current.vehicleId || updated.vehicleId)) await syncPayableVehicleExpense(tx, updated, actor);
+    await syncLinkedMaintenanceRequest(tx, current.maintenanceRequestId, actor);
+    if (updated?.maintenanceRequestId !== current.maintenanceRequestId) await syncLinkedMaintenanceRequest(tx, updated?.maintenanceRequestId, actor);
     return updated;
   });
 }
@@ -1206,6 +1245,7 @@ export async function updatePayableStatus(id: number, status: Payable["status"],
     await tx.update(payables).set({ status }).where(eq(payables.id, id));
     const updated = (await tx.select().from(payables).where(eq(payables.id, id)).limit(1))[0] ?? null;
     if (updated?.vehicleId) await syncPayableVehicleExpense(tx, updated, actor);
+    await syncLinkedMaintenanceRequest(tx, updated?.maintenanceRequestId, actor);
     return updated;
   });
 }
