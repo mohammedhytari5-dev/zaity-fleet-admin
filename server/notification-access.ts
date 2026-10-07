@@ -17,6 +17,10 @@ export function notificationModule(record: NotificationRecord): string | null {
   return record.entityType ? notificationModuleByEntityType[record.entityType] ?? "unknown" : "unknown";
 }
 
+export function notificationReadAtForUser<T>(legacyReadAt: T | null | undefined, userReadAt: T | null | undefined): T | null {
+  return userReadAt ?? legacyReadAt ?? null;
+}
+
 export function notificationsVisibleTo<T extends NotificationRecord>(
   records: T[],
   hasPermission: (permission: string) => boolean,

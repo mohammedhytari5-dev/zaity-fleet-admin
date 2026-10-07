@@ -3,7 +3,7 @@ import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { drizzle } from "drizzle-orm/mysql2";
 import { createPool } from "mysql2";
 import { getMysqlConnectionOptions } from "./db-connection";
-import { AuditLog, Claim, Client, Contract, ContractItem, Document, Driver, Employee, InsertEmployee, InsertClaim, InsertClient, InsertContract, InsertContractItem, InsertDocument, InsertDriver, InsertMaintenanceRequest, InsertUser, InsertVehicle, InsertVehicleExpense, VehicleExpense, InsertVehicleRevenue, VehicleRevenue, MaintenanceRequest, User, Vehicle, auditLogs, claims, clientRepresentatives, clients, contractItems, contracts, documents, drivers, employees, maintenanceEvents, maintenanceRequests, notifications, payments, vehicleExpenses, vehicleRevenues, settingCatalog, tasks, users, vehicles } from "../drizzle/schema";
+import { AuditLog, Claim, Client, Contract, ContractItem, Document, Driver, Employee, InsertEmployee, InsertClaim, InsertClient, InsertContract, InsertContractItem, InsertDocument, InsertDriver, InsertMaintenanceRequest, InsertUser, InsertVehicle, InsertVehicleExpense, VehicleExpense, InsertVehicleRevenue, VehicleRevenue, MaintenanceRequest, User, Vehicle, auditLogs, claims, clientRepresentatives, clients, contractItems, contracts, documents, drivers, employees, maintenanceEvents, maintenanceRequests, notifications, notificationReads, payments, vehicleExpenses, vehicleRevenues, settingCatalog, tasks, users, vehicles } from "../drizzle/schema";
 import { canAdvanceMaintenance, statusForMaintenanceStage, type MaintenanceStage } from "../shared/maintenance-domain";
 import { InsertProject, Project, projects } from "../drizzle/schema";
 import { InsertPayable, Payable, PayablePayment, InsertPayablePayment, payables, payablePayments } from "../drizzle/schema";
@@ -13,6 +13,7 @@ import { canUpdateClaim, validatePaymentLinkConsistency } from "./finance-domain
 import { isPayableExpensePosted } from "./payable-expense-policy";
 import { maintenanceInvoiceTotal } from "./maintenance-invoice-total";
 import { isProtectedLastAdminDemotion } from "./user-role-domain";
+import { notificationReadAtForUser } from "./notification-access";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 let _authSchemaReady: Promise<void> | null = null;
@@ -1112,9 +1113,21 @@ export async function updateContractStatus(id: number, status: Contract["status"
 export async function listTasks() { const db = await getDb(); return db ? db.select().from(tasks).where(isNull(tasks.archivedAt)).orderBy(desc(tasks.createdAt)) : null; }
 export async function createTask(input: typeof tasks.$inferInsert) { const db = await getDb(); if (!db) return null; const result = await db.insert(tasks).values(input); const rows = await db.select().from(tasks).where(eq(tasks.id, Number(result[0].insertId))).limit(1); return rows[0] ?? null; }
 export async function updateTask(id: number, input: Partial<typeof tasks.$inferInsert>) { const db = await getDb(); if (!db) return null; await db.update(tasks).set(input).where(eq(tasks.id, id)); const rows = await db.select().from(tasks).where(eq(tasks.id, id)).limit(1); return rows[0] ?? null; }
-export async function listNotifications() { const db = await getDb(); return db ? db.select().from(notifications).orderBy(desc(notifications.createdAt)).limit(100) : null; }
+export async function listNotifications(userId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db.select({ notification: notifications, userReadAt: notificationReads.readAt }).from(notifications)
+    .leftJoin(notificationReads, and(eq(notificationReads.notificationId, notifications.id), eq(notificationReads.userId, userId)))
+    .orderBy(desc(notifications.createdAt)).limit(100);
+  return rows.map(({ notification, userReadAt }) => ({ ...notification, readAt: notificationReadAtForUser(notification.readAt, userReadAt) }));
+}
 export async function getNotification(id: number) { const db = await getDb(); return db ? (await db.select().from(notifications).where(eq(notifications.id, id)).limit(1))[0] ?? null : null; }
-export async function markNotificationRead(id: number) { const db = await getDb(); if (!db) return false; await db.update(notifications).set({ readAt: new Date() }).where(eq(notifications.id, id)); return true; }
+export async function markNotificationRead(id: number, userId: number) {
+  const db = await getDb();
+  if (!db) return false;
+  await db.insert(notificationReads).values({ notificationId: id, userId }).onDuplicateKeyUpdate({ set: { readAt: new Date() } });
+  return true;
+}
 export async function createNotification(input: typeof notifications.$inferInsert) { const db = await getDb(); if (!db) return null; const result = await db.insert(notifications).values(input); return Number(result[0].insertId); }
 export async function listPayments() { const db = await getDb(); return db ? db.select().from(payments).where(isNull(payments.archivedAt)).orderBy(desc(payments.createdAt)) : null; }
 

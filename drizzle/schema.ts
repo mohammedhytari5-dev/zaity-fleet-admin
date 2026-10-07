@@ -368,6 +368,13 @@ export const notifications = mysqlTable("notifications", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
+export const notificationReads = mysqlTable("notification_reads", {
+  id: int("id").autoincrement().primaryKey(),
+  notificationId: int("notificationId").notNull().references(() => notifications.id, { onDelete: "cascade" }),
+  userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  readAt: timestamp("readAt").defaultNow().notNull(),
+}, (table) => [uniqueIndex("notification_reads_user_notification_unique").on(table.userId, table.notificationId)]);
+
 export const settingCatalog = mysqlTable("setting_catalog", {
   id: int("id").autoincrement().primaryKey(),
   category: varchar("category", { length: 80 }).notNull(),
