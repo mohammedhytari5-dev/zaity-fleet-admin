@@ -9,7 +9,7 @@ import { InsertProject, Project, projects } from "../drizzle/schema";
 import { InsertPayable, Payable, PayablePayment, InsertPayablePayment, payables, payablePayments } from "../drizzle/schema";
 import { ENV } from './_core/env';
 import { summarizeMaintenanceItems } from "./vehicle-maintenance-summary";
-import { canUpdateClaim, validatePaymentLinkConsistency } from "./finance-domain";
+import { canUpdateClaim, validateClaimContractLink, validatePaymentLinkConsistency } from "./finance-domain";
 import { isPayableExpensePosted } from "./payable-expense-policy";
 import { maintenanceInvoiceTotal } from "./maintenance-invoice-total";
 import { isProtectedLastAdminDemotion } from "./user-role-domain";
@@ -947,14 +947,33 @@ export async function listClaims(): Promise<Claim[] | null> {
   return db.select().from(claims).where(isNull(claims.archivedAt)).orderBy(desc(claims.createdAt));
 }
 
+async function normalizeClaimLinks(db: DbExecutor, input: Partial<InsertClaim>, current?: Claim): Promise<Pick<Claim, "client" | "clientId" | "contract" | "contractId">> {
+  const clientId = input.clientId !== undefined ? input.clientId : current?.clientId ?? null;
+  const contractId = input.contractId !== undefined ? input.contractId : current?.contractId ?? null;
+  if (!clientId && !contractId) {
+    if (!current) throw new Error("اختر عميلًا وعقدًا مسجلين للمطالبة");
+    if (current.clientId || current.contractId) throw new Error("لا يمكن فك ربط مطالبة مالية بعقد أو عميل");
+    return {} as Pick<Claim, "client" | "clientId" | "contract" | "contractId">;
+  }
+  if (!clientId || !contractId) throw new Error("يجب ربط المطالبة بعميل وعقد معًا");
+  const client = (await db.select({ id: clients.id, name: clients.name }).from(clients).where(and(eq(clients.id, clientId), isNull(clients.archivedAt))).limit(1).for("update"))[0];
+  if (!client) throw new Error("العميل المحدد غير موجود أو مؤرشف");
+  const contract = (await db.select({ id: contracts.id, ref: contracts.ref, clientId: contracts.clientId, client: contracts.client }).from(contracts).where(and(eq(contracts.id, contractId), isNull(contracts.archivedAt))).limit(1).for("update"))[0];
+  if (!contract) throw new Error("العقد المحدد غير موجود أو مؤرشف");
+  validateClaimContractLink({ clientId: client.id, clientName: client.name, contractClientId: contract.clientId, contractClientName: contract.client });
+  return { client: client.name, clientId: client.id, contract: contract.ref, contractId: contract.id };
+}
+
 export async function createClaim(input: InsertClaim): Promise<Claim | null> {
   const db = await getDb();
   if (!db) return null;
   if (input.status !== "غير مرفوعة" && input.status !== "جديدة") return null;
-  const result = await db.insert(claims).values({ ...input, paid: 0 });
-  const id = Number(result[0].insertId);
-  const created = await db.select().from(claims).where(eq(claims.id, id)).limit(1);
-  return created[0] ?? null;
+  return db.transaction(async tx => {
+    const references = await normalizeClaimLinks(tx, input);
+    const result = await tx.insert(claims).values({ ...input, ...references, paid: 0 });
+    const id = Number(result[0].insertId);
+    return (await tx.select().from(claims).where(eq(claims.id, id)).limit(1))[0] ?? null;
+  });
 }
 
 export async function updateClaim(id: number, input: Partial<InsertClaim>): Promise<Claim | null> {
@@ -967,7 +986,8 @@ export async function updateClaim(id: number, input: Partial<InsertClaim>): Prom
     const current = (await tx.select().from(claims).where(and(eq(claims.id, id), isNull(claims.archivedAt))).limit(1))[0];
     if (!current) return null;
     if (!canUpdateClaim({ currentStatus: current.status, currentAmount: current.amount, paid: current.paid, nextStatus: input.status, nextAmount: input.amount })) return null;
-    await tx.update(claims).set(input).where(and(eq(claims.id, id), isNull(claims.archivedAt)));
+    const references = await normalizeClaimLinks(tx, input, current);
+    await tx.update(claims).set({ ...input, ...references }).where(and(eq(claims.id, id), isNull(claims.archivedAt)));
     return (await tx.select().from(claims).where(eq(claims.id, id)).limit(1))[0] ?? null;
   });
 }

@@ -105,6 +105,18 @@ describe("Zaity operations", () => {
     await expect(appRouter.createCaller(ctx).projects.list()).resolves.toEqual(expect.any(Array));
   });
 
+  it("requires a registered client and matching contract before creating a claim", async () => {
+    const ctx: TrpcContext = {
+      user: { ...adminUser, role: "user" as const, permissions: JSON.stringify(["finance"]) },
+      req: { protocol: "https", headers: {} } as TrpcContext["req"],
+      res: {} as TrpcContext["res"],
+    };
+    const create = appRouter.createCaller(ctx).claims.create;
+    const base = { ref: "CL-LINK", client: "عميل اختبار", clientId: null, contract: "CT-LINK", contractId: null, amount: 100, due: "2026-10-31", submittedAt: "2026-10-07", followUpAt: "—", notes: "", status: "جديدة" as const };
+    await expect(create(base)).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(create({ ...base, clientId: 1, contractId: 2 })).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
   it("allows the dedicated payables permission without granting other financial modules", async () => {
     const ctx: TrpcContext = {
       user: { ...adminUser, role: "user" as const, permissions: JSON.stringify(["payables"]) },

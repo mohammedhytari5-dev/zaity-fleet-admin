@@ -37,3 +37,17 @@ export function validatePaymentLinkConsistency(input: {
   if (input.paymentContractId && input.claimContractId && input.paymentContractId !== input.claimContractId) throw new Error("المطالبة لا تتبع العقد المحدد");
   if (input.claimClientId && input.contractClientId && input.claimClientId !== input.contractClientId) throw new Error("المطالبة والدفعة لا تتبعان العميل نفسه");
 }
+
+export function validateClaimContractLink(input: {
+  clientId: number | null;
+  clientName: string;
+  contractClientId: number | null;
+  contractClientName: string;
+}): void {
+  if (!input.clientId) throw new Error("اختر عميلًا مسجلًا للمطالبة");
+  if (input.contractClientId !== null) {
+    if (input.contractClientId !== input.clientId) throw new Error("العقد المختار لا يتبع العميل المحدد");
+    return;
+  }
+  if (input.contractClientName.trim() !== input.clientName.trim()) throw new Error("العقد المختار لا يتبع العميل المحدد");
+}

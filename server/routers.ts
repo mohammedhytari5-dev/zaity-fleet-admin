@@ -317,8 +317,8 @@ export const appRouter = router({
   }),
   claims: router({
     list: permissionProcedure("finance").query(async () => (await listClaims()) ?? []),
-    create: permissionProcedure("finance").input(claimInput.omit({ paid: true })).mutation(async ({ input }) => requireRecord(await createClaim(input), "المطالبة")),
-    update: permissionProcedure("finance").input(z.object({ id: z.number().int().positive(), data: claimInput.omit({ paid: true }).partial() })).mutation(async ({ input }) => requireRecord(await updateClaim(input.id, input.data), "المطالبة")),
+    create: permissionProcedure("finance").input(claimInput.omit({ paid: true })).mutation(async ({ ctx, input }) => { if (!input.clientId || !input.contractId) throw new TRPCError({ code: "BAD_REQUEST", message: "اختر العميل والعقد المرتبط به قبل إنشاء المطالبة" }); requireReferencePermission(ctx.user, "clients"); return requireRecord(await createClaim(input), "المطالبة"); }),
+    update: permissionProcedure("finance").input(z.object({ id: z.number().int().positive(), data: claimInput.omit({ paid: true }).partial() })).mutation(async ({ ctx, input }) => { if (input.data.clientId !== undefined) requireReferencePermission(ctx.user, "clients"); return requireRecord(await updateClaim(input.id, input.data), "المطالبة"); }),
     archive: permissionProcedure("finance").input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archiveClaim(input.id) })),
   }),
   contracts: router({

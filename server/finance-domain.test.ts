@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canUpdateClaim, validatePaymentLinkConsistency } from "./finance-domain";
+import { canUpdateClaim, validateClaimContractLink, validatePaymentLinkConsistency } from "./finance-domain";
 
 describe("financial ledger invariants", () => {
   it("allows only defined claim status transitions", () => {
@@ -29,5 +29,13 @@ describe("financial ledger invariants", () => {
       paymentContractId: 12,
       claimContractId: 12,
     })).not.toThrow();
+  });
+
+  it("requires every new claim to reference the selected client's contract", () => {
+    expect(() => validateClaimContractLink({ clientId: 7, clientName: "شركة ألف", contractClientId: 7, contractClientName: "شركة ألف" })).not.toThrow();
+    expect(() => validateClaimContractLink({ clientId: 7, clientName: "شركة ألف", contractClientId: 8, contractClientName: "شركة باء" })).toThrow("العقد المختار لا يتبع العميل المحدد");
+    expect(() => validateClaimContractLink({ clientId: 7, clientName: "شركة ألف", contractClientId: null, contractClientName: "شركة ألف" })).not.toThrow();
+    expect(() => validateClaimContractLink({ clientId: 7, clientName: "شركة ألف", contractClientId: null, contractClientName: "شركة باء" })).toThrow("العقد المختار لا يتبع العميل المحدد");
+    expect(() => validateClaimContractLink({ clientId: null, clientName: "شركة ألف", contractClientId: null, contractClientName: "شركة ألف" })).toThrow("اختر عميلًا مسجلًا للمطالبة");
   });
 });
