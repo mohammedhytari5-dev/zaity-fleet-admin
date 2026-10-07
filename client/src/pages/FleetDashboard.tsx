@@ -938,6 +938,7 @@ export default function FleetDashboard() {
   const saveRecord = (data: Row) => {
     if (modal?.module === "drivers") {
       const { id: _id, ...payload } = data;
+      if (!canAccess("vehicles")) { delete payload.vehicleId; delete payload.vehicle; }
       const onSuccess = (saved: Row) => { setDrivers(prev => prev.some(item => item.id === saved.id) ? prev.map(item => item.id === saved.id ? saved as Driver : item) : [saved as Driver, ...prev]); utils.drivers.list.invalidate(); setModal(null); toast.success("تم حفظ السائق"); };
       if (drivers.some(item => item.id === data.id)) driverUpdate.mutate({ id: data.id, data: payload as any }, { onSuccess, onError: error => toast.error(`تعذر تعديل السائق: ${error.message}`) });
       else driverCreate.mutate(payload as any, { onSuccess, onError: error => toast.error(`تعذر إضافة السائق: ${error.message}`) });

@@ -11,6 +11,7 @@ import { documentModuleByType, resolveDocumentLink, type DocumentEntityType } fr
 import { documentsVisibleTo } from "./document-access";
 import { payableLinkPermissions, payablesVisibleTo } from "./payable-access";
 import { vehicleRecordForViewer } from "./vehicle-access";
+import { driverRecordForViewer } from "./driver-access";
 import { archiveClaim, archiveClient, archiveContract, archiveDocument, archiveDriver, archiveMaintenanceRequest, advanceMaintenanceRequest, decideMaintenanceApproval, settleMaintenanceAdvance, listMaintenanceEvents, archivePayment, archiveVehicleExpense, archiveVehicleRevenue, archiveProject, archiveSetting, deleteSetting, archiveVehicle, assignVehicleDriver, authenticateLocalUser, LastActiveAdminDemotionError, createLocalUser, createAuditLog, createClaim, createClient, createContract, createDocument, createDriver, createEmployee, updateEmployee, archiveEmployee, listEmployees, createMaintenanceRequest, createNotification, createPayment, createProject, createPayable, registerPayablePayment, updatePayable, updatePayableStatus, listPayables, getPayableReceipt, createRepresentative, createTask, createVehicle, createVehicleExpense, createVehicleRevenue, getVehicleFinancialProfile, getVehicleReceipt, listVehicleFinancialSummaries, updateVehicleExpense, listAuditLogs, listClaims, listClients, listContracts, listDocuments, listDrivers, listMaintenanceRequests, listNotifications, listPayments, listProjects, listRepresentatives, listSettings, listTasks, listUsers, listVehicles, getCompanyReport, markNotificationRead, updateClaim, updatePayment, updateSetting, updateClient, updateContract, updateContractStatus, updateProject, updateUserRole, updateUserAccess, updateDocument, updateDriver, updateMaintenanceRequest, updateTask, updateVehicle, upsertSetting, getDocument } from "./db";
 import { maintenanceStages, type MaintenanceStage } from "../shared/maintenance-domain";
 import { maintenanceEventForViewer, maintenanceRecordForViewer } from "./maintenance-access";
@@ -234,9 +235,9 @@ export const appRouter = router({
     archive: permissionProcedure("vehicles").input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archiveVehicle(input.id) })),
   }),
   drivers: router({
-    list: permissionProcedure("drivers").query(async () => (await listDrivers()) ?? []),
-    create: permissionProcedure("drivers").input(driverInput).mutation(async ({ ctx, input }) => { if (input.vehicleId !== null) requireReferencePermission(ctx.user, "vehicles"); return requireRecord(await createDriver(input), "السائق"); }),
-    update: permissionProcedure("drivers").input(z.object({ id: z.number().int().positive(), data: driverInput.partial() })).mutation(async ({ ctx, input }) => { if (input.data.vehicleId !== undefined) requireReferencePermission(ctx.user, "vehicles"); return requireRecord(await updateDriver(input.id, input.data), "السائق"); }),
+    list: permissionProcedure("drivers").query(async ({ ctx }) => (await listDrivers() ?? []).map(driver => driverRecordForViewer(driver, hasModulePermission(ctx.user, "vehicles")))),
+    create: permissionProcedure("drivers").input(driverInput).mutation(async ({ ctx, input }) => { if (input.vehicleId !== null) requireReferencePermission(ctx.user, "vehicles"); return driverRecordForViewer(requireRecord(await createDriver(input), "السائق"), hasModulePermission(ctx.user, "vehicles")); }),
+    update: permissionProcedure("drivers").input(z.object({ id: z.number().int().positive(), data: driverInput.partial() })).mutation(async ({ ctx, input }) => { if (input.data.vehicleId !== undefined) requireReferencePermission(ctx.user, "vehicles"); return driverRecordForViewer(requireRecord(await updateDriver(input.id, input.data), "السائق"), hasModulePermission(ctx.user, "vehicles")); }),
     archive: permissionProcedure("drivers").input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archiveDriver(input.id) })),
   }),
   employees: router({
