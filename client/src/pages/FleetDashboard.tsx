@@ -102,8 +102,8 @@ function Logo({ compact = false }: { compact?: boolean }) {
 }
 function formatSAR(value: number) { return `${value.toLocaleString("en-US")} SAR`; }
 function formatCurrencyText(value: unknown) { return String(value ?? "0 SAR").replace(/ر\.س/g, "SAR"); }
-function exportCsv(rows: Row[], columns: string[], filename: string) {
-  const csv = [columns.join(","), ...rows.map(row => columns.map(c => `"${String(row[c] ?? "").replaceAll('"', '""')}"`).join(","))].join("\n");
+function exportCsv(rows: Row[], columns: string[], filename: string, headers: string[] = columns) {
+  const csv = [headers.join(","), ...rows.map(row => columns.map(c => `"${String(row[c] ?? "").replaceAll('"', '""')}"`).join(","))].join("\n");
   const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
   const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `${filename}.csv`; link.click(); URL.revokeObjectURL(link.href);
   toast.success("تم تجهيز ملف التصدير بنجاح");
@@ -588,10 +588,16 @@ function EmployeesPage({ canAccess }: { canAccess: (key: ModuleKey) => boolean }
 type ReportData = { period: { from: string; to: string }; fleet: Record<string, number>; finance: Record<string, number>; maintenance: Record<string, number>; projects: Record<string, number>; documents: Record<string, number>; people: Record<string, number>; details: { claims: Row[]; contracts: Row[]; payables: Row[]; maintenance: Row[]; vehicleProfitability: Row[]; projectProfitability: Row[]; clientProfitability: Row[] } };
 function ReportsPage() {
   const today = new Date();
-  const [from, setFrom] = useState(new Date(today.getFullYear(), today.getMonth(), 1).toISOString().slice(0,10));
-  const [to, setTo] = useState(today.toISOString().slice(0,10));
+  const localDate = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  const [from, setFrom] = useState(localDate(new Date(today.getFullYear(), today.getMonth(), 1)));
+  const [to, setTo] = useState(localDate(today));
   const [section, setSection] = useState("claims");
-  const { data, isFetching } = trpc.reports.summary.useQuery({ from, to }, { staleTime: 15000 });
+  const [search, setSearch] = useState("");
+  const [status, setStatus] = useState("");
+  const [scope, setScope] = useState("");
+  const [sort, setSort] = useState<{ key: string; direction: "asc" | "desc" } | null>(null);
+  const validRange = from <= to;
+  const { data, isFetching } = trpc.reports.summary.useQuery({ from, to }, { staleTime: 15000, enabled: validRange });
   const report = data as ReportData | undefined;
   const sections: Record<string, { title: string; rows: Row[]; columns: string[]; labels: string[] }> = {
     claims: { title: "المطالبات خلال الفترة", rows: report?.details.claims ?? [], columns: ["ref", "client", "status", "amount", "paid", "due"], labels: ["المطالبة", "العميل", "الحالة", "القيمة", "المدفوع", "الاستحقاق"] },
@@ -603,13 +609,38 @@ function ReportsPage() {
     clientProfitability: { title: "التشغيل حسب العميل", rows: report?.details.clientProfitability ?? [], columns: ["name", "expense", "revenue", "netOperatingResult", "busCount"], labels: ["العميل", "المصروفات", "الإيراد المحصل المخصص", "صافي التشغيل*", "عدد الباصات"] },
   };
   const current = sections[section];
+  const contextualKey: Record<string, string> = { claims: "client", contracts: "client", payables: "supplier", maintenance: "vehicle", vehicleProfitability: "plate", projectProfitability: "name", clientProfitability: "name" };
+  const contextualLabel: Record<string, string> = { claims: "العميل", contracts: "العميل", payables: "المورد", maintenance: "المركبة", vehicleProfitability: "المركبة", projectProfitability: "المشروع", clientProfitability: "العميل" };
+  const categoryKey = contextualKey[section];
+  const uniqueValues = (key: string) => Array.from(new Set(current.rows.map(row => String(row[key] ?? "")).filter(value => value && value !== "—"))).sort((a, b) => a.localeCompare(b, "ar"));
+  const visibleRows = current.rows.filter(row => {
+    const matchesSearch = !search || current.columns.some(column => String(row[column] ?? "").toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
+    const matchesStatus = !status || String(row.status ?? "") === status;
+    const matchesScope = !scope || String(row[categoryKey] ?? "") === scope;
+    return matchesSearch && matchesStatus && matchesScope;
+  }).sort((a, b) => {
+    if (!sort) return 0;
+    const left = a[sort.key]; const right = b[sort.key];
+    const comparison = typeof left === "number" && typeof right === "number" ? left - right : String(left ?? "").localeCompare(String(right ?? ""), "ar", { numeric: true, sensitivity: "base" });
+    return sort.direction === "asc" ? comparison : -comparison;
+  });
+  const setPeriod = (days: number | "month" | "quarter" | "year") => {
+    const end = new Date();
+    const start = new Date(end);
+    if (days === "month") start.setDate(1);
+    else if (days === "quarter") start.setMonth(Math.floor(start.getMonth() / 3) * 3, 1);
+    else if (days === "year") start.setMonth(0, 1);
+    else start.setDate(start.getDate() - days + 1);
+    setFrom(localDate(start)); setTo(localDate(end));
+  };
+  const switchSection = (key: string) => { setSection(key); setSearch(""); setStatus(""); setScope(""); setSort(null); };
   return <>
     <PageHeader eyebrow="الإدارة / التقارير" title="التقارير" description="ملخص موحد للأسطول والمالية والصيانة والمشاريع والموظفين ضمن فترة قابلة للتحديد والتصدير." />
-    <div className="surface" style={{ padding: "1rem", marginBottom: "1rem" }}><div className="form-grid"><Field label="من تاريخ" type="date" value={from} onChange={setFrom} /><Field label="إلى تاريخ" type="date" value={to} onChange={setTo} /><div className="field"><span>حالة التقرير</span><strong>{isFetching ? "جارٍ التحديث…" : report ? `${report.period.from} — ${report.period.to}` : "تعذر تحميل البيانات"}</strong></div></div></div>
+    <div className="surface report-period-panel"><div className="report-period-head"><div><strong>نطاق التقرير</strong><span>اختر فترة جاهزة أو حدّد التواريخ يدويًا</span></div><div className="report-presets">{[["اليوم", 1], ["7 أيام", 7], ["30 يومًا", 30], ["هذا الشهر", "month"], ["هذا الربع", "quarter"], ["هذه السنة", "year"]].map(([label, days]) => <button key={String(label)} className="report-preset" onClick={() => setPeriod(days as number | "month" | "quarter" | "year")}>{label}</button>)}</div></div><div className="report-period-fields"><Field label="من تاريخ" type="date" value={from} onChange={setFrom} /><Field label="إلى تاريخ" type="date" value={to} onChange={setTo} /><div className="report-fetch-state"><span className={`report-state-dot ${isFetching ? "loading" : validRange && report ? "ready" : "error"}`} /><span>{!validRange ? "نطاق التاريخ غير صالح" : isFetching ? "جارٍ تحديث التقرير…" : report ? `${report.period.from} — ${report.period.to}` : "تعذر تحميل البيانات"}</span></div></div>{!validRange && <div className="report-range-error">تاريخ البداية يجب أن يسبق تاريخ النهاية أو يساويه.</div>}</div>
     {report && <>
       <div className="metrics-grid"><MetricCard title="إجمالي الأسطول" value={String(report.fleet.total)} helper={`${report.fleet.working} تعمل · ${report.fleet.ready} جاهزة`} icon={CarFront} tone="teal" /><MetricCard title="في الصيانة / متوقفة" value={`${report.fleet.maintenance} / ${report.fleet.stopped}`} helper="الحالة الحالية" icon={Wrench} tone="orange" /><MetricCard title="المطالبات غير المحصلة" value={formatSAR(report.finance.receivableOutstanding)} helper={`${report.finance.unpaidClaims} مطالبة · ${report.finance.overdueClaims} متأخرة`} icon={CircleDollarSign} tone="blue" /><MetricCard title="المستحقات على الشركة" value={formatSAR(report.finance.payablesOutstanding)} helper={`${report.finance.overduePayables} فاتورة متأخرة`} icon={ArrowUpLeft} tone="orange" /><MetricCard title="التحصيل / الصرف بالفترة" value={`${formatSAR(report.finance.incomingInPeriod)} / ${formatSAR(report.finance.outgoingInPeriod)}`} helper="الدفعات المسجلة خلال الفترة" icon={Activity} tone="violet" /><MetricCard title="تكلفة/إيراد تشغيل الباصات" value={`${formatSAR(report.finance.vehicleCostsInPeriod)} / ${formatSAR(report.finance.allocatedVehicleRevenueInPeriod)}`} helper={`الصافي مع الشراء المسجل بالفترة ${formatSAR(report.finance.fleetVehicleNetInPeriod)}`} icon={CarFront} tone="teal" /><MetricCard title="المشاريع النشطة" value={String(report.projects.activeNow)} helper={`${report.projects.assignedVehicles} مركبة مسندة · ${report.projects.requiredVehicles} مطلوبة`} icon={Truck} tone="blue" /></div>
       <div className="quick-metrics"><div><span>عقود جديدة بالفترة</span><strong>{formatSAR(report.finance.contractsValueInPeriod)}</strong></div><div><span>أوامر صيانة بالفترة</span><strong>{report.maintenance.openedInPeriod.toLocaleString("en-US")}</strong></div><div><span>تكلفة الصيانة بالفترة</span><strong>{formatSAR(report.maintenance.costInPeriod)}</strong></div><div><span>الموظفون النشطون</span><strong>{report.people.activeEmployees.toLocaleString("en-US")}</strong></div><div><span>مستندات تنتهي خلال الفترة</span><strong className="amber-text">{report.documents.expiringInPeriod.toLocaleString("en-US")}</strong></div><div><span>مستندات منتهية الآن</span><strong className="red-text">{report.documents.expiredNow.toLocaleString("en-US")}</strong></div></div>
-      <section className="surface" style={{ padding: "1rem", marginTop: "1rem" }}><div className="section-head"><div><h2>{current.title}</h2><span>يمكن تصدير تفاصيل القسم الظاهر إلى CSV</span></div><button className="btn outline" onClick={() => exportCsv(current.rows, current.columns, `zaity-${section}-${from}-${to}`)}><Download size={15} />تصدير CSV</button></div><div className="field-note">* صافي التشغيل للمشروع والعميل = الإيراد المحصل المخصص − مصروفات التشغيل، ولا يتضمن سعر شراء المركبات حتى لا يوزع سعر الأصل على فترة تشغيل اعتباطية. أرقام الباصات تحسب سعر الشراء فقط إذا وقع تاريخ الشراء ضمن الفترة.</div><div className="finance-switch">{Object.entries(sections).map(([key, item]) => <button key={key} className={section === key ? "active" : ""} onClick={() => setSection(key)}>{item.title}</button>)}</div><div className="table-scroll"><table><thead><tr>{current.labels.map(label => <th key={label}>{label}</th>)}</tr></thead><tbody>{current.rows.length ? current.rows.map(row => <tr key={row.id}>{current.columns.map(column => <td key={column}>{typeof row[column] === "number" && ["amount", "paid", "remaining", "total", "collected", "expense", "revenue", "purchaseInPeriod", "netReturn", "netOperatingResult"].includes(column) ? formatSAR(row[column]) : row[column] ?? "—"}</td>)}</tr>) : <tr><td colSpan={current.columns.length}>لا توجد سجلات لهذه الفترة</td></tr>}</tbody></table></div></section>
+      <section className="surface report-detail-panel"><div className="section-head"><div><h2>{current.title}</h2><span>{visibleRows.length.toLocaleString("en-US")} من {current.rows.length.toLocaleString("en-US")} سجل · التصدير يحترم الفلاتر الحالية</span></div><button className="btn outline" disabled={!visibleRows.length} onClick={() => exportCsv(visibleRows, current.columns, `zaity-${section}-${from}-${to}`, current.labels)}><Download size={15} />تصدير النتائج</button></div><div className="field-note">* صافي التشغيل للمشروع والعميل = الإيراد المحصل المخصص − مصروفات التشغيل، ولا يتضمن سعر شراء المركبات حتى لا يوزع سعر الأصل على فترة تشغيل اعتباطية. أرقام الباصات تحسب سعر الشراء فقط إذا وقع تاريخ الشراء ضمن الفترة.</div><div className="finance-switch report-section-tabs">{Object.entries(sections).map(([key, item]) => <button key={key} className={section === key ? "active" : ""} onClick={() => switchSection(key)}>{item.title}</button>)}</div><div className="report-filter-grid"><label className="report-search"><Search size={15} /><input value={search} onChange={event => setSearch(event.target.value)} placeholder="ابحث في نتائج التقرير…" /></label><label className="field"><span>الحالة</span><select value={status} onChange={event => setStatus(event.target.value)}><option value="">كل الحالات</option>{uniqueValues("status").map(value => <option key={value} value={value}>{value}</option>)}</select></label><label className="field"><span>{contextualLabel[section]}</span><select value={scope} onChange={event => setScope(event.target.value)}><option value="">الكل</option>{uniqueValues(categoryKey).map(value => <option key={value} value={value}>{value}</option>)}</select></label><button className="btn ghost report-reset" onClick={() => { setSearch(""); setStatus(""); setScope(""); setSort(null); }}>مسح الفلاتر</button></div><div className="table-scroll"><table><thead><tr>{current.labels.map((label, index) => { const key = current.columns[index]; return <th key={key}><button className="report-sort" onClick={() => setSort(previous => previous?.key === key ? { key, direction: previous.direction === "asc" ? "desc" : "asc" } : { key, direction: "asc" })}>{label}{sort?.key === key ? sort.direction === "asc" ? " ↑" : " ↓" : ""}</button></th>; })}</tr></thead><tbody>{visibleRows.length ? visibleRows.map((row, rowIndex) => <tr key={row.id ?? `${section}-${rowIndex}`}>{current.columns.map(column => <td key={column}>{typeof row[column] === "number" && ["amount", "paid", "remaining", "total", "collected", "expense", "revenue", "purchaseInPeriod", "netReturn", "netOperatingResult"].includes(column) ? formatSAR(row[column]) : row[column] ?? "—"}</td>)}</tr>) : <tr><td colSpan={current.columns.length}><div className="report-empty">لا توجد نتائج تطابق الفلاتر الحالية.</div></td></tr>}</tbody></table></div></section>
     </>}
   </>;
 }
