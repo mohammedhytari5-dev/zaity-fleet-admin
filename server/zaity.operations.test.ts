@@ -210,6 +210,8 @@ describe("Zaity operations", () => {
   it("does not allow maintenance-only users to enter invoice amounts or financial attachments", async () => {
     const ctx: TrpcContext = { user: { ...adminUser, role: "user" as const, permissions: JSON.stringify(["maintenance"]) }, req: { protocol: "https", headers: {} } as TrpcContext["req"], res: {} as TrpcContext["res"] };
     await expect(appRouter.createCaller(ctx).maintenance.create({ ref: "MT-TEST", vehicleId: 1, vehicle: "1234", type: "إصلاح", manager: "اختبار", start: "2026-10-03", due: "2026-10-03", status: "جديد", cost: "500 ر.س" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(appRouter.createCaller(ctx).maintenance.update({ id: 1, data: { cost: "500 SAR" } })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(appRouter.createCaller(ctx).maintenance.update({ id: 1, data: { receiptUrl: "data:application/pdf;base64,ZmFrZQ==" } })).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
   it("requires vehicle permission when maintenance actions link to or change a vehicle", async () => {
