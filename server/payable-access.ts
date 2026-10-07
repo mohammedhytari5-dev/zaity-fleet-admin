@@ -13,3 +13,10 @@ export function payableLinkPermissions(links: PayableLinks): string[] {
   }
   return Array.from(permissions);
 }
+
+export function payablesVisibleTo<T extends PayableLinks>(
+  records: T[],
+  hasPermission: (permission: string) => boolean,
+): T[] {
+  return records.filter(record => payableLinkPermissions(record).every(hasPermission));
+}
