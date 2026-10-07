@@ -10,6 +10,7 @@ import { sdk } from "./_core/sdk";
 import { documentModuleByType, resolveDocumentLink, type DocumentEntityType } from "./document-relations";
 import { documentsVisibleTo } from "./document-access";
 import { payableLinkPermissions, payablesVisibleTo } from "./payable-access";
+import { vehicleRecordForViewer } from "./vehicle-access";
 import { archiveClaim, archiveClient, archiveContract, archiveDocument, archiveDriver, archiveMaintenanceRequest, advanceMaintenanceRequest, decideMaintenanceApproval, settleMaintenanceAdvance, listMaintenanceEvents, archivePayment, archiveVehicleExpense, archiveVehicleRevenue, archiveProject, archiveSetting, deleteSetting, archiveVehicle, assignVehicleDriver, authenticateLocalUser, LastActiveAdminDemotionError, createLocalUser, createAuditLog, createClaim, createClient, createContract, createDocument, createDriver, createEmployee, updateEmployee, archiveEmployee, listEmployees, createMaintenanceRequest, createNotification, createPayment, createProject, createPayable, registerPayablePayment, updatePayable, updatePayableStatus, listPayables, getPayableReceipt, createRepresentative, createTask, createVehicle, createVehicleExpense, createVehicleRevenue, getVehicleFinancialProfile, getVehicleReceipt, listVehicleFinancialSummaries, updateVehicleExpense, listAuditLogs, listClaims, listClients, listContracts, listDocuments, listDrivers, listMaintenanceRequests, listNotifications, listPayments, listProjects, listRepresentatives, listSettings, listTasks, listUsers, listVehicles, getCompanyReport, markNotificationRead, updateClaim, updatePayment, updateSetting, updateClient, updateContract, updateContractStatus, updateProject, updateUserRole, updateUserAccess, updateDocument, updateDriver, updateMaintenanceRequest, updateTask, updateVehicle, upsertSetting, getDocument } from "./db";
 import { maintenanceStages, type MaintenanceStage } from "../shared/maintenance-domain";
 import { maintenanceEventForViewer, maintenanceRecordForViewer } from "./maintenance-access";
@@ -212,11 +213,12 @@ export const appRouter = router({
   vehicles: router({
     list: permissionProcedure("vehicles").query(async ({ ctx }) => {
       const records = await listVehicles() ?? [];
-      if (hasModulePermission(ctx.user, "finance")) {
+      const finance = hasModulePermission(ctx.user, "finance");
+      if (finance) {
         const summaries = await listVehicleFinancialSummaries() ?? {};
-        return records.map(vehicle => ({ ...vehicle, ...(summaries[vehicle.id] ?? { expenseTotal: 0, revenueTotal: 0, netOperatingReturn: 0 }) }));
+        return records.map(vehicle => vehicleRecordForViewer({ ...vehicle, ...(summaries[vehicle.id] ?? { expenseTotal: 0, revenueTotal: 0, netOperatingReturn: 0 }) }, module => hasModulePermission(ctx.user, module)));
       }
-      return records.map(({ purchasePrice: _purchasePrice, purchaseDate: _purchaseDate, inServiceDate: _inServiceDate, ...vehicle }) => vehicle);
+      return records.map(vehicle => vehicleRecordForViewer(vehicle, module => hasModulePermission(ctx.user, module)));
     }),
     financeProfile: permissionProcedure("vehicles").input(z.object({ vehicleId: z.number().int().positive() })).query(async ({ ctx, input }) => { requireReferencePermission(ctx.user, "finance"); return requireRecord(await getVehicleFinancialProfile(input.vehicleId), "الملف المالي للباص"); }),
     receipt: permissionProcedure("vehicles").input(z.object({ vehicleId: z.number().int().positive(), recordId: z.number().int().positive(), kind: z.enum(["expense", "revenue", "maintenance"]) })).query(async ({ ctx, input }) => { requireReferencePermission(ctx.user, "finance"); if (input.kind === "maintenance") requireReferencePermission(ctx.user, "maintenance"); return getVehicleReceipt(input.vehicleId, input.kind, input.recordId); }),
