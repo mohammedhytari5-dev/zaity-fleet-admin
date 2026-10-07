@@ -10,6 +10,7 @@ import { InsertPayable, Payable, PayablePayment, InsertPayablePayment, payables,
 import { ENV } from './_core/env';
 import { summarizeMaintenanceItems } from "./vehicle-maintenance-summary";
 import { canUpdateClaim, validatePaymentLinkConsistency } from "./finance-domain";
+import { isPayableExpensePosted } from "./payable-expense-policy";
 import { isProtectedLastAdminDemotion } from "./user-role-domain";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -125,12 +126,15 @@ export async function listVehicles(): Promise<Vehicle[] | null> {
 export async function listVehicleFinancialSummaries() {
   const db = await getDb();
   if (!db) return null;
-  const [expenses, revenues] = await Promise.all([
-    db.select({ vehicleId: vehicleExpenses.vehicleId, amount: vehicleExpenses.amount }).from(vehicleExpenses).where(isNull(vehicleExpenses.archivedAt)),
+  const [expenses, revenues, payableRows] = await Promise.all([
+    db.select({ vehicleId: vehicleExpenses.vehicleId, amount: vehicleExpenses.amount, payableId: vehicleExpenses.payableId }).from(vehicleExpenses).where(isNull(vehicleExpenses.archivedAt)),
     db.select({ vehicleId: vehicleRevenues.vehicleId, amount: vehicleRevenues.amount }).from(vehicleRevenues).where(isNull(vehicleRevenues.archivedAt)),
+    db.select({ id: payables.id, status: payables.status }).from(payables).where(isNull(payables.archivedAt)),
   ]);
+  const postedPayables = new Set(payableRows.filter(row => isPayableExpensePosted(row.status)).map(row => row.id));
+  const postedExpenses = expenses.filter(row => row.payableId === null || postedPayables.has(row.payableId));
   const summary = new Map<number, { expenseTotal: number; revenueTotal: number }>();
-  for (const row of expenses) { const item = summary.get(row.vehicleId) ?? { expenseTotal: 0, revenueTotal: 0 }; item.expenseTotal += Number(row.amount || 0); summary.set(row.vehicleId, item); }
+  for (const row of postedExpenses) { const item = summary.get(row.vehicleId) ?? { expenseTotal: 0, revenueTotal: 0 }; item.expenseTotal += Number(row.amount || 0); summary.set(row.vehicleId, item); }
   for (const row of revenues) { const item = summary.get(row.vehicleId) ?? { expenseTotal: 0, revenueTotal: 0 }; item.revenueTotal += Number(row.amount || 0); summary.set(row.vehicleId, item); }
   return Object.fromEntries(Array.from(summary.entries()).map(([id, value]) => [id, { ...value, netOperatingReturn: value.revenueTotal - value.expenseTotal }]));
 }
@@ -146,7 +150,7 @@ export async function getVehicleFinancialProfile(vehicleId: number) {
     db.select().from(payments).where(isNull(payments.archivedAt)).orderBy(desc(payments.paidAt)),
     db.select().from(contracts), db.select().from(contractItems), db.select().from(claims), db.select().from(projects), db.select().from(clients),
     db.select({ paymentId: vehicleRevenues.paymentId, amount: vehicleRevenues.amount }).from(vehicleRevenues).where(isNull(vehicleRevenues.archivedAt)),
-    db.select({ id: payables.id, receiptUrl: payables.receiptUrl }).from(payables).where(and(eq(payables.vehicleId, vehicleId), isNull(payables.archivedAt))),
+    db.select({ id: payables.id, receiptUrl: payables.receiptUrl, status: payables.status }).from(payables).where(and(eq(payables.vehicleId, vehicleId), isNull(payables.archivedAt))),
     db.select({ id: maintenanceRequests.id, type: maintenanceRequests.type }).from(maintenanceRequests).where(eq(maintenanceRequests.vehicleId, vehicleId)),
   ]);
   const paymentById = new Map(paymentRows.map(row => [row.id, row]));
@@ -180,7 +184,9 @@ export async function getVehicleFinancialProfile(vehicleId: number) {
   const allRevenueDetails = [...revenueDetails, ...autoLinkedPayments].sort((a, b) => String(b.paidAt || "").localeCompare(String(a.paidAt || "")));
   const payableReceipts = new Set(payableRows.filter(row => Boolean(row.receiptUrl)).map(row => row.id));
   const maintenanceTypeByRequestId = new Map(maintenanceRows.map(row => [row.id, row.type]));
-  const expensesWithMaintenance = expenses.map(expense => ({
+  const postedPayableIds = new Set(payableRows.filter(row => isPayableExpensePosted(row.status)).map(row => row.id));
+  const postedExpenses = expenses.filter(expense => expense.payableId === null || postedPayableIds.has(expense.payableId));
+  const expensesWithMaintenance = postedExpenses.map(expense => ({
     ...expense,
     maintenanceItem: expense.maintenanceRequestId ? maintenanceTypeByRequestId.get(expense.maintenanceRequestId) ?? null : null,
   }));
@@ -1147,7 +1153,7 @@ function isVehiclePurchasePayable(payable: Pick<Payable, "description">) {
 
 async function syncPayableVehicleExpense(tx: DbExecutor, payable: Payable, actor: LedgerActor = {}) {
   const existing = (await tx.select().from(vehicleExpenses).where(eq(vehicleExpenses.payableId, payable.id)).limit(1))[0];
-  if (payable.status === "ملغاة" || isVehiclePurchasePayable(payable) || !payable.vehicleId || !payable.vehicleCategory) {
+  if (!isPayableExpensePosted(payable.status) || isVehiclePurchasePayable(payable) || !payable.vehicleId || !payable.vehicleCategory) {
     if (existing && !existing.archivedAt) await tx.update(vehicleExpenses).set({ archivedAt: new Date(), archivedByUserId: actor.id ?? null, archivedByName: actor.name || "—" }).where(eq(vehicleExpenses.id, existing.id));
     return;
   }
@@ -1155,7 +1161,7 @@ async function syncPayableVehicleExpense(tx: DbExecutor, payable: Payable, actor
   if (!vehicle) throw new Error("الباص المرتبط بفاتورة المورد غير موجود");
   const sameVehicle = existing?.vehicleId === vehicle.id;
   const values = { vehicleId: vehicle.id, projectId: sameVehicle ? existing?.projectId ?? null : vehicle.projectId ?? null, projectName: sameVehicle ? existing?.projectName || vehicle.project || "—" : vehicle.project || "—", clientId: sameVehicle ? existing?.clientId ?? null : vehicle.clientId ?? null, clientName: sameVehicle ? existing?.clientName || vehicle.client || "—" : vehicle.client || "—", category: payable.vehicleCategory, amount: Number(payable.amount), spentAt: payable.issueDate && payable.issueDate !== "—" ? payable.issueDate : new Date(payable.createdAt).toISOString().slice(0, 10), description: `فاتورة ${payable.ref} · ${payable.description}`.slice(0, 300), vendor: payable.supplier, receiptName: payable.receiptName ?? null, receiptUrl: null, notes: payable.notes ?? null, updatedByUserId: actor.id ?? existing?.updatedByUserId ?? null, updatedByName: actor.name || existing?.updatedByName || "—" };
-  if (existing) await tx.update(vehicleExpenses).set(values).where(eq(vehicleExpenses.id, existing.id));
+  if (existing) await tx.update(vehicleExpenses).set({ ...values, archivedAt: null, archivedByUserId: null, archivedByName: null }).where(eq(vehicleExpenses.id, existing.id));
   else await tx.insert(vehicleExpenses).values({ ...values, payableId: payable.id, createdByUserId: actor.id ?? null, createdByName: actor.name || "—", updatedByUserId: actor.id ?? null, updatedByName: actor.name || "—" });
 }
 export async function createPayable(input: InsertPayable, actor: LedgerActor = {}): Promise<Payable | null> {
@@ -1250,7 +1256,8 @@ export async function getCompanyReport(from: string, to: string) {
   const periodMaintenance = maintenanceRows.filter(row => inRange(row.start));
   const periodProjects = projectRows.filter(row => inRange(row.startDate));
   const periodDocuments = documentRows.filter(row => inRange(row.expiry));
-  const periodVehicleExpenses = vehicleExpenseRows.filter(row => inRange(row.spentAt));
+  const postedPayableIds = new Set(payableRows.filter(row => isPayableExpensePosted(row.status)).map(row => row.id));
+  const periodVehicleExpenses = vehicleExpenseRows.filter(row => inRange(row.spentAt) && (row.payableId === null || postedPayableIds.has(row.payableId)));
   const paymentById = new Map(incomingRows.map(row => [row.id, row]));
   const periodVehicleRevenues = vehicleRevenueRows.filter(row => { const payment = paymentById.get(row.paymentId); return payment ? inRange(payment.paidAt) : false; });
   const outstandingClaims = claimRows.filter(row => !["تم صرفها", "مرفوضة", "ملغاة"].includes(row.status));
