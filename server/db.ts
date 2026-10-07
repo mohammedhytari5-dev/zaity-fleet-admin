@@ -1136,8 +1136,8 @@ export async function listPayables(): Promise<(Omit<Payable, "receiptUrl"> & { h
 export async function getPayableReceipt(id: number) {
   const db = await getDb();
   if (!db) return null;
-  const row = (await db.select({ receiptName: payables.receiptName, receiptUrl: payables.receiptUrl, vehicleId: payables.vehicleId }).from(payables).where(and(eq(payables.id, id), isNull(payables.archivedAt))).limit(1))[0];
-  return row?.receiptUrl ? { name: row.receiptName || "فاتورة مورد", url: row.receiptUrl, vehicleId: row.vehicleId } : null;
+  const row = (await db.select({ receiptName: payables.receiptName, receiptUrl: payables.receiptUrl, vehicleId: payables.vehicleId, maintenanceRequestId: payables.maintenanceRequestId }).from(payables).where(and(eq(payables.id, id), isNull(payables.archivedAt))).limit(1))[0];
+  return row?.receiptUrl ? { name: row.receiptName || "فاتورة مورد", url: row.receiptUrl, vehicleId: row.vehicleId, maintenanceRequestId: row.maintenanceRequestId } : null;
 }
 
 export async function getStoredFilePermissions(key: string): Promise<string[] | null> {
@@ -1149,7 +1149,7 @@ export async function getStoredFilePermissions(key: string): Promise<string[] | 
     db.select({ id: maintenanceRequests.id }).from(maintenanceRequests).where(and(eq(maintenanceRequests.receiptUrl, url), isNull(maintenanceRequests.archivedAt))).limit(1),
     db.select({ id: vehicleExpenses.id }).from(vehicleExpenses).where(and(eq(vehicleExpenses.receiptUrl, url), isNull(vehicleExpenses.archivedAt))).limit(1),
     db.select({ id: vehicleRevenues.id }).from(vehicleRevenues).where(and(eq(vehicleRevenues.receiptUrl, url), isNull(vehicleRevenues.archivedAt))).limit(1),
-    db.select({ vehicleId: payables.vehicleId }).from(payables).where(and(eq(payables.receiptUrl, url), isNull(payables.archivedAt))).limit(1),
+    db.select({ vehicleId: payables.vehicleId, maintenanceRequestId: payables.maintenanceRequestId }).from(payables).where(and(eq(payables.receiptUrl, url), isNull(payables.archivedAt))).limit(1),
   ]);
   const permissions = new Set<string>();
   if (documentRows.length) permissions.add("documents");
@@ -1158,6 +1158,7 @@ export async function getStoredFilePermissions(key: string): Promise<string[] | 
   if (payableRows.length) {
     permissions.add("payables");
     if (payableRows.some(row => row.vehicleId !== null)) { permissions.add("vehicles"); permissions.add("finance"); }
+    if (payableRows.some(row => row.maintenanceRequestId !== null)) { permissions.add("maintenance"); permissions.add("finance"); }
   }
   return permissions.size ? Array.from(permissions) : [];
 }
