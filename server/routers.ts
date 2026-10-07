@@ -14,6 +14,7 @@ import { vehicleRecordForViewer } from "./vehicle-access";
 import { driverRecordForViewer } from "./driver-access";
 import { projectRecordForViewer } from "./project-access";
 import { notificationModule, notificationsVisibleTo } from "./notification-access";
+import { contractRecordForViewer } from "./contract-access";
 import { archiveClaim, archiveClient, archiveContract, archiveDocument, archiveDriver, archiveMaintenanceRequest, advanceMaintenanceRequest, decideMaintenanceApproval, settleMaintenanceAdvance, listMaintenanceEvents, archivePayment, archiveVehicleExpense, archiveVehicleRevenue, archiveProject, archiveSetting, deleteSetting, archiveVehicle, assignVehicleDriver, authenticateLocalUser, LastActiveAdminDemotionError, createLocalUser, createAuditLog, createClaim, createClient, createContract, createDocument, createDriver, createEmployee, updateEmployee, archiveEmployee, listEmployees, createMaintenanceRequest, createNotification, createPayment, createProject, createPayable, registerPayablePayment, updatePayable, updatePayableStatus, listPayables, getPayableReceipt, createRepresentative, createTask, createVehicle, createVehicleExpense, createVehicleRevenue, getVehicleFinancialProfile, getVehicleReceipt, listVehicleFinancialSummaries, updateVehicleExpense, listAuditLogs, listClaims, listClients, listContracts, listDocuments, listDrivers, listMaintenanceRequests, listNotifications, getNotification, listPayments, listProjects, listRepresentatives, listSettings, listTasks, listUsers, listVehicles, getCompanyReport, markNotificationRead, updateClaim, updatePayment, updateSetting, updateClient, updateContract, updateContractStatus, updateProject, updateUserRole, updateUserAccess, updateDocument, updateDriver, updateMaintenanceRequest, updateTask, updateVehicle, upsertSetting, getDocument } from "./db";
 import { maintenanceStages, type MaintenanceStage } from "../shared/maintenance-domain";
 import { maintenanceEventForViewer, maintenanceRecordForViewer } from "./maintenance-access";
@@ -36,6 +37,9 @@ function requirePayableLinkAccess(user: { role?: string; permissions?: string | 
 }
 function scopeVehicleForUser<T extends object>(user: { role?: string; permissions?: string | null } | undefined, vehicle: T): T {
   return vehicleRecordForViewer(vehicle, module => hasModulePermission(user, module));
+}
+function scopeContractForUser<T extends object>(user: { role?: string; permissions?: string | null } | undefined, contract: T): T {
+  return contractRecordForViewer(contract, module => hasModulePermission(user, module));
 }
 
 const vehicleInput = z.object({
@@ -213,7 +217,7 @@ export const appRouter = router({
   projects: router({
     list: permissionProcedure("projects").query(async ({ ctx }) => (await listProjects() ?? []).map(project => projectRecordForViewer(project, module => hasModulePermission(ctx.user, module)))),
     create: permissionProcedure("projects").input(projectInput).mutation(async ({ ctx, input }) => { if (input.managerEmployeeId) requireReferencePermission(ctx.user, "employees"); if (input.clientId !== null) requireReferencePermission(ctx.user, "clients"); if (input.contractId !== null) requireReferencePermission(ctx.user, "finance"); return projectRecordForViewer(requireRecord(await createProject(input), "المشروع"), module => hasModulePermission(ctx.user, module)); }),
-    update: permissionProcedure("projects").input(z.object({ id: z.number().int().positive(), data: projectInput.partial() })).mutation(async ({ ctx, input }) => { if (input.data.managerEmployeeId) requireReferencePermission(ctx.user, "employees"); if (input.data.clientId !== undefined && input.data.clientId !== null) requireReferencePermission(ctx.user, "clients"); if (input.data.contractId !== undefined && input.data.contractId !== null) requireReferencePermission(ctx.user, "finance"); return projectRecordForViewer(requireRecord(await updateProject(input.id, input.data), "المشروع"), module => hasModulePermission(ctx.user, module)); }),
+    update: permissionProcedure("projects").input(z.object({ id: z.number().int().positive(), data: projectInput.partial() })).mutation(async ({ ctx, input }) => { if (input.data.managerEmployeeId !== undefined) requireReferencePermission(ctx.user, "employees"); if (input.data.clientId !== undefined) requireReferencePermission(ctx.user, "clients"); if (input.data.contractId !== undefined) requireReferencePermission(ctx.user, "finance"); return projectRecordForViewer(requireRecord(await updateProject(input.id, input.data), "المشروع"), module => hasModulePermission(ctx.user, module)); }),
     archive: permissionProcedure("projects").input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archiveProject(input.id) })),
   }),
   vehicles: router({
@@ -318,15 +322,16 @@ export const appRouter = router({
     archive: permissionProcedure("finance").input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archiveClaim(input.id) })),
   }),
   contracts: router({
-    list: permissionProcedure("finance").query(async () => (await listContracts()) ?? []),
+    list: permissionProcedure("finance").query(async ({ ctx }) => (await listContracts() ?? []).map(contract => scopeContractForUser(ctx.user, contract))),
     create: permissionProcedure("finance").input(contractInput).mutation(async ({ ctx, input }) => {
       if (input.clientId !== null) requireReferencePermission(ctx.user, "clients");
       if (input.items.some(item => item.vehicleId !== null)) requireReferencePermission(ctx.user, "vehicles");
+      if (input.items.some(item => item.driver && item.driver !== "—")) requireReferencePermission(ctx.user, "drivers");
       const { items, ...contract } = input;
-      return requireRecord(await createContract(contract, items), "العقد");
+      return scopeContractForUser(ctx.user, requireRecord(await createContract(contract, items), "العقد"));
     }),
-    update: permissionProcedure("finance").input(z.object({ id: z.number().int().positive(), data: contractInput.partial() })).mutation(async ({ ctx, input }) => { if (input.data.clientId !== undefined) requireReferencePermission(ctx.user, "clients"); if (input.data.items?.some(item => item.vehicleId !== null)) requireReferencePermission(ctx.user, "vehicles"); const { items, ...contract } = input.data; return requireRecord(await updateContract(input.id, contract, items), "العقد"); }),
-    updateStatus: permissionProcedure("finance").input(z.object({ id: z.number().int().positive(), status: z.enum(["قائم", "مكتمل", "عرض سعر", "ملغي"]) })).mutation(async ({ input }) => requireRecord(await updateContractStatus(input.id, input.status), "العقد")),
+    update: permissionProcedure("finance").input(z.object({ id: z.number().int().positive(), data: contractInput.partial() })).mutation(async ({ ctx, input }) => { if (input.data.clientId !== undefined) requireReferencePermission(ctx.user, "clients"); if (input.data.items !== undefined) { requireReferencePermission(ctx.user, "vehicles"); requireReferencePermission(ctx.user, "drivers"); } const { items, ...contract } = input.data; return scopeContractForUser(ctx.user, requireRecord(await updateContract(input.id, contract, items), "العقد")); }),
+    updateStatus: permissionProcedure("finance").input(z.object({ id: z.number().int().positive(), status: z.enum(["قائم", "مكتمل", "عرض سعر", "ملغي"]) })).mutation(async ({ ctx, input }) => scopeContractForUser(ctx.user, requireRecord(await updateContractStatus(input.id, input.status), "العقد"))),
     archive: permissionProcedure("finance").input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archiveContract(input.id) })),
   }),
   tasks: router({
