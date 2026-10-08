@@ -5,12 +5,13 @@
   "license": "MIT",
   "scripts": {
     "dev": "tsx watch server/_core/index.ts",
-    "build": "vite build && esbuild server/_core/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
+    "build": "node scripts/build.mjs",
     "start": "NODE_ENV=production node dist/index.js",
     "check": "tsc --noEmit",
     "format": "prettier --write .",
-    "test": "vitest run",
-    "db:push": "drizzle-kit generate && drizzle-kit migrate",
+    "test": "tsx vitest-inline-runner.mts",
+    "db:check": "drizzle-kit check",
+    "db:push": "drizzle-kit check && drizzle-kit generate && drizzle-kit migrate",
     "db:seed": "tsx server/seed.ts"
   },
   "dependencies": {

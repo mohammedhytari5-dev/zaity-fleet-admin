@@ -1,5 +1,5 @@
 import { trpc } from "@/lib/trpc";
-import { COOKIE_NAME, UNAUTHED_ERR_MSG } from '@shared/const';
+import { UNAUTHED_ERR_MSG } from '@shared/const';
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { httpBatchLink, TRPCClientError } from "@trpc/client";
 import { createRoot } from "react-dom/client";
@@ -8,9 +8,11 @@ import App from "./App";
 import { startLogin } from "./const";
 import "./index.css";
 
-// Remove the legacy app token previously exposed to JavaScript storage.
+// Remove session tokens left by older client versions. Authentication now uses
+// the HTTP-only session cookie, which JavaScript cannot read.
 try {
   sessionStorage.removeItem("alhaitari-session-token");
+  sessionStorage.removeItem("manus-cookie");
 } catch {
   // sessionStorage unavailable
 }
@@ -49,27 +51,6 @@ const trpcClient = trpc.createClient({
     httpBatchLink({
       url: "/api/trpc",
       transformer: superjson,
-      headers() {
-        // Preview auto-login fallback: when the browser blocks iframe cookies
-        // (Safari ITP / private browsing / WebView), the runtime mirrors the
-        // session into sessionStorage so we can forward it as a Bearer token.
-        // Local and production OAuth login use the HTTP-only cookie below and
-        // never expose the app's session token to JavaScript storage.
-        try {
-          const raw = sessionStorage.getItem("manus-cookie");
-          if (raw) {
-            const prefix = `${COOKIE_NAME}=`;
-            const pair = raw.split(";").find(s => s.trim().startsWith(prefix));
-            const token = pair?.trim().slice(prefix.length);
-            if (token) {
-              return { Authorization: `Bearer ${token}` };
-            }
-          }
-        } catch {
-          // sessionStorage unavailable
-        }
-        return {};
-      },
       fetch(input, init) {
         return globalThis.fetch(input, {
           ...(init ?? {}),

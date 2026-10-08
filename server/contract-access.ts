@@ -10,3 +10,24 @@ export function contractRecordForViewer<T extends object>(
   }
   return scoped as T;
 }
+
+export function claimRecordForViewer<T extends object>(
+  record: T,
+  canAccessModule: (module: string) => boolean,
+): T {
+  if (canAccessModule("clients")) return record;
+  const scoped = { ...record } as unknown as Record<string, unknown>;
+  scoped.clientId = null;
+  scoped.client = "—";
+  return scoped as T;
+}
+
+export function paymentRecordForViewer<T extends object>(
+  record: T,
+  canAccessModule: (module: string) => boolean,
+): T {
+  if (canAccessModule("clients")) return record;
+  const scoped = { ...record } as unknown as Record<string, unknown>;
+  scoped.clientId = null;
+  return scoped as T;
+}

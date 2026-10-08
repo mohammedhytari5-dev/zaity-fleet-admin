@@ -2,6 +2,8 @@ import { NOT_ADMIN_ERR_MSG, UNAUTHED_ERR_MSG } from '@shared/const';
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import type { TrpcContext } from "./context";
+import { createMutationAuditEvent } from "../mutation-audit";
+import { createAuditLog } from "../db";
 
 const t = initTRPC.context<TrpcContext>().create({
   transformer: superjson,
@@ -37,7 +39,28 @@ const requireUser = t.middleware(async opts => {
   });
 });
 
-export const protectedProcedure = t.procedure.use(requireUser);
+const auditSuccessfulMutation = t.middleware(async opts => {
+  const result = await opts.next();
+  if (opts.type !== "mutation" || !result.ok) return result;
+  if (result.data === false || result.data === null) return result;
+  if (typeof result.data === "object" && result.data !== null && "success" in result.data && result.data.success === false) return result;
+  const event = createMutationAuditEvent({
+    path: opts.path,
+    userId: opts.ctx.user?.id,
+    procedureInput: opts.input,
+  });
+  if (!event) return result;
+  try {
+    await createAuditLog(event);
+  } catch (error) {
+    // The business action has already completed; report audit persistence
+    // failures for operational follow-up without making clients retry it.
+    console.error("[Audit] Could not record successful mutation:", error);
+  }
+  return result;
+});
+
+export const protectedProcedure = t.procedure.use(requireUser).use(auditSuccessfulMutation);
 
 export const permissionProcedure = (permission: string) => t.procedure.use(
   t.middleware(async opts => {
@@ -60,7 +83,7 @@ export const permissionProcedure = (permission: string) => t.procedure.use(
 
     return next({ ctx: { ...ctx, user: ctx.user } });
   }),
-);
+).use(auditSuccessfulMutation);
 
 export const adminProcedure = t.procedure.use(
   t.middleware(async opts => {
@@ -81,4 +104,4 @@ export const adminProcedure = t.procedure.use(
       },
     });
   }),
-);
+).use(auditSuccessfulMutation);

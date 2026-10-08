@@ -20,10 +20,11 @@ const financeOnlyMaintenanceFields = [
   "fundingIssuedByName",
 ] as const;
 
-export function maintenanceRecordForViewer<T extends object>(record: T, canViewFinance: boolean): T {
+export function maintenanceRecordForViewer<T extends object>(record: T, canViewFinance: boolean, canViewVehicles = true): T {
   const visible = { ...record } as Record<string, unknown>;
   if (!canViewFinance) financeOnlyMaintenanceFields.forEach(field => delete visible[field]);
   else delete visible.receiptUrl;
+  if (!canViewVehicles) { delete visible.vehicleId; visible.vehicle = "—"; }
   return visible as T;
 }
 

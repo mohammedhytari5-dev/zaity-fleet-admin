@@ -140,11 +140,12 @@ export const employees = mysqlTable("employees", {
   jobTitle: varchar("jobTitle", { length: 120 }).notNull().default("موظف"),
   hireDate: varchar("hireDate", { length: 32 }).notNull().default("—"),
   status: mysqlEnum("status", ["نشط", "إجازة", "موقوف", "منتهي الخدمة"]).notNull().default("نشط"),
+  userId: int("userId").references(() => users.id, { onDelete: "set null" }),
   notes: text("notes"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   archivedAt: timestamp("archivedAt"),
-});
+}, (table) => [uniqueIndex("employees_user_id_unique").on(table.userId)]);
 
 export const maintenanceRequests = mysqlTable("maintenance_requests", {
   id: int("id").autoincrement().primaryKey(),
@@ -262,7 +263,7 @@ export const payments = mysqlTable("payments", {
   notes: text("notes"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   archivedAt: timestamp("archivedAt"),
-});
+}, (table) => [index("payments_archived_paid_idx").on(table.archivedAt, table.paidAt)]);
 
 export const vehicleExpenses = mysqlTable("vehicle_expenses", {
   id: int("id").autoincrement().primaryKey(),
@@ -290,7 +291,7 @@ export const vehicleExpenses = mysqlTable("vehicle_expenses", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   archivedAt: timestamp("archivedAt"),
-});
+}, (table) => [index("vehicle_expenses_archived_spent_idx").on(table.archivedAt, table.spentAt)]);
 
 export const vehicleRevenues = mysqlTable("vehicle_revenues", {
   id: int("id").autoincrement().primaryKey(),
@@ -310,7 +311,7 @@ export const vehicleRevenues = mysqlTable("vehicle_revenues", {
   archivedByName: varchar("archivedByName", { length: 160 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   archivedAt: timestamp("archivedAt"),
-});
+}, (table) => [index("vehicle_revenues_payment_archived_idx").on(table.paymentId, table.archivedAt)]);
 
 export const payables = mysqlTable("payables", {
   id: int("id").autoincrement().primaryKey(),
@@ -342,7 +343,7 @@ export const payablePayments = mysqlTable("payable_payments", {
   reference: varchar("reference", { length: 80 }).notNull().default("—"),
   notes: text("notes"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+}, (table) => [index("payable_payments_paid_idx").on(table.paidAt)]);
 
 export const tasks = mysqlTable("tasks", {
   id: int("id").autoincrement().primaryKey(),
@@ -351,10 +352,13 @@ export const tasks = mysqlTable("tasks", {
   dueAt: varchar("dueAt", { length: 32 }).notNull().default("—"),
   status: mysqlEnum("status", ["مفتوحة", "مكتملة", "ملغاة"]).notNull().default("مفتوحة"),
   assignee: varchar("assignee", { length: 160 }).notNull().default("—"),
+  assigneeUserId: int("assigneeUserId").references(() => users.id, { onDelete: "set null" }),
+  relatedEntityType: varchar("relatedEntityType", { length: 40 }),
+  relatedEntityId: int("relatedEntityId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   archivedAt: timestamp("archivedAt"),
-});
+}, (table) => [index("tasks_related_entity_idx").on(table.relatedEntityType, table.relatedEntityId)]);
 
 export const notifications = mysqlTable("notifications", {
   id: int("id").autoincrement().primaryKey(),
@@ -385,6 +389,104 @@ export const settingCatalog = mysqlTable("setting_catalog", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
+
+export const inventoryItems = mysqlTable("inventory_items", {
+  id: int("id").autoincrement().primaryKey(),
+  sku: varchar("sku", { length: 64 }).notNull().unique(),
+  name: varchar("name", { length: 180 }).notNull(),
+  category: varchar("category", { length: 100 }).notNull(),
+  unit: varchar("unit", { length: 40 }).notNull().default("قطعة"),
+  onHand: int("onHand").notNull().default(0),
+  reorderLevel: int("reorderLevel").notNull().default(0),
+  location: varchar("location", { length: 160 }).notNull().default("—"),
+  notes: text("notes"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  archivedAt: timestamp("archivedAt"),
+});
+
+export const inventoryMovements = mysqlTable("inventory_movements", {
+  id: int("id").autoincrement().primaryKey(),
+  itemId: int("itemId").notNull().references(() => inventoryItems.id, { onDelete: "restrict" }),
+  direction: mysqlEnum("direction", ["استلام", "صرف"]).notNull(),
+  quantity: int("quantity").notNull(),
+  resultingBalance: int("resultingBalance").notNull(),
+  reference: varchar("reference", { length: 120 }).notNull().default("—"),
+  recipient: varchar("recipient", { length: 160 }).notNull().default("—"),
+  notes: text("notes"),
+  actorUserId: int("actorUserId"),
+  actorName: varchar("actorName", { length: 160 }).notNull().default("—"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => [index("inventory_movements_item_created_idx").on(table.itemId, table.createdAt)]);
+
+export const inventoryRequests = mysqlTable("inventory_requests", {
+  id: int("id").autoincrement().primaryKey(),
+  ref: varchar("ref", { length: 48 }).notNull().unique(),
+  requestedByUserId: int("requestedByUserId").references(() => users.id, { onDelete: "set null" }),
+  requestedByName: varchar("requestedByName", { length: 160 }).notNull(),
+  purpose: varchar("purpose", { length: 500 }).notNull(),
+  status: mysqlEnum("status", ["بانتظار الاعتماد", "معتمد", "مرفوض", "مصروف"]).notNull().default("بانتظار الاعتماد"),
+  approvalNotes: text("approvalNotes"),
+  approvedByUserId: int("approvedByUserId").references(() => users.id, { onDelete: "set null" }),
+  approvedByName: varchar("approvedByName", { length: 160 }),
+  approvedAt: timestamp("approvedAt"),
+  issuedAt: timestamp("issuedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => [index("inventory_requests_status_created_idx").on(table.status, table.createdAt)]);
+
+export const inventoryRequestItems = mysqlTable("inventory_request_items", {
+  id: int("id").autoincrement().primaryKey(),
+  requestId: int("requestId").notNull().references(() => inventoryRequests.id, { onDelete: "cascade" }),
+  itemId: int("itemId").notNull().references(() => inventoryItems.id, { onDelete: "restrict" }),
+  itemName: varchar("itemName", { length: 180 }).notNull(),
+  sku: varchar("sku", { length: 64 }).notNull(),
+  unit: varchar("unit", { length: 40 }).notNull(),
+  requestedQuantity: int("requestedQuantity").notNull(),
+  approvedQuantity: int("approvedQuantity").notNull().default(0),
+  issuedQuantity: int("issuedQuantity").notNull().default(0),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => [index("inventory_request_items_request_idx").on(table.requestId), index("inventory_request_items_item_idx").on(table.itemId)]);
+
+export const accidents = mysqlTable("accidents", {
+  id: int("id").autoincrement().primaryKey(),
+  ref: varchar("ref", { length: 48 }).notNull().unique(),
+  vehicleId: int("vehicleId").references(() => vehicles.id, { onDelete: "set null" }),
+  vehiclePlate: varchar("vehiclePlate", { length: 32 }).notNull(),
+  driverId: int("driverId").references(() => drivers.id, { onDelete: "set null" }),
+  driverName: varchar("driverName", { length: 160 }).notNull().default("—"),
+  occurredAt: varchar("occurredAt", { length: 40 }).notNull(),
+  location: varchar("location", { length: 240 }).notNull().default("—"),
+  description: text("description").notNull(),
+  najmReportNo: varchar("najmReportNo", { length: 120 }),
+  najmReportName: varchar("najmReportName", { length: 255 }),
+  najmReportUrl: mediumtext("najmReportUrl"),
+  workflowStage: mysqlEnum("workflowStage", ["بلاغ", "تحديد المسؤولية", "تقدير الإصلاح", "مطالبة التأمين", "التسوية", "مغلق", "ملغي"]).notNull().default("بلاغ"),
+  faultPercent: int("faultPercent"),
+  estimatedRepairCost: int("estimatedRepairCost"),
+  insurerName: varchar("insurerName", { length: 180 }),
+  insurerClaimRef: varchar("insurerClaimRef", { length: 120 }),
+  insurerClaimStatus: mysqlEnum("insurerClaimStatus", ["غير مرفوعة", "مرفوعة", "مقبولة", "مرفوضة", "مصروفة"]).notNull().default("غير مرفوعة"),
+  settlementAmount: int("settlementAmount"),
+  resolutionNotes: text("resolutionNotes"),
+  reportedByUserId: int("reportedByUserId").references(() => users.id, { onDelete: "set null" }),
+  reportedByName: varchar("reportedByName", { length: 160 }).notNull(),
+  closedAt: timestamp("closedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  archivedAt: timestamp("archivedAt"),
+}, (table) => [uniqueIndex("accidents_najm_report_unique").on(table.najmReportNo), index("accidents_vehicle_occurred_idx").on(table.vehicleId, table.occurredAt), index("accidents_stage_created_idx").on(table.workflowStage, table.createdAt)]);
+
+export const accidentEvents = mysqlTable("accident_events", {
+  id: int("id").autoincrement().primaryKey(),
+  accidentId: int("accidentId").notNull().references(() => accidents.id, { onDelete: "cascade" }),
+  fromStage: varchar("fromStage", { length: 60 }),
+  toStage: varchar("toStage", { length: 60 }).notNull(),
+  details: text("details"),
+  actorUserId: int("actorUserId").references(() => users.id, { onDelete: "set null" }),
+  actorName: varchar("actorName", { length: 160 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => [index("accident_events_accident_created_idx").on(table.accidentId, table.createdAt)]);
 
 export const auditLogs = mysqlTable("audit_logs", {
   id: int("id").autoincrement().primaryKey(),
@@ -436,4 +538,15 @@ export type InsertTask = typeof tasks.$inferInsert;
 export type Notification = typeof notifications.$inferSelect;
 export type SettingCatalog = typeof settingCatalog.$inferSelect;
 export type InsertSettingCatalog = typeof settingCatalog.$inferInsert;
+export type InventoryItem = typeof inventoryItems.$inferSelect;
+export type InsertInventoryItem = typeof inventoryItems.$inferInsert;
+export type InventoryMovement = typeof inventoryMovements.$inferSelect;
+export type InsertInventoryMovement = typeof inventoryMovements.$inferInsert;
+export type InventoryRequest = typeof inventoryRequests.$inferSelect;
+export type InsertInventoryRequest = typeof inventoryRequests.$inferInsert;
+export type InventoryRequestItem = typeof inventoryRequestItems.$inferSelect;
+export type InsertInventoryRequestItem = typeof inventoryRequestItems.$inferInsert;
+export type Accident = typeof accidents.$inferSelect;
+export type InsertAccident = typeof accidents.$inferInsert;
+export type AccidentEvent = typeof accidentEvents.$inferSelect;
 export type AuditLog = typeof auditLogs.$inferSelect;

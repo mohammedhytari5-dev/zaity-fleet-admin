@@ -1,19 +1,33 @@
-import { and, desc, eq, isNull, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { drizzle } from "drizzle-orm/mysql2";
 import { createPool } from "mysql2";
 import { getMysqlConnectionOptions } from "./db-connection";
-import { AuditLog, Claim, Client, Contract, ContractItem, Document, Driver, Employee, InsertEmployee, InsertClaim, InsertClient, InsertContract, InsertContractItem, InsertDocument, InsertDriver, InsertMaintenanceRequest, InsertUser, InsertVehicle, InsertVehicleExpense, VehicleExpense, InsertVehicleRevenue, VehicleRevenue, MaintenanceRequest, User, Vehicle, auditLogs, claims, clientRepresentatives, clients, contractItems, contracts, documents, drivers, employees, maintenanceEvents, maintenanceRequests, notifications, notificationReads, payments, vehicleExpenses, vehicleRevenues, settingCatalog, tasks, users, vehicles } from "../drizzle/schema";
-import { canAdvanceMaintenance, statusForMaintenanceStage, type MaintenanceStage } from "../shared/maintenance-domain";
+import { AuditLog, Claim, Client, Contract, ContractItem, Document, Driver, Employee, InsertEmployee, InsertClaim, InsertClient, InsertContract, InsertContractItem, InsertDocument, InsertDriver, InsertMaintenanceRequest, InsertUser, InsertVehicle, InsertVehicleExpense, VehicleExpense, InsertVehicleRevenue, VehicleRevenue, MaintenanceRequest, User, Vehicle, auditLogs, claims, clientRepresentatives, clients, contractItems, contracts, documents, drivers, employees, maintenanceEvents, maintenanceRequests, notifications, notificationReads, payments, vehicleExpenses, vehicleRevenues, settingCatalog, tasks, users, vehicles, InventoryItem, InsertInventoryItem, InventoryMovement, InsertInventoryMovement, inventoryItems, inventoryMovements, InventoryRequest, inventoryRequests, inventoryRequestItems, Accident, InsertAccident, accidents, AccidentEvent, accidentEvents } from "../drizzle/schema";
+import { canAdvanceMaintenance, canCloseMaintenance, canEditMaintenanceQuote, hasMaintenanceQuote, statusForMaintenanceStage, type MaintenanceStage } from "../shared/maintenance-domain";
 import { InsertProject, Project, projects } from "../drizzle/schema";
 import { InsertPayable, Payable, PayablePayment, InsertPayablePayment, payables, payablePayments } from "../drizzle/schema";
 import { ENV } from './_core/env';
 import { summarizeMaintenanceItems } from "./vehicle-maintenance-summary";
-import { canUpdateClaim, validateClaimContractLink, validatePaymentLinkConsistency } from "./finance-domain";
+import { canAcceptContractPayment, canArchiveClaim, canChangeClaimReferences, canSetContractCollection, canUpdateClaim, ClaimPaymentHistoryError, ClaimReferenceConflictError, validateClaimContractLink, validatePaymentLinkConsistency } from "./finance-domain";
 import { isPayableExpensePosted } from "./payable-expense-policy";
-import { maintenanceInvoiceTotal } from "./maintenance-invoice-total";
+import { hasPostedMaintenanceInvoices, maintenanceInvoiceTotal, shouldClearMaintenanceActualCost } from "./maintenance-invoice-total";
+import { maintenanceExpenseTotalInPeriod } from "./maintenance-report";
 import { isProtectedLastAdminDemotion } from "./user-role-domain";
 import { notificationReadAtForUser } from "./notification-access";
+import { isReceivableClaimStatus, outstandingClaimAmount, receivableAging, totalOutstandingClaims, countOutstandingClaims } from "../shared/receivables";
+import { linkedVehicleDriverNameUpdate } from "./driver-domain";
+import { deriveSingleVehicleAutoRevenues } from "./vehicle-revenue-allocation";
+import { isValidReportPeriod, reportPeriodExclusiveEnd } from "./report-period";
+import { groupIncomingPaymentsForReport, incomingPaymentRowsForReport } from "./report-ledger";
+import { employeeAccountLinkError } from "./employee-account";
+import { requiredPermissionsForStoredFile } from "./stored-file-access";
+import { canAssignVehicleToContract, vehicleStatusAfterContractAssignment, vehicleStatusAfterContractRemoval } from "../shared/vehicle-contract-policy";
+import { canUpdateTask } from "../shared/task-access";
+import { formatCompanyDate, isCompanyDateBeforeToday, isWithinUpcomingDays, resolveDocumentStatus, resolveRenewalStatus } from "../shared/date-utils";
+import { summarizePayableBalances } from "../shared/payable-report-summary";
+import { nextInventoryBalance, nextInventoryRequestStatus, validateInventoryRequestAvailability, type InventoryDirection } from "./inventory-domain";
+import { nextAccidentStage, type AccidentStage } from "./accident-domain";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 let _authSchemaReady: Promise<void> | null = null;
@@ -167,21 +181,15 @@ export async function getVehicleFinancialProfile(vehicleId: number) {
     const { receiptUrl, ...safeAllocation } = allocation;
     return { ...safeAllocation, hasReceipt: Boolean(receiptUrl), paidAt: payment?.paidAt ?? "—", method: payment?.method ?? "—", reference: payment?.reference ?? "—", contractRef: contract?.ref ?? "—", client: allocation.clientName || contract?.client || "—" };
   });
-  const autoLinkedPayments = paymentRows.flatMap(payment => {
-    const contractId = payment.contractId ?? (payment.claimId ? claimById.get(payment.claimId)?.contractId : null);
-    if (!contractId) return [];
-    const contract = contractById.get(contractId);
-    if (!contract) return [];
-    const items = contractItemRows.filter(item => item.contractId === contractId);
-    const linkedVehicleIds = Array.from(new Set(items.map(item => item.vehicleId).filter((id): id is number => id !== null)));
-    const linkedToThisVehicle = items.length ? items.some(item => item.vehicleId === vehicleId) : vehicle.contractId === contractId;
-    const isSingleVehicleContract = items.length ? linkedVehicleIds.length === 1 && linkedVehicleIds[0] === vehicleId : vehicle.contractId === contractId;
-    if (!linkedToThisVehicle || !isSingleVehicleContract) return [];
-    const allocated = usedByPayment.get(payment.id) ?? 0;
-    const remaining = Math.max(0, Number(payment.amount || 0) - allocated);
-    if (!remaining) return [];
-    const client = clientRows.find(row => row.id === (payment.clientId ?? contract.clientId));
-    return [{ id: -payment.id, vehicleId, paymentId: payment.id, projectId: vehicle.projectId ?? null, projectName: vehicle.project || "—", clientId: client?.id ?? contract.clientId ?? null, clientName: client?.name ?? contract.client ?? "—", amount: remaining, receiptName: null, notes: "دفعة مرتبطة تلقائيًا بعقد بباص واحد", createdByName: "تلقائي", hasReceipt: false, autoLinked: true, paidAt: payment.paidAt, method: payment.method, reference: payment.reference, contractRef: contract.ref, client: client?.name ?? contract.client ?? "—" }];
+  const autoLinkedPayments = deriveSingleVehicleAutoRevenues({
+    payments: paymentRows,
+    claims: claimRows,
+    contracts: contractRows,
+    contractItems: contractItemRows,
+    vehicles: [vehicle],
+    projects: projectRows,
+    clients: clientRows,
+    allocations: allAllocations,
   });
   const allRevenueDetails = [...revenueDetails, ...autoLinkedPayments].sort((a, b) => String(b.paidAt || "").localeCompare(String(a.paidAt || "")));
   const payableReceipts = new Set(payableRows.filter(row => Boolean(row.receiptUrl)).map(row => row.id));
@@ -498,16 +506,50 @@ export async function updateEmployee(id: number, input: Partial<InsertEmployee>)
   await db.update(employees).set(input).where(and(eq(employees.id, id), isNull(employees.archivedAt)));
   return (await db.select().from(employees).where(eq(employees.id, id)).limit(1))[0] ?? null;
 }
-export async function archiveEmployee(id: number): Promise<boolean> {
+export async function archiveEmployee(id: number, actor: LedgerActor = {}): Promise<boolean> {
   const db = await getDb();
   if (!db) return false;
   return db.transaction(async tx => {
-    const employee = (await tx.select().from(employees).where(and(eq(employees.id, id), isNull(employees.archivedAt))).limit(1))[0];
+    const initial = (await tx.select({ id: employees.id, userId: employees.userId }).from(employees).where(and(eq(employees.id, id), isNull(employees.archivedAt))).limit(1))[0];
+    if (!initial) return false;
+    const lockedUsers = initial.userId !== null
+      ? await tx.select({ id: users.id, role: users.role, isActive: users.isActive }).from(users).orderBy(users.id).for("update")
+      : [];
+    const employee = (await tx.select().from(employees).where(and(eq(employees.id, id), isNull(employees.archivedAt))).limit(1).for("update"))[0];
     if (!employee) return false;
+    if (employee.userId !== initial.userId) throw new Error("تغير حساب الموظف أثناء الإنهاء؛ أعد المحاولة للتأكد من تعطيل الحساب الصحيح");
+    if (employee.userId !== null) {
+      const account = lockedUsers.find(user => user.id === employee.userId);
+      if (account?.role === "admin" && account.isActive === 1) {
+        if (lockedUsers.filter(user => user.role === "admin" && user.isActive === 1).length <= 1) throw new Error("لا يمكن إنهاء ملف الموظف المرتبط بآخر مدير نشط؛ انقل صلاحية الإدارة أولًا");
+      }
+      await tx.update(users).set({ isActive: 0 }).where(eq(users.id, employee.userId));
+    }
     await tx.update(vehicles).set({ employeeId: null }).where(eq(vehicles.employeeId, id));
     await tx.update(projects).set({ managerEmployeeId: null }).where(eq(projects.managerEmployeeId, id));
     await tx.update(employees).set({ status: "منتهي الخدمة", archivedAt: new Date() }).where(eq(employees.id, id));
+    await recordAuditInTransaction(tx, actor, "employees.archive", "employees", id, employee.userId ? `أرشفة الموظف وفصل إسناداته وتعطيل حساب المستخدم #${employee.userId}` : "أرشفة الموظف وفصل إسناداته التشغيلية");
     return true;
+  });
+}
+export async function linkEmployeeUser(employeeId: number, userId: number | null, actor: LedgerActor = {}) {
+  const db = await getDb();
+  if (!db) return null;
+  return db.transaction(async tx => {
+    const account = userId !== null
+      ? (await tx.select({ id: users.id, isActive: users.isActive }).from(users).where(eq(users.id, userId)).limit(1).for("update"))[0]
+      : undefined;
+    if (userId !== null) {
+      const linkedEmployee = (await tx.select({ id: employees.id }).from(employees).where(eq(employees.userId, userId)).limit(1).for("update"))[0];
+      const linkError = employeeAccountLinkError({ userExists: Boolean(account), userActive: account?.isActive === 1, employeeId, linkedEmployeeId: linkedEmployee?.id ?? null });
+      if (linkError) throw new Error(linkError);
+    }
+    const employee = (await tx.select().from(employees).where(and(eq(employees.id, employeeId), isNull(employees.archivedAt))).limit(1).for("update"))[0];
+    if (!employee) return null;
+    await tx.update(employees).set({ userId }).where(eq(employees.id, employeeId));
+    const saved = (await tx.select().from(employees).where(eq(employees.id, employeeId)).limit(1))[0] ?? null;
+    if (saved) await recordAuditInTransaction(tx, actor, userId === null ? "employees.account.unlink" : "employees.account.link", "employees", employeeId, userId === null ? "فصل حساب النظام عن ملف الموظف" : `ربط حساب النظام #${userId} بملف الموظف`);
+    return saved;
   });
 }
 export async function listProjects(): Promise<(Project & { actualVehicles: number })[] | null> {
@@ -576,9 +618,13 @@ export async function updateProject(id: number, input: Partial<InsertProject>): 
       }
     }
   }
-  if (nextClientId && nextContractId) {
+  if (nextContractId) {
     const contract = (await db.select().from(contracts).where(and(eq(contracts.id, nextContractId), isNull(contracts.archivedAt))).limit(1))[0];
-    if (!contract || (contract.clientId && contract.clientId !== nextClientId)) return null;
+    if (!contract || (contract.clientId && nextClientId && contract.clientId !== nextClientId)) return null;
+    if (contract.clientId) {
+      normalized.clientId = contract.clientId;
+      normalized.client = contract.client;
+    }
   }
   if (input.clientId !== undefined && input.clientId !== current.clientId) {
     const assignedVehicles = await db.select({ contractId: vehicles.contractId }).from(vehicles).where(and(eq(vehicles.projectId, id), isNull(vehicles.archivedAt)));
@@ -627,9 +673,17 @@ export async function createDriver(input: InsertDriver): Promise<Driver | null> 
 export async function updateDriver(id: number, input: Partial<InsertDriver>): Promise<Driver | null> {
   const db = await getDb();
   if (!db) return null;
-  await db.update(drivers).set(input).where(and(eq(drivers.id, id), isNull(drivers.archivedAt)));
-  const updated = await db.select().from(drivers).where(eq(drivers.id, id)).limit(1);
-  return updated[0] ?? null;
+  return db.transaction(async tx => {
+    const current = (await tx.select().from(drivers).where(and(eq(drivers.id, id), isNull(drivers.archivedAt))).limit(1))[0];
+    if (!current) return null;
+    await tx.update(drivers).set(input).where(and(eq(drivers.id, id), isNull(drivers.archivedAt)));
+    const linkedNameUpdate = linkedVehicleDriverNameUpdate(current, input.name);
+    if (linkedNameUpdate) {
+      await tx.update(vehicles).set({ driver: linkedNameUpdate.name }).where(and(eq(vehicles.id, linkedNameUpdate.vehicleId), eq(vehicles.driverId, id), isNull(vehicles.archivedAt)));
+    }
+    const updated = await tx.select().from(drivers).where(and(eq(drivers.id, id), isNull(drivers.archivedAt))).limit(1);
+    return updated[0] ?? null;
+  });
 }
 
 export async function archiveDriver(id: number): Promise<boolean> {
@@ -665,12 +719,28 @@ export async function assignVehicleDriver(vehicleId: number, driverId: number | 
 }
 
 type LedgerActor = { id?: number | null; name?: string | null };
+async function recordAuditInTransaction(
+  tx: any,
+  actor: LedgerActor,
+  action: string,
+  entityType: string,
+  entityId: number,
+  details: string,
+) {
+  await tx.insert(auditLogs).values({
+    userId: actor.id ?? null,
+    action: action.slice(0, 80),
+    entityType: entityType.slice(0, 80),
+    entityId,
+    details,
+  });
+}
 function parseRiyalAmount(value: unknown) {
   const arabicDigits: Record<string, string> = { "٠": "0", "١": "1", "٢": "2", "٣": "3", "٤": "4", "٥": "5", "٦": "6", "٧": "7", "٨": "8", "٩": "9" };
   const normalized = String(value ?? "").replace(/[٠-٩]/g, digit => arabicDigits[digit]).replace(/[٬,]/g, "").replace(/[^0-9.\-]/g, "");
   return Math.max(0, Math.round(Number(normalized) || 0));
 }
-async function syncMaintenanceExpense(tx: DbExecutor, request: MaintenanceRequest, actor: LedgerActor = {}) {
+async function syncMaintenanceExpense(tx: DbExecutor, request: MaintenanceRequest, actor: LedgerActor = {}, clearPostedCostWhenNoInvoicesRemain = false) {
   if (!request.vehicleId) return;
   const linkedPayables = await tx.select({ amount: payables.amount, status: payables.status }).from(payables).where(and(eq(payables.maintenanceRequestId, request.id), isNull(payables.archivedAt)));
   const linkedInvoiceTotal = maintenanceInvoiceTotal(linkedPayables);
@@ -678,16 +748,24 @@ async function syncMaintenanceExpense(tx: DbExecutor, request: MaintenanceReques
   const existing = (await tx.select().from(vehicleExpenses).where(eq(vehicleExpenses.maintenanceRequestId, request.id)).limit(1))[0];
   const vehicle = (await tx.select().from(vehicles).where(eq(vehicles.id, request.vehicleId)).limit(1))[0];
   if (!vehicle) return;
-  if (linkedPayables.length) {
+  if (hasPostedMaintenanceInvoices(linkedPayables)) {
     await tx.update(maintenanceRequests).set({ cost: `${amount} SAR` }).where(eq(maintenanceRequests.id, request.id));
     if (existing && !existing.archivedAt) await tx.update(vehicleExpenses).set({ archivedAt: new Date(), archivedByUserId: actor.id ?? null, archivedByName: actor.name || "—" }).where(eq(vehicleExpenses.id, existing.id));
     return;
   }
+  if (shouldClearMaintenanceActualCost({ cancelledInvoiceWasPosted: clearPostedCostWhenNoInvoicesRemain, hasOtherPostedInvoices: false })) {
+    await tx.update(maintenanceRequests).set({ cost: "0 SAR" }).where(eq(maintenanceRequests.id, request.id));
+    if (existing && !existing.archivedAt) await tx.update(vehicleExpenses).set({ archivedAt: new Date(), archivedByUserId: actor.id ?? null, archivedByName: actor.name || "—" }).where(eq(vehicleExpenses.id, existing.id));
+    return;
+  }
+  // A newly entered supplier invoice is still awaiting approval. Keep the
+  // currently recorded actual cost until finance posts an approved invoice.
+  if (linkedPayables.length) return;
   const reason = [request.type, request.reason !== "—" ? request.reason : ""].filter(Boolean).join(" · ").slice(0, 300) || "تكلفة أمر صيانة";
   const sameVehicle = existing?.vehicleId === request.vehicleId;
   const snapshot = {
     vehicleId: request.vehicleId, projectId: sameVehicle ? existing?.projectId ?? null : vehicle.projectId ?? null, projectName: sameVehicle ? existing?.projectName || vehicle.project || "—" : vehicle.project || "—", clientId: sameVehicle ? existing?.clientId ?? null : vehicle.clientId ?? null, clientName: sameVehicle ? existing?.clientName || vehicle.client || "—" : vehicle.client || "—",
-    category: "صيانة" as const, amount, spentAt: request.start && request.start !== "—" ? request.start : new Date().toISOString().slice(0, 10), description: reason,
+    category: "صيانة" as const, amount, spentAt: request.start && request.start !== "—" ? request.start : formatCompanyDate(), description: reason,
     vendor: request.manager || "—", receiptName: request.receiptName ?? null, receiptUrl: request.receiptUrl ?? null,
     updatedByUserId: actor.id ?? existing?.updatedByUserId ?? null, updatedByName: actor.name || existing?.updatedByName || "—",
   };
@@ -727,6 +805,7 @@ export async function createMaintenanceRequest(input: InsertMaintenanceRequest, 
     if (input.vehicleId && input.priority === "طارئ") await tx.update(vehicles).set({ status: "متوقفة" }).where(eq(vehicles.id, input.vehicleId));
     const created = (await tx.select().from(maintenanceRequests).where(eq(maintenanceRequests.id, id)).limit(1))[0] ?? null;
     if (created) await syncMaintenanceExpense(tx, created, actor);
+    if (created) await recordAuditInTransaction(tx, actor, "maintenance.create", "maintenance", id, "تم إنشاء طلب صيانة");
     return created;
   });
 }
@@ -738,13 +817,23 @@ export async function advanceMaintenanceRequest(id: number, toStage: Maintenance
     await tx.execute(sql`SELECT id FROM maintenance_requests WHERE id = ${id} FOR UPDATE`);
     const current = (await tx.select().from(maintenanceRequests).where(and(eq(maintenanceRequests.id, id), isNull(maintenanceRequests.archivedAt))).limit(1))[0];
     if (!current) return null;
-    if (toStage === "مغلق" && current.approvalStatus === "معتمد" && parseRiyalAmount(current.cost) <= 0) throw new Error("أدخل التكلفة الفعلية قبل إغلاق طلب الصيانة");
+    if (toStage === "اعتماد" && !hasMaintenanceQuote(current)) throw new Error("أرفق عرض سعر الورشة وأدخل قيمة عرض الورشة أو قطع الغيار قبل إرسال الطلب للمالية");
+    if (toStage === "مغلق") {
+      const linkedInvoices = await tx.select({ status: payables.status }).from(payables).where(and(eq(payables.maintenanceRequestId, id), isNull(payables.archivedAt)));
+      if (!canCloseMaintenance({ approvalStatus: current.approvalStatus as "غير مطلوب" | "بانتظار الاعتماد" | "معتمد" | "مرفوض", actualCost: parseRiyalAmount(current.cost), linkedInvoices })) {
+        if (current.approvalStatus === "معتمد" && linkedInvoices.some(invoice => !isPayableExpensePosted(invoice.status))) throw new Error("اعتمد جميع فواتير الورشة وقطع الغيار المرتبطة قبل إغلاق طلب الصيانة");
+        if (current.approvalStatus === "معتمد") throw new Error("سجّل فاتورة معتمدة بقيمتها الفعلية قبل إغلاق طلب الصيانة");
+        throw new Error("لا يمكن إغلاق الطلب قبل إكمال الفحص بعد الإصلاح");
+      }
+    }
     if (!canAdvanceMaintenance({ from: current.workflowStage as MaintenanceStage, to: toStage, approvalStatus: current.approvalStatus })) throw new Error("لا يمكن نقل الطلب إلى هذه المرحلة قبل استكمال المرحلة الحالية أو اعتماد التكلفة");
     const status = statusForMaintenanceStage(toStage);
     await tx.update(maintenanceRequests).set({ workflowStage: toStage, status, ...(toStage === "اعتماد" ? { approvalStatus: "بانتظار الاعتماد" as const } : {}), ...(toStage === "مغلق" ? { closedAt: new Date() } : {}) }).where(eq(maintenanceRequests.id, id));
     await tx.insert(maintenanceEvents).values({ maintenanceRequestId: id, eventType: "تغيير المرحلة", fromStage: current.workflowStage, toStage, actorUserId: actor.id ?? null, actorName: actor.name || "—" });
     if (current.vehicleId) await refreshVehicleMaintenanceStatus(tx, current.vehicleId);
-    return (await tx.select().from(maintenanceRequests).where(eq(maintenanceRequests.id, id)).limit(1))[0] ?? null;
+    const updated = (await tx.select().from(maintenanceRequests).where(eq(maintenanceRequests.id, id)).limit(1))[0] ?? null;
+    if (updated) await recordAuditInTransaction(tx, actor, "maintenance.advance", "maintenance", id, "تم نقل طلب الصيانة إلى مرحلة أخرى");
+    return updated;
   });
 }
 
@@ -763,7 +852,9 @@ export async function decideMaintenanceApproval(id: number, approved: boolean, d
     await tx.update(maintenanceRequests).set({ workflowStage: toStage, status, approvalStatus: approved ? "معتمد" : "مرفوض", approvedByUserId: actor.id ?? null, approvedByName: actor.name || "—", approvedAt: new Date(), approvalNotes: decision.notes || null, fundingType: approved ? decision.fundingType! : null, fundingReference: approved ? decision.fundingReference! : null, fundingAmount: approved ? decision.fundingAmount! : null, fundingRecipient: approved ? decision.fundingRecipient! : null, advanceStatus: approved && decision.fundingType === "عهدة" ? "مفتوحة" : null, fundingIssuedAt: approved ? new Date() : null, fundingIssuedByUserId: approved ? actor.id ?? null : null, fundingIssuedByName: approved ? actor.name || "—" : null }).where(eq(maintenanceRequests.id, id));
     await tx.insert(maintenanceEvents).values({ maintenanceRequestId: id, eventType: approved ? `اعتماد الصيانة · ${decision.fundingType}` : "رفض الطلب", fromStage: current.workflowStage, toStage, details: [fundingDetails, decision.notes].filter(Boolean).join(" · ") || null, actorUserId: actor.id ?? null, actorName: actor.name || "—" });
     if (current.vehicleId) await refreshVehicleMaintenanceStatus(tx, current.vehicleId);
-    return (await tx.select().from(maintenanceRequests).where(eq(maintenanceRequests.id, id)).limit(1))[0] ?? null;
+    const updated = (await tx.select().from(maintenanceRequests).where(eq(maintenanceRequests.id, id)).limit(1))[0] ?? null;
+    if (updated) await recordAuditInTransaction(tx, actor, "maintenance.decideApproval", "maintenance", id, approved ? "تم اعتماد طلب الصيانة" : "تم رفض طلب الصيانة");
+    return updated;
   });
 }
 
@@ -777,7 +868,9 @@ export async function settleMaintenanceAdvance(id: number, reference: string, ac
     if (current.fundingType !== "عهدة" || current.advanceStatus !== "مفتوحة") throw new Error("لا توجد عهدة مفتوحة لتسويتها");
     await tx.update(maintenanceRequests).set({ advanceStatus: "مسواة", advanceSettledAt: new Date(), advanceSettlementReference: reference }).where(eq(maintenanceRequests.id, id));
     await tx.insert(maintenanceEvents).values({ maintenanceRequestId: id, eventType: "تسوية العهدة", fromStage: current.workflowStage, toStage: current.workflowStage, details: `مرجع التسوية: ${reference}`, actorUserId: actor.id ?? null, actorName: actor.name || "—" });
-    return (await tx.select().from(maintenanceRequests).where(eq(maintenanceRequests.id, id)).limit(1))[0] ?? null;
+    const updated = (await tx.select().from(maintenanceRequests).where(eq(maintenanceRequests.id, id)).limit(1))[0] ?? null;
+    if (updated) await recordAuditInTransaction(tx, actor, "maintenance.settleAdvance", "maintenance", id, "تمت تسوية عهدة الصيانة");
+    return updated;
   });
 }
 
@@ -790,6 +883,7 @@ export async function listMaintenanceEvents(id: number) {
 export async function updateMaintenanceRequest(id: number, input: Partial<InsertMaintenanceRequest>, actor: LedgerActor = {}): Promise<MaintenanceRequest | null> {
   const db = await getDb();
   if (!db) return null;
+  if (input.cost !== undefined || input.laborCost !== undefined || input.partsCost !== undefined || input.receiptName !== undefined || input.receiptUrl !== undefined) throw new Error("سجّل فاتورة المورد من شاشة المستحقات علينا واربطها بطلب الصيانة لتحديث التكلفة الفعلية");
   return db.transaction(async tx => {
     await tx.execute(sql`SELECT id FROM maintenance_requests WHERE id = ${id} FOR UPDATE`);
     const current = (await tx.select().from(maintenanceRequests).where(and(eq(maintenanceRequests.id, id), isNull(maintenanceRequests.archivedAt))).limit(1))[0];
@@ -800,11 +894,9 @@ export async function updateMaintenanceRequest(id: number, input: Partial<Insert
       (input.quotedPartsCost !== undefined && Number(input.quotedPartsCost) !== Number(current.quotedPartsCost)) ||
       (input.quoteUrl !== undefined && input.quoteUrl !== current.quoteUrl) ||
       (input.quoteName !== undefined && input.quoteName !== current.quoteName);
-    if (quoteChanged && current.approvalStatus !== "بانتظار الاعتماد") throw new Error("لا يمكن تغيير عرض السعر بعد اعتماد المالية");
+    if (quoteChanged && !canEditMaintenanceQuote({ workflowStage: current.workflowStage as MaintenanceStage, approvalStatus: current.approvalStatus as "غير مطلوب" | "بانتظار الاعتماد" | "معتمد" | "مرفوض" })) throw new Error("لا يمكن تغيير عرض السعر بعد اعتماد المالية");
     const linkedInvoices = await tx.select({ id: payables.id }).from(payables).where(and(eq(payables.maintenanceRequestId, id), isNull(payables.archivedAt)));
-    if (linkedInvoices.length && (input.cost !== undefined || input.laborCost !== undefined || input.partsCost !== undefined || input.receiptName !== undefined || input.receiptUrl !== undefined)) throw new Error("التكلفة والفواتير الفعلية لهذا الطلب تُحسب من فواتير المورد المرتبطة به");
     if (linkedInvoices.length && input.vehicleId !== undefined && input.vehicleId !== current.vehicleId) throw new Error("لا يمكن تغيير مركبة طلب الصيانة بعد ربط فواتير مورد به");
-    if ((input.cost !== undefined || input.laborCost !== undefined || input.partsCost !== undefined || input.receiptUrl !== undefined) && (current.approvalStatus !== "معتمد" || !["تنفيذ", "فحص بعد الإصلاح"].includes(current.workflowStage))) throw new Error("يجب اعتماد الطلب وبدء التنفيذ قبل تسجيل المصروف الفعلي");
     const targetVehicleId = input.vehicleId !== undefined ? input.vehicleId : current.vehicleId;
     const changes: Partial<InsertMaintenanceRequest> = { ...input };
     if (targetVehicleId && targetVehicleId !== current.vehicleId) {
@@ -819,11 +911,12 @@ export async function updateMaintenanceRequest(id: number, input: Partial<Insert
     if (targetVehicleId) await refreshVehicleMaintenanceStatus(tx, targetVehicleId);
     const updated = (await tx.select().from(maintenanceRequests).where(eq(maintenanceRequests.id, id)).limit(1))[0] ?? null;
     if (updated) await syncMaintenanceExpense(tx, updated, actor);
+    if (updated && changedFields.length) await recordAuditInTransaction(tx, actor, "maintenance.update", "maintenance", id, "تم تعديل بيانات طلب الصيانة");
     return updated ? (await tx.select().from(maintenanceRequests).where(eq(maintenanceRequests.id, id)).limit(1))[0] ?? null : null;
   });
 }
 
-export async function archiveMaintenanceRequest(id: number): Promise<boolean> {
+export async function archiveMaintenanceRequest(id: number, actor: LedgerActor = {}): Promise<boolean> {
   const db = await getDb();
   if (!db) return false;
   return db.transaction(async tx => {
@@ -833,6 +926,7 @@ export async function archiveMaintenanceRequest(id: number): Promise<boolean> {
     if (linkedInvoices.length) throw new Error("لا يمكن أرشفة طلب صيانة مرتبط بفواتير؛ ألغ الفواتير أو احتفظ بالطلب كسجل مالي");
     await tx.update(maintenanceRequests).set({ archivedAt: new Date() }).where(eq(maintenanceRequests.id, id));
     if (current.vehicleId) await refreshVehicleMaintenanceStatus(tx, current.vehicleId);
+    await recordAuditInTransaction(tx, actor, "maintenance.archive", "maintenance", id, "تمت أرشفة طلب الصيانة");
     return true;
   });
 }
@@ -840,13 +934,15 @@ export async function archiveMaintenanceRequest(id: number): Promise<boolean> {
 export async function listDocuments(): Promise<Document[] | null> {
   const db = await getDb();
   if (!db) return null;
-  return db.select().from(documents).where(isNull(documents.archivedAt)).orderBy(desc(documents.createdAt));
+  const rows = await db.select().from(documents).where(isNull(documents.archivedAt)).orderBy(desc(documents.createdAt));
+  return rows.map(document => ({ ...document, status: resolveDocumentStatus(document.expiry, document.status) }));
 }
 
 export async function getDocument(id: number): Promise<Document | null> {
   const db = await getDb();
   if (!db) return null;
-  return (await db.select().from(documents).where(and(eq(documents.id, id), isNull(documents.archivedAt))).limit(1))[0] ?? null;
+  const document = (await db.select().from(documents).where(and(eq(documents.id, id), isNull(documents.archivedAt))).limit(1))[0] ?? null;
+  return document ? { ...document, status: resolveDocumentStatus(document.expiry, document.status) } : null;
 }
 
 async function documentEntityName(db: DbExecutor, entityType: string, entityId: number) {
@@ -858,6 +954,7 @@ async function documentEntityName(db: DbExecutor, entityType: string, entityId: 
   if (entityType === "عقد") return (await db.select({ name: contracts.ref }).from(contracts).where(and(eq(contracts.id, entityId), isNull(contracts.archivedAt))).limit(1))[0]?.name ?? null;
   if (entityType === "مطالبة") return (await db.select({ name: claims.ref }).from(claims).where(and(eq(claims.id, entityId), isNull(claims.archivedAt))).limit(1))[0]?.name ?? null;
   if (entityType === "صيانة") return (await db.select({ name: maintenanceRequests.ref }).from(maintenanceRequests).where(and(eq(maintenanceRequests.id, entityId), isNull(maintenanceRequests.archivedAt))).limit(1))[0]?.name ?? null;
+  if (entityType === "حادث") return (await db.select({ name: accidents.ref }).from(accidents).where(and(eq(accidents.id, entityId), isNull(accidents.archivedAt))).limit(1))[0]?.name ?? null;
   return null;
 }
 
@@ -987,6 +1084,10 @@ export async function updateClaim(id: number, input: Partial<InsertClaim>): Prom
     if (!current) return null;
     if (!canUpdateClaim({ currentStatus: current.status, currentAmount: current.amount, paid: current.paid, nextStatus: input.status, nextAmount: input.amount })) return null;
     const references = await normalizeClaimLinks(tx, input, current);
+    if (references.clientId !== current.clientId || references.contractId !== current.contractId) {
+      const activePayment = (await tx.select({ id: payments.id }).from(payments).where(and(eq(payments.claimId, id), isNull(payments.archivedAt))).limit(1))[0];
+      if (!canChangeClaimReferences({ hasActivePayments: Boolean(activePayment), clientChanged: references.clientId !== current.clientId, contractChanged: references.contractId !== current.contractId })) throw new ClaimReferenceConflictError();
+    }
     await tx.update(claims).set({ ...input, ...references }).where(and(eq(claims.id, id), isNull(claims.archivedAt)));
     return (await tx.select().from(claims).where(eq(claims.id, id)).limit(1))[0] ?? null;
   });
@@ -996,7 +1097,10 @@ export async function archiveClaim(id: number): Promise<boolean> {
   const db = await getDb();
   if (!db) return false;
   return db.transaction(async tx => {
-    await tx.execute(sql`SELECT id FROM claims WHERE id = ${id} FOR UPDATE`);
+    const current = (await tx.select({ id: claims.id }).from(claims).where(and(eq(claims.id, id), isNull(claims.archivedAt))).limit(1).for("update"))[0];
+    if (!current) return false;
+    const activePayments = await tx.select({ id: payments.id }).from(payments).where(and(eq(payments.claimId, id), isNull(payments.archivedAt))).limit(1);
+    if (!canArchiveClaim(activePayments.length > 0)) throw new ClaimPaymentHistoryError();
     await tx.update(claims).set({ archivedAt: new Date() }).where(and(eq(claims.id, id), isNull(claims.archivedAt)));
     return true;
   });
@@ -1010,39 +1114,86 @@ export async function listContracts(): Promise<Array<Contract & { items: Contrac
   return rows.map(contract => ({ ...contract, items: items.filter(item => item.contractId === contract.id) }));
 }
 
+export async function getContractRelatedModuleAccess(contractId?: number, candidateVehicleIds: number[] = []): Promise<{ vehicles: boolean; projects: boolean }> {
+  const db = await getDb();
+  if (!db) return { vehicles: candidateVehicleIds.length > 0, projects: true };
+  const [linkedVehicles, linkedProjects, candidateVehicles] = await Promise.all([
+    contractId ? db.select({ id: vehicles.id, projectId: vehicles.projectId }).from(vehicles).where(and(eq(vehicles.contractId, contractId), isNull(vehicles.archivedAt))) : Promise.resolve([]),
+    contractId ? db.select({ id: projects.id }).from(projects).where(and(eq(projects.contractId, contractId), isNull(projects.archivedAt))) : Promise.resolve([]),
+    candidateVehicleIds.length ? db.select({ projectId: vehicles.projectId }).from(vehicles).where(and(inArray(vehicles.id, candidateVehicleIds), isNull(vehicles.archivedAt))) : Promise.resolve([]),
+  ]);
+  return {
+    vehicles: candidateVehicleIds.length > 0 || linkedVehicles.length > 0,
+    projects: linkedProjects.length > 0 || linkedVehicles.some(vehicle => vehicle.projectId !== null) || candidateVehicles.some(vehicle => vehicle.projectId !== null),
+  };
+}
+
 async function ensureCollectedPayment(tx: DbExecutor, contractId: number, targetCollected: number, clientId: number | null | undefined, ref: string, paidAt: string) {
   const current = (await tx.select({ total: sql<number>`COALESCE(SUM(${payments.amount}), 0)` }).from(payments).where(and(eq(payments.contractId, contractId), isNull(payments.archivedAt))).limit(1))[0];
   const gap = Math.max(0, Math.round(targetCollected) - Number(current?.total || 0));
   if (!gap) return;
-  await tx.insert(payments).values({ contractId, clientId: clientId ?? null, amount: gap, paidAt: paidAt || new Date().toISOString().slice(0, 10), method: "تحويل بنكي", reference: `تحصيل العقد ${ref}`, notes: "دفعة تلقائية من خانة المحصل في العقد" });
+  await tx.insert(payments).values({ contractId, clientId: clientId ?? null, amount: gap, paidAt: paidAt || formatCompanyDate(), method: "تحويل بنكي", reference: `تحصيل العقد ${ref}`, notes: "دفعة تلقائية من خانة المحصل في العقد" });
+}
+
+async function lockContractResources(tx: DbExecutor, vehicleIds: number[]) {
+  const vehicleRows = new Map<number, Vehicle>();
+  for (const vehicleId of [...vehicleIds].sort((a, b) => a - b)) {
+    const vehicle = (await tx.select().from(vehicles).where(and(eq(vehicles.id, vehicleId), isNull(vehicles.archivedAt))).limit(1).for("update"))[0];
+    if (!vehicle) return null;
+    vehicleRows.set(vehicleId, vehicle);
+  }
+
+  const projectIds = Array.from(new Set(Array.from(vehicleRows.values()).map(vehicle => vehicle.projectId).filter((id): id is number => id !== null))).sort((a, b) => a - b);
+  const projectRows = new Map<number, Project>();
+  for (const projectId of projectIds) {
+    const project = (await tx.select().from(projects).where(and(eq(projects.id, projectId), isNull(projects.archivedAt))).limit(1).for("update"))[0];
+    if (!project) return null;
+    projectRows.set(projectId, project);
+  }
+  return { vehicles: vehicleRows, projects: projectRows };
 }
 
 export async function createContract(input: InsertContract, items: Omit<InsertContractItem, "contractId">[]): Promise<(Contract & { items: ContractItem[] }) | null> {
   const db = await getDb();
   if (!db) return null;
+  if (!canSetContractCollection({ total: Number(input.total ?? 0), targetCollected: Number(input.collected ?? 0), ledgerCollected: 0 })) throw new Error("المحصل لا يمكن أن يتجاوز القيمة الإجمالية للعقد");
   return db.transaction(async tx => {
-    if (input.clientId && !(await tx.select({ id: clients.id }).from(clients).where(and(eq(clients.id, input.clientId), isNull(clients.archivedAt))).limit(1))[0]) return null;
+    let normalized = { ...input };
+    if (input.clientId) {
+      const client = (await tx.select({ name: clients.name }).from(clients).where(and(eq(clients.id, input.clientId), isNull(clients.archivedAt))).limit(1))[0];
+      if (!client) return null;
+      normalized = { ...normalized, client: client.name };
+    }
     const vehicleIds = items.map(item => item.vehicleId).filter((value): value is number => value !== null);
     if (new Set(vehicleIds).size !== vehicleIds.length) return null;
+    const resources = await lockContractResources(tx, vehicleIds);
+    if (!resources) return null;
+    const linkedProjectIds = new Set<number>();
     for (const vehicleId of vehicleIds) {
-      const vehicle = (await tx.select().from(vehicles).where(and(eq(vehicles.id, vehicleId), isNull(vehicles.archivedAt))).limit(1))[0];
-      if (!vehicle || (vehicle.contractId && vehicle.contractId !== 0)) return null;
+      const vehicle = resources.vehicles.get(vehicleId)!;
+      if (!vehicle || !canAssignVehicleToContract({ status: vehicle.status, currentContractId: vehicle.contractId })) return null;
       if (vehicle.clientId && input.clientId && vehicle.clientId !== input.clientId) return null;
       if (vehicle.projectId) {
-        const project = (await tx.select().from(projects).where(and(eq(projects.id, vehicle.projectId), isNull(projects.archivedAt))).limit(1))[0];
+        const project = resources.projects.get(vehicle.projectId);
         if (!project || project.contractId) return null;
         if (project.clientId && input.clientId && project.clientId !== input.clientId) return null;
+        linkedProjectIds.add(project.id);
       }
     }
-    const result = await tx.insert(contracts).values(input);
+    const result = await tx.insert(contracts).values(normalized);
     const id = Number(result[0].insertId);
     if (items.length) await tx.insert(contractItems).values(items.map(item => ({ ...item, contractId: id })));
-    if (input.clientId) await tx.update(clients).set({ contracts: sql`${clients.contracts} + 1` }).where(eq(clients.id, input.clientId));
-    await ensureCollectedPayment(tx, id, Number(input.collected || 0), input.clientId, input.ref, input.startDate);
+    if (normalized.clientId) await tx.update(clients).set({ contracts: sql`${clients.contracts} + 1` }).where(eq(clients.id, normalized.clientId));
+    await ensureCollectedPayment(tx, id, Number(normalized.collected || 0), normalized.clientId, normalized.ref, normalized.startDate);
+    for (const projectId of Array.from(linkedProjectIds)) {
+      await tx.update(projects).set({ contractId: id, contract: normalized.ref, ...(normalized.clientId ? { clientId: normalized.clientId, client: normalized.client } : {}) }).where(and(eq(projects.id, projectId), isNull(projects.archivedAt)));
+      await tx.update(vehicles).set({ contract: normalized.ref, ...(normalized.clientId ? { clientId: normalized.clientId, client: normalized.client } : {}) }).where(and(eq(vehicles.projectId, projectId), isNull(vehicles.archivedAt)));
+    }
     for (const item of items) {
       if (!item.vehicleId) continue;
-      const vehicleStatus = item.coverage === "سائق فقط" ? "متاحة" : "مؤجرة";
-      await tx.update(vehicles).set({ contract: input.ref, client: input.client, clientId: input.clientId ?? null, contractId: id, status: vehicleStatus }).where(eq(vehicles.id, item.vehicleId));
+      const vehicle = (await tx.select({ status: vehicles.status }).from(vehicles).where(eq(vehicles.id, item.vehicleId)).limit(1))[0];
+      const vehicleStatus = vehicle ? vehicleStatusAfterContractAssignment(item.coverage || "مركبة وسائق", vehicle.status) : "متاحة";
+      await tx.update(vehicles).set({ contract: normalized.ref, ...(normalized.clientId ? { client: normalized.client, clientId: normalized.clientId } : {}), contractId: id, status: vehicleStatus }).where(eq(vehicles.id, item.vehicleId));
     }
     const created = await tx.select().from(contracts).where(eq(contracts.id, id)).limit(1);
     const createdItems = await tx.select().from(contractItems).where(eq(contractItems.contractId, id));
@@ -1059,40 +1210,89 @@ export async function updateContract(id: number, input: Partial<InsertContract>,
     if (!current) return null;
     const oldItems = await tx.select().from(contractItems).where(eq(contractItems.contractId, id));
     const nextClientId = input.clientId === undefined ? current.clientId : input.clientId;
-    if (nextClientId && !(await tx.select({ id: clients.id }).from(clients).where(and(eq(clients.id, nextClientId), isNull(clients.archivedAt))).limit(1))[0]) return null;
-    if (input.collected !== undefined) {
-      const currentPayments = (await tx.select({ total: sql<number>`COALESCE(SUM(${payments.amount}), 0)` }).from(payments).where(and(eq(payments.contractId, id), isNull(payments.archivedAt))).limit(1))[0];
-      if (input.collected < Number(currentPayments?.total || 0)) return null;
+    if (nextClientId !== current.clientId) {
+      const linkedClaims = await tx.select({ id: claims.id }).from(claims).where(eq(claims.contractId, id));
+      const directPayments = await tx.select({ id: payments.id }).from(payments).where(eq(payments.contractId, id));
+      const claimPayments = linkedClaims.length
+        ? await tx.select({ id: payments.id }).from(payments).where(inArray(payments.claimId, linkedClaims.map(claim => claim.id)))
+        : [];
+      if (linkedClaims.length || directPayments.length || claimPayments.length) {
+        throw new Error("لا يمكن تغيير عميل العقد بعد إنشاء مطالبات أو تسجيل دفعات مرتبطة به؛ حافظ على السجل المالي وأنشئ عقدًا جديدًا عند الحاجة");
+      }
     }
+    let nextClient = input.clientId === null ? "—" : input.client ?? current.client;
+    if (nextClientId) {
+      const client = (await tx.select({ id: clients.id, name: clients.name }).from(clients).where(and(eq(clients.id, nextClientId), isNull(clients.archivedAt))).limit(1))[0];
+      if (!client) return null;
+      nextClient = client.name;
+    }
+    const normalizedInput = { ...input, ...(nextClientId || input.clientId === null ? { client: nextClient } : {}) };
+    const shouldSyncClient = Boolean(nextClientId) || input.clientId === null;
+    if (input.total !== undefined || input.collected !== undefined) {
+      const currentPayments = (await tx.select({ total: sql<number>`COALESCE(SUM(${payments.amount}), 0)` }).from(payments).where(and(eq(payments.contractId, id), isNull(payments.archivedAt))).limit(1))[0];
+      const ledgerCollected = Number(currentPayments?.total || 0);
+      const nextTotal = Number(input.total ?? current.total);
+      const targetCollected = Number(input.collected ?? ledgerCollected);
+      if (!canSetContractCollection({ total: nextTotal, targetCollected, ledgerCollected })) throw new Error("إجمالي العقد أو المحصل لا يطابق سجل الدفعات؛ لا يمكن خفض الإجمالي عن التحصيل المسجل أو تجاوزه");
+    }
+    const nextProjectIds = new Set<number>();
     if (items) {
       const vehicleIds = items.map(item => item.vehicleId).filter((value): value is number => value !== null);
       if (new Set(vehicleIds).size !== vehicleIds.length) return null;
+      const resources = await lockContractResources(tx, vehicleIds);
+      if (!resources) return null;
       for (const vehicleId of vehicleIds) {
-        const vehicle = (await tx.select().from(vehicles).where(and(eq(vehicles.id, vehicleId), isNull(vehicles.archivedAt))).limit(1))[0];
-        if (!vehicle || (vehicle.contractId && vehicle.contractId !== id)) return null;
+        const vehicle = resources.vehicles.get(vehicleId)!;
+        if (!vehicle || !canAssignVehicleToContract({ status: vehicle.status, currentContractId: vehicle.contractId, targetContractId: id })) return null;
         if (vehicle.clientId && nextClientId && vehicle.clientId !== nextClientId) return null;
         if (vehicle.projectId) {
-          const project = (await tx.select().from(projects).where(and(eq(projects.id, vehicle.projectId), isNull(projects.archivedAt))).limit(1))[0];
+          const project = resources.projects.get(vehicle.projectId);
           if (!project || (project.contractId && project.contractId !== id) || (project.clientId && nextClientId && project.clientId !== nextClientId)) return null;
+          nextProjectIds.add(project.id);
         }
       }
     }
-    await tx.update(contracts).set(input).where(eq(contracts.id, id));
+    await tx.update(contracts).set(normalizedInput).where(eq(contracts.id, id));
     if (items) {
       await tx.delete(contractItems).where(eq(contractItems.contractId, id));
       if (items.length) await tx.insert(contractItems).values(items.map(item => ({ ...item, contractId: id })));
       const nextVehicleIds = new Set(items.map(item => item.vehicleId).filter((value): value is number => Boolean(value)));
-      for (const item of oldItems) if (item.vehicleId && !nextVehicleIds.has(item.vehicleId)) await tx.update(vehicles).set({ contract: "—", contractId: null, client: "—", clientId: null, status: "متاحة" }).where(eq(vehicles.id, item.vehicleId));
-      const nextClient = input.client ?? current.client;
+      for (const item of oldItems) if (item.vehicleId && !nextVehicleIds.has(item.vehicleId)) {
+        const removed = (await tx.select({ status: vehicles.status, projectId: vehicles.projectId }).from(vehicles).where(eq(vehicles.id, item.vehicleId)).limit(1))[0];
+        if (removed?.projectId) {
+          const linkedProject = (await tx.select({ contractId: projects.contractId }).from(projects).where(and(eq(projects.id, removed.projectId), isNull(projects.archivedAt))).limit(1))[0];
+          if (linkedProject?.contractId === id) throw new Error("المركبة مرتبطة بعقد المشروع؛ افصلها عن المشروع قبل إزالتها من بنود العقد");
+        }
+        await tx.update(vehicles).set({ contract: "—", contractId: null, ...(removed ? { status: vehicleStatusAfterContractRemoval(removed.status) } : {}) }).where(eq(vehicles.id, item.vehicleId));
+      }
       const nextRef = input.ref ?? current.ref;
-      for (const item of items) if (item.vehicleId) await tx.update(vehicles).set({ contract: nextRef, contractId: id, client: nextClient, clientId: nextClientId ?? null, status: item.coverage === "سائق فقط" ? "متاحة" : "مؤجرة" }).where(eq(vehicles.id, item.vehicleId));
+      for (const item of items) if (item.vehicleId) {
+        const assigned = (await tx.select({ status: vehicles.status }).from(vehicles).where(eq(vehicles.id, item.vehicleId)).limit(1))[0];
+        const vehicleStatus = assigned ? vehicleStatusAfterContractAssignment(item.coverage || "مركبة وسائق", assigned.status) : "متاحة";
+        await tx.update(vehicles).set({ contract: nextRef, contractId: id, client: nextClient, clientId: nextClientId ?? null, status: vehicleStatus }).where(eq(vehicles.id, item.vehicleId));
+      }
+    }
+    const nextRef = input.ref ?? current.ref;
+    for (const projectId of Array.from(nextProjectIds)) {
+      await tx.update(projects).set({ contractId: id, contract: nextRef, ...(shouldSyncClient ? { clientId: nextClientId ?? null, client: nextClient } : {}) }).where(and(eq(projects.id, projectId), isNull(projects.archivedAt)));
     }
     if (!items && (input.ref !== undefined || input.client !== undefined || input.clientId !== undefined)) {
       await tx.update(vehicles).set({
         ...(input.ref !== undefined ? { contract: input.ref } : {}),
-        ...(input.client !== undefined ? { client: input.client } : {}),
-        ...(input.clientId !== undefined ? { clientId: input.clientId, client: input.client ?? current.client } : {}),
+        ...(input.client !== undefined ? { client: nextClient } : {}),
+        ...(input.clientId !== undefined ? { clientId: nextClientId ?? null, client: nextClient } : {}),
       }).where(and(eq(vehicles.contractId, id), isNull(vehicles.archivedAt)));
+    }
+    const linkedProjects = await tx.select({ id: projects.id }).from(projects).where(and(eq(projects.contractId, id), isNull(projects.archivedAt)));
+    for (const project of linkedProjects) {
+      await tx.update(projects).set({
+        contract: nextRef,
+        ...(shouldSyncClient ? { clientId: nextClientId ?? null, client: nextClient } : {}),
+      }).where(eq(projects.id, project.id));
+      await tx.update(vehicles).set({
+        contract: nextRef,
+        ...(shouldSyncClient ? { clientId: nextClientId ?? null, client: nextClient } : {}),
+      }).where(and(eq(vehicles.projectId, project.id), isNull(vehicles.archivedAt)));
     }
     if (input.collected !== undefined) await ensureCollectedPayment(tx, id, input.collected, nextClientId, input.ref ?? current.ref, input.startDate ?? current.startDate);
     if (input.clientId !== undefined && input.clientId !== current.clientId) {
@@ -1112,8 +1312,28 @@ export async function archiveContract(id: number) {
     await tx.execute(sql`SELECT id FROM contracts WHERE id = ${id} FOR UPDATE`);
     const current = (await tx.select().from(contracts).where(and(eq(contracts.id, id), isNull(contracts.archivedAt))).limit(1))[0];
     if (!current) return false;
-    const items = await tx.select().from(contractItems).where(eq(contractItems.contractId, id));
-    for (const item of items) if (item.vehicleId) await tx.update(vehicles).set({ contract: "—", contractId: null, client: "—", clientId: null, status: "متاحة" }).where(eq(vehicles.id, item.vehicleId));
+    const linkedProjects = await tx.select({ id: projects.id, clientId: projects.clientId, client: projects.client }).from(projects).where(and(eq(projects.contractId, id), isNull(projects.archivedAt)));
+    for (const project of linkedProjects) {
+      await tx.update(projects).set({ contractId: null, contract: "—" }).where(eq(projects.id, project.id));
+      const projectVehicles = await tx.select({ id: vehicles.id, contractId: vehicles.contractId }).from(vehicles).where(and(eq(vehicles.projectId, project.id), isNull(vehicles.archivedAt)));
+      for (const vehicle of projectVehicles) {
+        if (vehicle.contractId !== null) continue;
+        await tx.update(vehicles).set({ contract: "—", clientId: project.clientId, client: project.client || "—" }).where(eq(vehicles.id, vehicle.id));
+      }
+    }
+    const assignedVehicles = await tx.select({ id: vehicles.id, projectId: vehicles.projectId, status: vehicles.status, clientId: vehicles.clientId, client: vehicles.client }).from(vehicles).where(and(eq(vehicles.contractId, id), isNull(vehicles.archivedAt)));
+    for (const vehicle of assignedVehicles) {
+      const project = linkedProjects.find(item => item.id === vehicle.projectId) ?? (vehicle.projectId
+        ? (await tx.select({ clientId: projects.clientId, client: projects.client }).from(projects).where(and(eq(projects.id, vehicle.projectId), isNull(projects.archivedAt))).limit(1))[0]
+        : undefined);
+      await tx.update(vehicles).set({
+        contract: "—",
+        contractId: null,
+        clientId: project?.clientId ?? vehicle.clientId ?? current.clientId ?? null,
+        client: project?.client && project.client !== "—" ? project.client : vehicle.client && vehicle.client !== "—" ? vehicle.client : current.client || "—",
+        status: vehicleStatusAfterContractRemoval(vehicle.status),
+      }).where(eq(vehicles.id, vehicle.id));
+    }
     if (current.clientId) await tx.update(clients).set({ contracts: sql`GREATEST(0, ${clients.contracts} - 1)` }).where(eq(clients.id, current.clientId));
     await tx.update(contracts).set({ archivedAt: new Date() }).where(eq(contracts.id, id));
     return true;
@@ -1130,9 +1350,44 @@ export async function updateContractStatus(id: number, status: Contract["status"
   });
 }
 
-export async function listTasks() { const db = await getDb(); return db ? db.select().from(tasks).where(isNull(tasks.archivedAt)).orderBy(desc(tasks.createdAt)) : null; }
-export async function createTask(input: typeof tasks.$inferInsert) { const db = await getDb(); if (!db) return null; const result = await db.insert(tasks).values(input); const rows = await db.select().from(tasks).where(eq(tasks.id, Number(result[0].insertId))).limit(1); return rows[0] ?? null; }
-export async function updateTask(id: number, input: Partial<typeof tasks.$inferInsert>) { const db = await getDb(); if (!db) return null; await db.update(tasks).set(input).where(eq(tasks.id, id)); const rows = await db.select().from(tasks).where(eq(tasks.id, id)).limit(1); return rows[0] ?? null; }
+export async function listTasks(viewer: { id: number; name?: string | null; role?: string }) {
+  const db = await getDb();
+  if (!db) return null;
+  const scope = viewer.role === "admin" ? isNull(tasks.archivedAt) : and(isNull(tasks.archivedAt), or(eq(tasks.assigneeUserId, viewer.id), and(isNull(tasks.assigneeUserId), eq(tasks.assignee, viewer.name || "—"))));
+  return db.select().from(tasks).where(scope).orderBy(desc(tasks.createdAt));
+}
+export async function listTaskAssignees() {
+  const db = await getDb();
+  return db ? db.select({ id: users.id, name: users.name }).from(users).where(and(eq(users.isActive, 1), isNotNull(users.name))).orderBy(users.name) : null;
+}
+export async function createTask(input: Omit<typeof tasks.$inferInsert, "assignee">, actor: LedgerActor = {}) {
+  const db = await getDb();
+  if (!db) return null;
+  return db.transaction(async tx => {
+    const assignee = (await tx.select({ id: users.id, name: users.name }).from(users).where(and(eq(users.id, Number(input.assigneeUserId)), eq(users.isActive, 1))).limit(1))[0];
+    if (!assignee?.name?.trim()) throw new Error("اختر مستخدمًا نشطًا له اسم مسجل لإسناد المهمة");
+    const result = await tx.insert(tasks).values({ ...input, assignee: assignee.name.trim() });
+    const id = Number(result[0].insertId);
+    const created = (await tx.select().from(tasks).where(eq(tasks.id, id)).limit(1))[0] ?? null;
+    if (created) await recordAuditInTransaction(tx, actor, "task.create", "task", id, `تم إسناد المهمة إلى ${assignee.name}`);
+    return created;
+  });
+}
+export async function updateTask(id: number, input: Partial<typeof tasks.$inferInsert>, actor: LedgerActor & { role?: string } = {}) {
+  const db = await getDb();
+  if (!db) return null;
+  return db.transaction(async tx => {
+    await tx.execute(sql`SELECT id FROM tasks WHERE id = ${id} FOR UPDATE`);
+    const current = (await tx.select().from(tasks).where(and(eq(tasks.id, id), isNull(tasks.archivedAt))).limit(1))[0];
+    if (!current) return null;
+    if (!canUpdateTask(current, input as Record<string, unknown>, { id: actor.id ?? 0, name: actor.name, role: actor.role })) throw new Error("يمكنك تغيير حالة المهام المسندة إلى حسابك فقط؛ تعديل تفاصيل المهمة متاح للمدير");
+    const { id: _id, assigneeUserId: _assigneeUserId, ...safeInput } = input;
+    await tx.update(tasks).set(safeInput).where(eq(tasks.id, id));
+    const updated = (await tx.select().from(tasks).where(eq(tasks.id, id)).limit(1))[0] ?? null;
+    if (updated) await recordAuditInTransaction(tx, actor, "task.update", "task", id, `تغيّرت حالة المهمة إلى ${updated.status}`);
+    return updated;
+  });
+}
 export async function listNotifications(userId: number) {
   const db = await getDb();
   if (!db) return null;
@@ -1158,13 +1413,11 @@ export async function listPayables(): Promise<(Omit<Payable, "receiptUrl"> & { h
     db.select().from(payables).where(isNull(payables.archivedAt)).orderBy(desc(payables.createdAt)),
     db.select().from(payablePayments).orderBy(desc(payablePayments.createdAt)),
   ]);
-  const now = Date.now();
   return records.map(record => {
     const entries = ledger.filter(payment => payment.payableId === record.id);
     const remaining = Math.max(0, record.amount - record.paid);
-    const due = record.dueDate !== "—" ? Date.parse(`${record.dueDate}T23:59:59`) : NaN;
     const { receiptUrl, ...safeRecord } = record;
-    return { ...safeRecord, hasReceipt: Boolean(receiptUrl), remaining, overdue: remaining > 0 && record.status !== "ملغاة" && Number.isFinite(due) && due < now, payments: entries };
+    return { ...safeRecord, hasReceipt: Boolean(receiptUrl), remaining, overdue: isPayableExpensePosted(record.status) && remaining > 0 && isCompanyDateBeforeToday(record.dueDate), payments: entries };
   });
 }
 export async function getPayableReceipt(id: number) {
@@ -1178,23 +1431,21 @@ export async function getStoredFilePermissions(key: string): Promise<string[] | 
   const db = await getDb();
   if (!db) return null;
   const url = `/manus-storage/${key}`;
-  const [documentRows, maintenanceRows, expenseRows, revenueRows, payableRows] = await Promise.all([
-    db.select({ id: documents.id }).from(documents).where(and(eq(documents.fileUrl, url), isNull(documents.archivedAt))).limit(1),
-    db.select({ id: maintenanceRequests.id }).from(maintenanceRequests).where(and(eq(maintenanceRequests.receiptUrl, url), isNull(maintenanceRequests.archivedAt))).limit(1),
-    db.select({ id: vehicleExpenses.id }).from(vehicleExpenses).where(and(eq(vehicleExpenses.receiptUrl, url), isNull(vehicleExpenses.archivedAt))).limit(1),
-    db.select({ id: vehicleRevenues.id }).from(vehicleRevenues).where(and(eq(vehicleRevenues.receiptUrl, url), isNull(vehicleRevenues.archivedAt))).limit(1),
-    db.select({ vehicleId: payables.vehicleId, maintenanceRequestId: payables.maintenanceRequestId }).from(payables).where(and(eq(payables.receiptUrl, url), isNull(payables.archivedAt))).limit(1),
+  const [documentRows, maintenanceQuoteRows, maintenanceReceiptRows, expenseRows, revenueRows, payableRows] = await Promise.all([
+    db.select({ entityType: documents.entityType, entityId: documents.entityId }).from(documents).where(and(eq(documents.fileUrl, url), isNull(documents.archivedAt))),
+    db.select({ id: maintenanceRequests.id }).from(maintenanceRequests).where(and(eq(maintenanceRequests.quoteUrl, url), isNull(maintenanceRequests.archivedAt))),
+    db.select({ id: maintenanceRequests.id }).from(maintenanceRequests).where(and(eq(maintenanceRequests.receiptUrl, url), isNull(maintenanceRequests.archivedAt))),
+    db.select({ id: vehicleExpenses.id }).from(vehicleExpenses).where(and(eq(vehicleExpenses.receiptUrl, url), isNull(vehicleExpenses.archivedAt))),
+    db.select({ id: vehicleRevenues.id }).from(vehicleRevenues).where(and(eq(vehicleRevenues.receiptUrl, url), isNull(vehicleRevenues.archivedAt))),
+    db.select({ vehicleId: payables.vehicleId, maintenanceRequestId: payables.maintenanceRequestId }).from(payables).where(and(eq(payables.receiptUrl, url), isNull(payables.archivedAt))),
   ]);
-  const permissions = new Set<string>();
-  if (documentRows.length) permissions.add("documents");
-  if (maintenanceRows.length) { permissions.add("maintenance"); permissions.add("finance"); }
-  if (expenseRows.length || revenueRows.length) { permissions.add("vehicles"); permissions.add("finance"); }
-  if (payableRows.length) {
-    permissions.add("payables");
-    if (payableRows.some(row => row.vehicleId !== null)) { permissions.add("vehicles"); permissions.add("finance"); }
-    if (payableRows.some(row => row.maintenanceRequestId !== null)) { permissions.add("maintenance"); permissions.add("finance"); }
-  }
-  return permissions.size ? Array.from(permissions) : [];
+  return requiredPermissionsForStoredFile({
+    documents: documentRows,
+    maintenanceQuoteCount: maintenanceQuoteRows.length,
+    maintenanceReceiptCount: maintenanceReceiptRows.length,
+    vehicleLedgerCount: expenseRows.length + revenueRows.length,
+    payables: payableRows,
+  });
 }
 function isVehiclePurchasePayable(payable: Pick<Payable, "description">) {
   return /(?:شراء|قيمة شراء).*(?:باص|مركبة|سيارة)|(?:باص|مركبة|سيارة).*شراء/.test(String(payable.description || ""));
@@ -1211,10 +1462,14 @@ async function validateMaintenancePayableLink(tx: DbExecutor, input: { maintenan
   if (request.approvalStatus !== "معتمد" || !["تنفيذ", "فحص بعد الإصلاح"].includes(request.workflowStage)) throw new Error("يمكن ربط الفاتورة بطلب صيانة معتمد وقيد التنفيذ أو الفحص فقط");
 }
 
-async function syncLinkedMaintenanceRequest(tx: DbExecutor, requestId: number | null | undefined, actor: LedgerActor) {
+async function lockMaintenanceRequestForInvoice(tx: DbExecutor, requestId: number | null | undefined) {
+  if (requestId) await tx.execute(sql`SELECT id FROM maintenance_requests WHERE id = ${requestId} AND archivedAt IS NULL FOR UPDATE`);
+}
+
+async function syncLinkedMaintenanceRequest(tx: DbExecutor, requestId: number | null | undefined, actor: LedgerActor, clearPostedCostWhenNoInvoicesRemain = false) {
   if (!requestId) return;
   const request = (await tx.select().from(maintenanceRequests).where(and(eq(maintenanceRequests.id, requestId), isNull(maintenanceRequests.archivedAt))).limit(1))[0];
-  if (request) await syncMaintenanceExpense(tx, request, actor);
+  if (request) await syncMaintenanceExpense(tx, request, actor, clearPostedCostWhenNoInvoicesRemain);
 }
 
 async function syncPayableVehicleExpense(tx: DbExecutor, payable: Payable, actor: LedgerActor = {}) {
@@ -1234,12 +1489,17 @@ export async function createPayable(input: InsertPayable, actor: LedgerActor = {
   const db = await getDb();
   if (!db) return null;
   return db.transaction(async tx => {
+    // Serialize invoice creation for a maintenance request before its linked
+    // invoice total is recalculated, so concurrent invoices cannot overwrite
+    // each other's actual cost.
+    await lockMaintenanceRequestForInvoice(tx, input.maintenanceRequestId);
     await validateMaintenancePayableLink(tx, input);
     const result = await tx.insert(payables).values({ ...input, paid: 0, status: "جديدة" });
     const id = Number(result[0].insertId);
     const payable = (await tx.select().from(payables).where(eq(payables.id, id)).limit(1))[0] ?? null;
     if (payable?.vehicleId) await syncPayableVehicleExpense(tx, payable, actor);
     await syncLinkedMaintenanceRequest(tx, payable?.maintenanceRequestId, actor);
+    if (payable) await recordAuditInTransaction(tx, actor, "payables.create", "payables", id, "تم إنشاء فاتورة مورد");
     return payable;
   });
 }
@@ -1250,11 +1510,12 @@ export async function updatePayable(id: number, input: Partial<InsertPayable>, a
   return db.transaction(async tx => {
     // Serialize edits with payments so amount/status checks use the latest ledger state.
     await tx.execute(sql`SELECT id FROM payables WHERE id = ${id} FOR UPDATE`);
-    const current = (await tx.select().from(payables).where(and(eq(payables.id, id), isNull(payables.archivedAt))).limit(1))[0];
+    const current = (await tx.select().from(payables).where(and(eq(payables.id, id), isNull(payables.archivedAt))).for("update").limit(1))[0];
     if (!current || Number(input.amount ?? current.amount) < current.paid) return null;
     if (current.vehicleId && current.paid > 0 && (input.vehicleId !== undefined && input.vehicleId !== current.vehicleId || input.vehicleCategory !== undefined && input.vehicleCategory !== current.vehicleCategory)) throw new Error("لا يمكن نقل فاتورة باص أو تغيير فئتها بعد تسجيل دفعة عليها");
     const nextVehicleId = input.vehicleId !== undefined ? input.vehicleId : current.vehicleId;
     const nextMaintenanceRequestId = input.maintenanceRequestId !== undefined ? input.maintenanceRequestId : current.maintenanceRequestId;
+    await lockMaintenanceRequestForInvoice(tx, nextMaintenanceRequestId);
     await validateMaintenancePayableLink(tx, { vehicleId: nextVehicleId, maintenanceRequestId: nextMaintenanceRequestId, vehicleCategory: input.vehicleCategory ?? current.vehicleCategory, description: input.description ?? current.description }, current);
     if (current.maintenanceRequestId && current.maintenanceRequestId !== nextMaintenanceRequestId) throw new Error("لا يمكن فك فاتورة مورد مرتبطة بطلب صيانة؛ ألغ الفاتورة واترك الربط التاريخي محفوظًا");
     await tx.update(payables).set(input).where(eq(payables.id, id));
@@ -1262,6 +1523,7 @@ export async function updatePayable(id: number, input: Partial<InsertPayable>, a
     if (updated && (current.vehicleId || updated.vehicleId)) await syncPayableVehicleExpense(tx, updated, actor);
     await syncLinkedMaintenanceRequest(tx, current.maintenanceRequestId, actor);
     if (updated?.maintenanceRequestId !== current.maintenanceRequestId) await syncLinkedMaintenanceRequest(tx, updated?.maintenanceRequestId, actor);
+    if (updated && Object.keys(input).length) await recordAuditInTransaction(tx, actor, "payables.update", "payables", id, "تم تعديل بيانات فاتورة مورد");
     return updated;
   });
 }
@@ -1271,8 +1533,9 @@ export async function updatePayableStatus(id: number, status: Payable["status"],
   return db.transaction(async tx => {
     // Status changes (especially cancellation/approval) must not race a payment.
     await tx.execute(sql`SELECT id FROM payables WHERE id = ${id} FOR UPDATE`);
-    const current = (await tx.select().from(payables).where(and(eq(payables.id, id), isNull(payables.archivedAt))).limit(1))[0];
+    const current = (await tx.select().from(payables).where(and(eq(payables.id, id), isNull(payables.archivedAt))).for("update").limit(1))[0];
     if (!current) return null;
+    await lockMaintenanceRequestForInvoice(tx, current.maintenanceRequestId);
     const allowed: Record<Payable["status"], Payable["status"][]> = { "جديدة": ["معتمدة", "ملغاة"], "معتمدة": ["ملغاة"], "مدفوعة جزئيًا": ["ملغاة"], "مدفوعة": [], "ملغاة": [] };
     if (status !== current.status && !allowed[current.status].includes(status)) return null;
     if (status === "ملغاة" && current.vehicleId && current.paid > 0) throw new Error("لا يمكن إلغاء فاتورة مرتبطة بباص بعد تسجيل دفعة عليها؛ عالجها بإشعار دائن لتبقى تكلفة الباص دقيقة");
@@ -1280,11 +1543,12 @@ export async function updatePayableStatus(id: number, status: Payable["status"],
     await tx.update(payables).set({ status }).where(eq(payables.id, id));
     const updated = (await tx.select().from(payables).where(eq(payables.id, id)).limit(1))[0] ?? null;
     if (updated?.vehicleId) await syncPayableVehicleExpense(tx, updated, actor);
-    await syncLinkedMaintenanceRequest(tx, updated?.maintenanceRequestId, actor);
+    await syncLinkedMaintenanceRequest(tx, updated?.maintenanceRequestId, actor, status === "ملغاة" && isPayableExpensePosted(current.status));
+    if (updated && updated.status !== current.status) await recordAuditInTransaction(tx, actor, "payables.updateStatus", "payables", id, "تم تغيير حالة فاتورة مورد");
     return updated;
   });
 }
-export async function registerPayablePayment(input: InsertPayablePayment): Promise<PayablePayment | null> {
+export async function registerPayablePayment(input: InsertPayablePayment, actor: LedgerActor = {}): Promise<PayablePayment | null> {
   const db = await getDb();
   if (!db) return null;
   return db.transaction(async tx => {
@@ -1299,41 +1563,46 @@ export async function registerPayablePayment(input: InsertPayablePayment): Promi
     const paid = payable.paid + input.amount;
     await tx.update(payables).set({ paid, status: paid >= payable.amount ? "مدفوعة" : "مدفوعة جزئيًا" }).where(eq(payables.id, payable.id));
     const id = Number(result[0].insertId);
-    return (await tx.select().from(payablePayments).where(eq(payablePayments.id, id)).limit(1))[0] ?? null;
+    const payment = (await tx.select().from(payablePayments).where(eq(payablePayments.id, id)).limit(1))[0] ?? null;
+    if (payment) await recordAuditInTransaction(tx, actor, "payables.registerPayment", "payables", payable.id, "تم تسجيل دفعة صادرة للمورد");
+    return payment;
   });
 }
 
 export async function getCompanyReport(from: string, to: string) {
+  const exclusiveEnd = reportPeriodExclusiveEnd(to);
+  if (!exclusiveEnd || !isValidReportPeriod(from, to)) return null;
   const db = await getDb();
   if (!db) return null;
-  const [vehicleRows, contractRows, claimRows, incomingRows, payableRows, outgoingRows, maintenanceRows, projectRows, documentRows, employeeRows, driverRows, vehicleExpenseRows, vehicleRevenueRows, clientRows] = await Promise.all([
+  const [vehicleRows, historicalVehicleRows, contractRows, historicalContractRows, contractItemRows, claimRows, incomingRows, payableRows, outgoingRows, maintenanceRows, projectRows, documentRows, employeeRows, driverRows, vehicleExpenseRows, clientRows] = await Promise.all([
     db.select().from(vehicles).where(isNull(vehicles.archivedAt)),
+    db.select().from(vehicles),
     db.select().from(contracts).where(isNull(contracts.archivedAt)),
+    db.select().from(contracts),
+    db.select().from(contractItems),
     db.select().from(claims).where(isNull(claims.archivedAt)),
-    db.select().from(payments).where(isNull(payments.archivedAt)),
+    db.select().from(payments).where(and(isNull(payments.archivedAt), gte(payments.paidAt, from), lt(payments.paidAt, exclusiveEnd))),
     db.select().from(payables).where(isNull(payables.archivedAt)),
-    db.select().from(payablePayments),
+    db.select().from(payablePayments).where(and(gte(payablePayments.paidAt, from), lt(payablePayments.paidAt, exclusiveEnd))),
     db.select().from(maintenanceRequests).where(isNull(maintenanceRequests.archivedAt)),
     db.select().from(projects).where(isNull(projects.archivedAt)),
     db.select().from(documents).where(isNull(documents.archivedAt)),
     db.select().from(employees).where(isNull(employees.archivedAt)),
     db.select().from(drivers).where(isNull(drivers.archivedAt)),
-    db.select().from(vehicleExpenses).where(isNull(vehicleExpenses.archivedAt)),
-    db.select().from(vehicleRevenues).where(isNull(vehicleRevenues.archivedAt)),
+    db.select().from(vehicleExpenses).where(and(isNull(vehicleExpenses.archivedAt), gte(vehicleExpenses.spentAt, from), lt(vehicleExpenses.spentAt, exclusiveEnd))),
     db.select().from(clients).where(isNull(clients.archivedAt)),
   ]);
   const inRange = (value: unknown) => { const date = value instanceof Date ? value.toISOString().slice(0, 10) : String(value ?? "").slice(0, 10); return date >= from && date <= to; };
-  const periodClaims = claimRows.filter(row => inRange(row.submittedAt));
+  const periodClaims = claimRows.filter(row => isReceivableClaimStatus(row.status) && inRange(row.submittedAt));
   const periodContracts = contractRows.filter(row => inRange(row.startDate));
   const periodIncoming = incomingRows.filter(row => inRange(row.paidAt));
   const periodOutgoing = outgoingRows.filter(row => inRange(row.paidAt));
-  const incomingByClaimInPeriod = new Map<number, number>();
-  const incomingByContractInPeriod = new Map<number, number>();
+  const periodPaymentIds = periodIncoming.map(row => row.id);
+  const vehicleRevenueRows = periodPaymentIds.length
+    ? await db.select().from(vehicleRevenues).where(and(inArray(vehicleRevenues.paymentId, periodPaymentIds), isNull(vehicleRevenues.archivedAt)))
+    : [];
+  const { byClaim: incomingByClaimInPeriod, byContract: incomingByContractInPeriod } = groupIncomingPaymentsForReport(periodIncoming, claimRows);
   const outgoingByPayableInPeriod = new Map<number, number>();
-  for (const payment of periodIncoming) {
-    if (payment.claimId !== null) incomingByClaimInPeriod.set(payment.claimId, (incomingByClaimInPeriod.get(payment.claimId) ?? 0) + payment.amount);
-    if (payment.contractId !== null) incomingByContractInPeriod.set(payment.contractId, (incomingByContractInPeriod.get(payment.contractId) ?? 0) + payment.amount);
-  }
   for (const payment of periodOutgoing) outgoingByPayableInPeriod.set(payment.payableId, (outgoingByPayableInPeriod.get(payment.payableId) ?? 0) + payment.amount);
   const periodMaintenance = maintenanceRows.filter(row => inRange(row.start));
   const periodProjects = projectRows.filter(row => inRange(row.startDate));
@@ -1341,14 +1610,23 @@ export async function getCompanyReport(from: string, to: string) {
   const postedPayableIds = new Set(payableRows.filter(row => isPayableExpensePosted(row.status)).map(row => row.id));
   const periodVehicleExpenses = vehicleExpenseRows.filter(row => inRange(row.spentAt) && (row.payableId === null || postedPayableIds.has(row.payableId)));
   const paymentById = new Map(incomingRows.map(row => [row.id, row]));
-  const periodVehicleRevenues = vehicleRevenueRows.filter(row => { const payment = paymentById.get(row.paymentId); return payment ? inRange(payment.paidAt) : false; });
-  const outstandingClaims = claimRows.filter(row => !["تم صرفها", "مرفوضة", "ملغاة"].includes(row.status));
+  const manuallyAllocatedPeriodVehicleRevenues = vehicleRevenueRows;
+  const autoLinkedPeriodVehicleRevenues = deriveSingleVehicleAutoRevenues({
+    payments: periodIncoming,
+    claims: claimRows,
+    contracts: historicalContractRows,
+    contractItems: contractItemRows,
+    vehicles: historicalVehicleRows,
+    projects: projectRows,
+    clients: clientRows,
+    allocations: vehicleRevenueRows,
+  });
+  const periodVehicleRevenues = [...manuallyAllocatedPeriodVehicleRevenues, ...autoLinkedPeriodVehicleRevenues];
+  const outstandingClaims = claimRows.filter(row => outstandingClaimAmount(row) > 0);
   const activePayables = payableRows.filter(row => row.status !== "ملغاة");
-  const costNumber = (value: string) => Number(value.replace(/[^0-9.]/g, "")) || 0;
-  const dateValue = (value: string) => value && value !== "—" ? Date.parse(`${value.slice(0,10)}T23:59:59`) : NaN;
-  const now = Date.now(); const soon = now + 30 * 86400000;
+  const payableBalances = summarizePayableBalances(activePayables.map(row => ({ amount: row.amount, paid: row.paid, status: row.status, dueDate: row.dueDate })), formatCompanyDate());
   const activeMaintenance = maintenanceRows.filter(row => row.status !== "مكتمل");
-  const vehiclesById = new Map(vehicleRows.map(row => [row.id, row]));
+  const vehiclesById = new Map(historicalVehicleRows.map(row => [row.id, row]));
   const ledgerGroups = (expenseRows: typeof periodVehicleExpenses, revenueRows: typeof periodVehicleRevenues, key: "vehicleId" | "projectId" | "clientId", labelFor: (row: any) => string) => {
     const grouped = new Map<string, { id: number | null; name: string; expense: number; revenue: number; buses: Set<number> }>();
     const add = (row: any, kind: "expense" | "revenue") => {
@@ -1365,7 +1643,7 @@ export async function getCompanyReport(from: string, to: string) {
   };
   const vehicleProfitabilityBase = ledgerGroups(periodVehicleExpenses, periodVehicleRevenues, "vehicleId", row => { const bus = vehiclesById.get(row.vehicleId); return bus ? `${bus.plate} · ${bus.brand} ${bus.model}` : `مركبة #${row.vehicleId}`; });
   const vehicleProfitabilityIds = new Set(vehicleProfitabilityBase.map(row => row.id));
-  for (const bus of vehicleRows) if (inRange(bus.purchaseDate) && !vehicleProfitabilityIds.has(bus.id)) vehicleProfitabilityBase.push({ id: bus.id, name: `${bus.plate} · ${bus.brand} ${bus.model}`, expense: 0, revenue: 0, netOperatingResult: 0, busCount: 1 });
+  for (const bus of historicalVehicleRows) if (inRange(bus.purchaseDate) && !vehicleProfitabilityIds.has(bus.id)) vehicleProfitabilityBase.push({ id: bus.id, name: `${bus.plate} · ${bus.brand} ${bus.model}`, expense: 0, revenue: 0, netOperatingResult: 0, busCount: 1 });
   const vehicleProfitability = vehicleProfitabilityBase.map(row => { const bus = vehiclesById.get(row.id ?? -1); const purchaseInPeriod = bus && inRange(bus.purchaseDate) ? Number(bus.purchasePrice || 0) : 0; return { ...row, plate: bus?.plate ?? row.name, purchaseInPeriod, netReturn: row.revenue - row.expense - purchaseInPeriod }; });
   const projectProfitability = ledgerGroups(periodVehicleExpenses, periodVehicleRevenues, "projectId", row => row.projectName || "—");
   const clientProfitability = ledgerGroups(periodVehicleExpenses, periodVehicleRevenues, "clientId", row => row.clientName || "—");
@@ -1385,22 +1663,24 @@ export async function getCompanyReport(from: string, to: string) {
     finance: {
       contractsValueInPeriod: periodContracts.reduce((sum, row) => sum + row.total, 0),
       incomingInPeriod: periodIncoming.reduce((sum, row) => sum + row.amount, 0),
-      receivableOutstanding: outstandingClaims.reduce((sum, row) => sum + Math.max(0, row.amount - row.paid), 0),
-      unpaidClaims: outstandingClaims.filter(row => row.amount > row.paid).length,
-      overdueClaims: outstandingClaims.filter(row => { const due = dateValue(row.due); return Number.isFinite(due) && due < now && row.amount > row.paid; }).length,
-      payablesOutstanding: activePayables.reduce((sum, row) => sum + Math.max(0, row.amount - row.paid), 0),
+      receivableOutstanding: totalOutstandingClaims(claimRows),
+      unpaidClaims: countOutstandingClaims(claimRows),
+      overdueClaims: outstandingClaims.filter(row => isCompanyDateBeforeToday(row.due) && row.amount > row.paid).length,
+      payablesOutstanding: payableBalances.recognizedOutstanding,
+      payablesPendingApproval: payableBalances.pendingApprovalCount,
+      payablesPendingApprovalAmount: payableBalances.pendingApprovalAmount,
       outgoingInPeriod: periodOutgoing.reduce((sum, row) => sum + row.amount, 0),
       vehicleCostsInPeriod,
       allocatedVehicleRevenueInPeriod,
       fleetVehicleNetInPeriod: allocatedVehicleRevenueInPeriod - vehicleCostsInPeriod - vehicleProfitability.reduce((sum,row) => sum + row.purchaseInPeriod, 0),
-      overduePayables: activePayables.filter(row => { const due = dateValue(row.dueDate); return Number.isFinite(due) && due < now && row.amount > row.paid; }).length,
+      overduePayables: payableBalances.overdueRecognizedCount,
     },
     maintenance: {
       openedInPeriod: periodMaintenance.length,
       openNow: activeMaintenance.length,
       completedInPeriod: periodMaintenance.filter(row => row.status === "مكتمل").length,
-      costInPeriod: periodMaintenance.reduce((sum, row) => sum + costNumber(row.cost), 0),
-      overdueNow: activeMaintenance.filter(row => { const due = dateValue(row.expectedReturn || row.due); return Number.isFinite(due) && due < now; }).length,
+      costInPeriod: maintenanceExpenseTotalInPeriod(periodVehicleExpenses),
+      overdueNow: activeMaintenance.filter(row => isCompanyDateBeforeToday(row.expectedReturn || row.due)).length,
     },
     projects: {
       startedInPeriod: periodProjects.length,
@@ -1411,8 +1691,8 @@ export async function getCompanyReport(from: string, to: string) {
     },
     documents: {
       expiringInPeriod: periodDocuments.length,
-      expiredNow: documentRows.filter(row => { const expiry = dateValue(row.expiry); return Number.isFinite(expiry) && expiry < now; }).length,
-      expiringNext30Days: documentRows.filter(row => { const expiry = dateValue(row.expiry); return Number.isFinite(expiry) && expiry >= now && expiry <= soon; }).length,
+      expiredNow: documentRows.filter(row => isCompanyDateBeforeToday(row.expiry)).length,
+      expiringNext30Days: documentRows.filter(row => isWithinUpcomingDays(row.expiry, 30)).length,
     },
     people: {
       employees: employeeRows.length,
@@ -1421,13 +1701,90 @@ export async function getCompanyReport(from: string, to: string) {
       availableDrivers: driverRows.filter(row => row.status === "متاح").length,
     },
     details: {
-      claims: periodClaims.map(row => ({ id: row.id, ref: row.ref, client: row.client, status: row.status, amount: row.amount, paidInPeriod: incomingByClaimInPeriod.get(row.id) ?? 0, outstandingNow: Math.max(0, row.amount - row.paid), due: row.due })),
+      payments: incomingPaymentRowsForReport(periodIncoming, claimRows, historicalContractRows, clientRows),
+      receivablesAging: outstandingClaims.map(row => ({
+        id: row.id,
+        ref: row.ref,
+        client: row.client,
+        status: row.status,
+        amount: Number(row.amount || 0),
+        paid: Number(row.paid || 0),
+        outstanding: outstandingClaimAmount(row),
+        due: row.due,
+        ...receivableAging(row.due),
+      })),
+      claims: periodClaims.map(row => ({ id: row.id, ref: row.ref, client: row.client, status: row.status, amount: row.amount, paidInPeriod: incomingByClaimInPeriod.get(row.id) ?? 0, outstandingNow: outstandingClaimAmount(row), due: row.due })),
       contracts: periodContracts.map(row => ({ id: row.id, ref: row.ref, client: row.client, status: row.status, total: row.total, collectedInPeriod: incomingByContractInPeriod.get(row.id) ?? 0, startDate: row.startDate, expiry: row.expiry })),
-      payables: activePayables.filter(row => inRange(row.issueDate)).map(row => ({ id: row.id, ref: row.ref, supplier: row.supplier, status: row.status, amount: row.amount, paidInPeriod: outgoingByPayableInPeriod.get(row.id) ?? 0, remainingNow: Math.max(0, row.amount - row.paid), issueDate: row.issueDate, dueDate: row.dueDate })),
-      maintenance: periodMaintenance.map(row => ({ id: row.id, ref: row.ref, vehicle: row.vehicle, status: row.status, cost: row.cost, start: row.start, expectedReturn: row.expectedReturn })),
+      payables: activePayables.filter(row => inRange(row.issueDate)).map(row => ({ id: row.id, ref: row.ref, supplier: row.supplier, status: row.status, amount: row.amount, paidInPeriod: outgoingByPayableInPeriod.get(row.id) ?? 0, remainingNow: isPayableExpensePosted(row.status) ? Math.max(0, row.amount - row.paid) : 0, pendingApprovalAmount: row.status === "جديدة" ? Math.max(0, Number(row.amount || 0)) : 0, issueDate: row.issueDate, dueDate: row.dueDate, vehicleId: row.vehicleId, maintenanceRequestId: row.maintenanceRequestId })),
+      documentSummaryRows: documentRows.map(row => {
+        return {
+          entityType: row.entityType || "",
+          entityId: row.entityId,
+          expiringInPeriod: inRange(row.expiry),
+          expiredNow: isCompanyDateBeforeToday(row.expiry),
+          expiringNext30Days: isWithinUpcomingDays(row.expiry, 30),
+        };
+      }),
+      payableSummaryRows: activePayables.map(row => {
+        const awaitingApproval = row.status === "جديدة";
+        const recognized = isPayableExpensePosted(row.status);
+        return {
+          id: row.id,
+          remainingNow: recognized ? Math.max(0, row.amount - row.paid) : 0,
+          pendingApproval: awaitingApproval,
+          pendingApprovalAmount: awaitingApproval ? Math.max(0, Number(row.amount || 0)) : 0,
+          paidInPeriod: outgoingByPayableInPeriod.get(row.id) ?? 0,
+          overdue: recognized && isCompanyDateBeforeToday(row.dueDate) && row.amount > row.paid,
+          vehicleId: row.vehicleId,
+          maintenanceRequestId: row.maintenanceRequestId,
+        };
+      }),
+      maintenance: periodMaintenance.map(row => {
+        const linkedInvoices = activePayables.filter(invoice => invoice.maintenanceRequestId === row.id);
+        const estimatedCost = Math.max(0, Number(row.estimatedCost || 0)) + Math.max(0, Number(row.quotedPartsCost || 0));
+        const postedInvoices = linkedInvoices.filter(invoice => isPayableExpensePosted(invoice.status));
+        const invoicedCost = maintenanceInvoiceTotal(linkedInvoices);
+        return {
+          id: row.id,
+          ref: row.ref,
+          vehicle: row.vehicle,
+          status: row.status,
+          cost: row.cost,
+          estimatedCost,
+          invoicedCost,
+          costVariance: postedInvoices.length ? invoicedCost - estimatedCost : null,
+          invoiceCount: postedInvoices.length,
+          start: row.start,
+          expectedReturn: row.expectedReturn,
+        };
+      }),
+      operatingExpenses: periodVehicleExpenses.map(row => {
+        const vehicle = vehiclesById.get(row.vehicleId);
+        const payable = row.payableId ? payableRows.find(item => item.id === row.payableId) : null;
+        return {
+          id: row.id,
+          vehicleId: row.vehicleId,
+          vehicle: vehicle?.plate ?? `مركبة #${row.vehicleId}`,
+          category: row.category,
+          description: row.description,
+          vendor: row.vendor,
+          amount: Number(row.amount || 0),
+          spentAt: row.spentAt,
+          projectId: row.projectId,
+          projectName: row.projectName,
+          clientId: row.clientId,
+          clientName: row.clientName,
+          maintenanceRequestId: row.maintenanceRequestId,
+          payableId: row.payableId,
+          payableVehicleId: payable?.vehicleId ?? null,
+          payableMaintenanceRequestId: payable?.maintenanceRequestId ?? null,
+        };
+      }),
       vehicleProfitability,
       projectProfitability,
       clientProfitability,
+      employees: employeeRows.map(row => ({ id: row.id, employeeNo: row.employeeNo, name: row.name, department: row.department, jobTitle: row.jobTitle, hireDate: row.hireDate, status: row.status })),
+      drivers: driverRows.map(row => ({ id: row.id, name: row.name, status: row.status, vehicle: row.vehicle, renewal: row.renewal, renewalStatus: resolveRenewalStatus(row.renewal) })),
     },
   };
 }
@@ -1439,11 +1796,22 @@ async function lockPaymentReferences(db: DbExecutor, ...inputs: Array<{ contract
   for (const id of contractIds) await db.execute(sql`SELECT id FROM contracts WHERE id = ${id} FOR UPDATE`);
   for (const id of claimIds) await db.execute(sql`SELECT id FROM claims WHERE id = ${id} FOR UPDATE`);
 }
+async function normalizePaymentReferences(db: DbExecutor, input: { contractId?: number | null; claimId?: number | null; clientId?: number | null; amount?: number }) {
+  const claim = input.claimId
+    ? (await db.select({ contractId: claims.contractId, clientId: claims.clientId }).from(claims).where(and(eq(claims.id, input.claimId), isNull(claims.archivedAt))).limit(1))[0]
+    : undefined;
+  const contractId = input.contractId ?? claim?.contractId ?? null;
+  const contract = contractId
+    ? (await db.select({ clientId: contracts.clientId }).from(contracts).where(and(eq(contracts.id, contractId), isNull(contracts.archivedAt))).limit(1))[0]
+    : undefined;
+  return { ...input, contractId, clientId: input.clientId ?? claim?.clientId ?? contract?.clientId ?? null };
+}
 async function validatePaymentReferences(db: DbExecutor, input: { contractId?: number | null; claimId?: number | null; clientId?: number | null; amount?: number }) {
   if (!input.contractId && !input.claimId && !input.clientId) throw new Error("يجب ربط الدفعة بعقد أو مطالبة أو عميل");
   if (input.contractId) {
     const contract = (await db.select().from(contracts).where(and(eq(contracts.id, input.contractId), isNull(contracts.archivedAt))).limit(1))[0];
     if (!contract) throw new Error("العقد المرتبط بالدفعة غير موجود");
+    if (input.amount !== undefined && !canAcceptContractPayment({ total: Number(contract.total), collected: Number(contract.collected), amount: Number(input.amount) })) throw new Error("قيمة الدفعة تتجاوز الرصيد المتبقي من العقد");
     const claim = input.claimId ? (await db.select().from(claims).where(and(eq(claims.id, input.claimId), isNull(claims.archivedAt))).limit(1).for("update"))[0] : undefined;
     validatePaymentLinkConsistency({ paymentClientId: input.clientId, contractClientId: contract.clientId, claimClientId: claim?.clientId, paymentContractId: input.contractId, claimContractId: claim?.contractId });
   }
@@ -1472,39 +1840,44 @@ async function applyPaymentImpact(db: DbExecutor, input: { contractId?: number |
     }
   }
 }
-export async function createPayment(input: typeof payments.$inferInsert) {
+export async function createPayment(input: typeof payments.$inferInsert, actor: LedgerActor = {}) {
   const db = await getDb();
   if (!db) return null;
   return db.transaction(async tx => {
-    await lockPaymentReferences(tx, input);
-    await validatePaymentReferences(tx, input);
-    const result = await tx.insert(payments).values(input);
+    const normalized = await normalizePaymentReferences(tx, input);
+    await lockPaymentReferences(tx, normalized);
+    await validatePaymentReferences(tx, normalized);
+    const result = await tx.insert(payments).values(normalized);
     const paymentId = Number(result[0].insertId);
-    await applyPaymentImpact(tx, input, 1);
-    return (await tx.select().from(payments).where(eq(payments.id, paymentId)).limit(1))[0] ?? null;
+    await applyPaymentImpact(tx, normalized, 1);
+    const payment = (await tx.select().from(payments).where(eq(payments.id, paymentId)).limit(1))[0] ?? null;
+    if (payment) await recordAuditInTransaction(tx, actor, "payments.create", "payments", paymentId, "تم تسجيل دفعة واردة");
+    return payment;
   });
 }
-export async function updatePayment(id: number, input: Partial<typeof payments.$inferInsert>) {
+export async function updatePayment(id: number, input: Partial<typeof payments.$inferInsert>, actor: LedgerActor = {}) {
   const db = await getDb();
   if (!db) return null;
   return db.transaction(async tx => {
     await tx.execute(sql`SELECT id FROM payments WHERE id = ${id} FOR UPDATE`);
     const current = (await tx.select().from(payments).where(and(eq(payments.id, id), isNull(payments.archivedAt))).limit(1))[0];
     if (!current) return null;
-    await lockPaymentReferences(tx, current, input);
-    const next = { ...current, ...input };
+    const next = await normalizePaymentReferences(tx, { ...current, ...input });
+    await lockPaymentReferences(tx, current, next);
     const allocations = await tx.select({ amount: vehicleRevenues.amount }).from(vehicleRevenues).where(and(eq(vehicleRevenues.paymentId, id), isNull(vehicleRevenues.archivedAt)));
     const allocated = allocations.reduce((total, row) => total + Number(row.amount || 0), 0);
     if (input.amount !== undefined && Number(next.amount) < allocated) throw new Error(`لا يمكن خفض الدفعة عن الإيرادات المخصصة للباصات (${allocated} SAR)`);
     if (allocations.length && ((input.contractId !== undefined && input.contractId !== current.contractId) || (input.claimId !== undefined && input.claimId !== current.claimId))) throw new Error("لا يمكن نقل الدفعة إلى عقد أو مطالبة أخرى بعد تخصيص جزء منها لباص");
     await applyPaymentImpact(tx, current, -1);
     await validatePaymentReferences(tx, next);
-    await tx.update(payments).set(input).where(eq(payments.id, id));
+    await tx.update(payments).set({ ...input, contractId: next.contractId, clientId: next.clientId }).where(eq(payments.id, id));
     await applyPaymentImpact(tx, next, 1);
-    return (await tx.select().from(payments).where(eq(payments.id, id)).limit(1))[0] ?? null;
+    const payment = (await tx.select().from(payments).where(eq(payments.id, id)).limit(1))[0] ?? null;
+    if (payment && Object.keys(input).length) await recordAuditInTransaction(tx, actor, "payments.update", "payments", id, "تم تعديل دفعة واردة");
+    return payment;
   });
 }
-export async function archivePayment(id: number) {
+export async function archivePayment(id: number, actor: LedgerActor = {}) {
   const db = await getDb();
   if (!db) return false;
   return db.transaction(async tx => {
@@ -1515,10 +1888,215 @@ export async function archivePayment(id: number) {
     if (allocations.length) throw new Error("لا يمكن إلغاء هذه الدفعة قبل إلغاء تخصيص إيرادات الباص المرتبطة بها");
     await applyPaymentImpact(tx, current, -1);
     await tx.update(payments).set({ archivedAt: new Date() }).where(eq(payments.id, id));
+    await recordAuditInTransaction(tx, actor, "payments.archive", "payments", id, "تم إلغاء دفعة واردة وعكس أثرها");
     return true;
   });
 }
 
+export async function listInventoryItems(): Promise<InventoryItem[] | null> {
+  const db = await getDb();
+  return db ? db.select().from(inventoryItems).where(isNull(inventoryItems.archivedAt)).orderBy(inventoryItems.name) : null;
+}
+export async function listInventoryMovements(itemId?: number): Promise<InventoryMovement[] | null> {
+  const db = await getDb();
+  if (!db) return null;
+  return itemId === undefined
+    ? db.select().from(inventoryMovements).orderBy(desc(inventoryMovements.createdAt)).limit(500)
+    : db.select().from(inventoryMovements).where(eq(inventoryMovements.itemId, itemId)).orderBy(desc(inventoryMovements.createdAt)).limit(200);
+}
+export async function createInventoryItem(input: InsertInventoryItem, actor: LedgerActor = {}) {
+  const db = await getDb();
+  if (!db) return null;
+  return db.transaction(async tx => {
+    const result = await tx.insert(inventoryItems).values({ ...input, onHand: 0 });
+    const id = Number(result[0].insertId);
+    await recordAuditInTransaction(tx, actor, "inventory.create", "inventory_item", id, `إضافة صنف مخزون ${input.sku}`);
+    return (await tx.select().from(inventoryItems).where(eq(inventoryItems.id, id)).limit(1))[0] ?? null;
+  });
+}
+export async function updateInventoryItem(id: number, input: Partial<Pick<InsertInventoryItem, "sku" | "name" | "category" | "unit" | "reorderLevel" | "location" | "notes">>, actor: LedgerActor = {}) {
+  const db = await getDb();
+  if (!db) return null;
+  return db.transaction(async tx => {
+    await tx.execute(sql`SELECT id FROM inventory_items WHERE id = ${id} AND archivedAt IS NULL FOR UPDATE`);
+    const current = (await tx.select().from(inventoryItems).where(and(eq(inventoryItems.id, id), isNull(inventoryItems.archivedAt))).limit(1))[0];
+    if (!current) return null;
+    await tx.update(inventoryItems).set(input).where(eq(inventoryItems.id, id));
+    if (Object.keys(input).length) await recordAuditInTransaction(tx, actor, "inventory.update", "inventory_item", id, `تعديل الصنف ${current.sku}`);
+    return (await tx.select().from(inventoryItems).where(eq(inventoryItems.id, id)).limit(1))[0] ?? null;
+  });
+}
+export async function recordInventoryMovement(input: { itemId: number; direction: InventoryDirection; quantity: number; reference?: string; recipient?: string; notes?: string }, actor: LedgerActor = {}) {
+  const db = await getDb();
+  if (!db) return null;
+  return db.transaction(async tx => {
+    await tx.execute(sql`SELECT id FROM inventory_items WHERE id = ${input.itemId} AND archivedAt IS NULL FOR UPDATE`);
+    const item = (await tx.select().from(inventoryItems).where(and(eq(inventoryItems.id, input.itemId), isNull(inventoryItems.archivedAt))).limit(1))[0];
+    if (!item) return null;
+    const resultingBalance = nextInventoryBalance(item.onHand, input.direction as InventoryDirection, input.quantity);
+    await tx.update(inventoryItems).set({ onHand: resultingBalance }).where(eq(inventoryItems.id, item.id));
+    const [inserted] = await tx.insert(inventoryMovements).values({ ...input, resultingBalance, actorUserId: actor.id ?? null, actorName: actor.name || "—" });
+    const movementId = Number(inserted.insertId);
+    await recordAuditInTransaction(tx, actor, `inventory.${input.direction === "استلام" ? "receive" : "issue"}`, "inventory_item", item.id, `${input.direction} ${input.quantity} ${item.unit} من ${item.sku} · الرصيد ${resultingBalance}`);
+    return (await tx.select().from(inventoryMovements).where(eq(inventoryMovements.id, movementId)).limit(1))[0] ?? null;
+  });
+}
+export async function archiveInventoryItem(id: number, actor: LedgerActor = {}) {
+  const db = await getDb();
+  if (!db) return false;
+  return db.transaction(async tx => {
+    await tx.execute(sql`SELECT id FROM inventory_items WHERE id = ${id} AND archivedAt IS NULL FOR UPDATE`);
+    const item = (await tx.select().from(inventoryItems).where(and(eq(inventoryItems.id, id), isNull(inventoryItems.archivedAt))).limit(1))[0];
+    if (!item) return false;
+    if (item.onHand !== 0) throw new Error("لا يمكن أرشفة صنف له رصيد متبقٍ؛ سجّل الصرف أو التسوية أولًا");
+    await tx.update(inventoryItems).set({ archivedAt: new Date() }).where(eq(inventoryItems.id, id));
+    await recordAuditInTransaction(tx, actor, "inventory.archive", "inventory_item", id, `أرشفة الصنف ${item.sku}`);
+    return true;
+  });
+}
+export async function listInventoryRequests(): Promise<Array<InventoryRequest & { items: Array<{ id: number; itemId: number; itemName: string; sku: string; unit: string; requestedQuantity: number; approvedQuantity: number; issuedQuantity: number }> }> | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const requests = await db.select().from(inventoryRequests).orderBy(desc(inventoryRequests.createdAt));
+  const lines = await db.select().from(inventoryRequestItems).orderBy(inventoryRequestItems.id);
+  const grouped = new Map<number, typeof lines>();
+  for (const line of lines) grouped.set(line.requestId, [...(grouped.get(line.requestId) ?? []), line]);
+  return requests.map(request => ({ ...request, items: grouped.get(request.id) ?? [] }));
+}
+export async function createInventoryRequest(input: { ref: string; purpose: string; items: Array<{ itemId: number; quantity: number }> }, actor: LedgerActor & { name: string }) {
+  const db = await getDb();
+  if (!db) return null;
+  return db.transaction(async tx => {
+    const selectedItems = [] as InventoryItem[];
+    for (const itemId of Array.from(new Set(input.items.map(line => line.itemId))).sort((a, b) => a - b)) {
+      await tx.execute(sql`SELECT id FROM inventory_items WHERE id = ${itemId} AND archivedAt IS NULL FOR UPDATE`);
+      const item = (await tx.select().from(inventoryItems).where(and(eq(inventoryItems.id, itemId), isNull(inventoryItems.archivedAt))).limit(1))[0];
+      if (!item) throw new Error("يوجد صنف غير موجود أو مؤرشف في الطلب");
+      selectedItems.push(item);
+    }
+    const byId = new Map(selectedItems.map(item => [item.id, item]));
+    const [inserted] = await tx.insert(inventoryRequests).values({ ref: input.ref, purpose: input.purpose, requestedByUserId: actor.id ?? null, requestedByName: actor.name });
+    const id = Number(inserted.insertId);
+    await tx.insert(inventoryRequestItems).values(input.items.map(line => {
+      const item = byId.get(line.itemId)!;
+      return { requestId: id, itemId: item.id, itemName: item.name, sku: item.sku, unit: item.unit, requestedQuantity: line.quantity };
+    }));
+    await recordAuditInTransaction(tx, actor, "inventory.request.create", "inventory_request", id, `إنشاء طلب صرف ${input.ref} · ${input.items.length} أصناف`);
+    const request = (await tx.select().from(inventoryRequests).where(eq(inventoryRequests.id, id)).limit(1))[0]!;
+    const lines = await tx.select().from(inventoryRequestItems).where(eq(inventoryRequestItems.requestId, id));
+    return { ...request, items: lines };
+  });
+}
+export async function decideInventoryRequest(id: number, approved: boolean, notes: string | undefined, actor: LedgerActor & { name: string }) {
+  const db = await getDb();
+  if (!db) return null;
+  return db.transaction(async tx => {
+    await tx.execute(sql`SELECT id FROM inventory_requests WHERE id = ${id} FOR UPDATE`);
+    const request = (await tx.select().from(inventoryRequests).where(eq(inventoryRequests.id, id)).limit(1))[0];
+    if (!request) return null;
+    const nextStatus = nextInventoryRequestStatus(request.status, approved ? "اعتماد" : "رفض");
+    const lines = await tx.select().from(inventoryRequestItems).where(eq(inventoryRequestItems.requestId, id));
+    if (approved) {
+      const balances = new Map<number, number>();
+      for (const itemId of Array.from(new Set(lines.map(line => line.itemId))).sort((a, b) => a - b)) {
+        await tx.execute(sql`SELECT id FROM inventory_items WHERE id = ${itemId} AND archivedAt IS NULL FOR UPDATE`);
+        const item = (await tx.select().from(inventoryItems).where(and(eq(inventoryItems.id, itemId), isNull(inventoryItems.archivedAt))).limit(1))[0];
+        if (item) balances.set(itemId, item.onHand);
+      }
+      validateInventoryRequestAvailability(lines.map(line => ({ itemId: line.itemId, itemName: line.itemName, requestedQuantity: line.requestedQuantity })), balances);
+      for (const line of lines) await tx.update(inventoryRequestItems).set({ approvedQuantity: line.requestedQuantity }).where(eq(inventoryRequestItems.id, line.id));
+    }
+    await tx.update(inventoryRequests).set({ status: nextStatus, approvalNotes: notes ?? null, approvedByUserId: actor.id ?? null, approvedByName: actor.name, approvedAt: new Date() }).where(eq(inventoryRequests.id, id));
+    await recordAuditInTransaction(tx, actor, approved ? "inventory.request.approve" : "inventory.request.reject", "inventory_request", id, `${approved ? "اعتماد" : "رفض"} طلب الصرف ${request.ref}${notes ? ` · ${notes}` : ""}`);
+    const updated = (await tx.select().from(inventoryRequests).where(eq(inventoryRequests.id, id)).limit(1))[0]!;
+    return { ...updated, items: await tx.select().from(inventoryRequestItems).where(eq(inventoryRequestItems.requestId, id)) };
+  });
+}
+export async function issueInventoryRequest(id: number, actor: LedgerActor & { name: string }) {
+  const db = await getDb();
+  if (!db) return null;
+  return db.transaction(async tx => {
+    await tx.execute(sql`SELECT id FROM inventory_requests WHERE id = ${id} FOR UPDATE`);
+    const request = (await tx.select().from(inventoryRequests).where(eq(inventoryRequests.id, id)).limit(1))[0];
+    if (!request) return null;
+    const nextStatus = nextInventoryRequestStatus(request.status, "صرف");
+    const lines = await tx.select().from(inventoryRequestItems).where(eq(inventoryRequestItems.requestId, id));
+    const items = new Map<number, InventoryItem>();
+    for (const itemId of Array.from(new Set(lines.map(line => line.itemId))).sort((a, b) => a - b)) {
+      await tx.execute(sql`SELECT id FROM inventory_items WHERE id = ${itemId} AND archivedAt IS NULL FOR UPDATE`);
+      const item = (await tx.select().from(inventoryItems).where(and(eq(inventoryItems.id, itemId), isNull(inventoryItems.archivedAt))).limit(1))[0];
+      if (!item) throw new Error("تعذر الصرف؛ أحد الأصناف مؤرشف أو غير موجود");
+      items.set(itemId, item);
+    }
+    for (const line of lines) {
+      const item = items.get(line.itemId)!;
+      const resultingBalance = nextInventoryBalance(item.onHand, "صرف", line.approvedQuantity);
+      await tx.update(inventoryItems).set({ onHand: resultingBalance }).where(eq(inventoryItems.id, item.id));
+      await tx.insert(inventoryMovements).values({ itemId: item.id, direction: "صرف", quantity: line.approvedQuantity, resultingBalance, reference: request.ref, recipient: request.requestedByName, notes: request.purpose, actorUserId: actor.id ?? null, actorName: actor.name });
+      await tx.update(inventoryRequestItems).set({ issuedQuantity: line.approvedQuantity }).where(eq(inventoryRequestItems.id, line.id));
+      item.onHand = resultingBalance;
+    }
+    await tx.update(inventoryRequests).set({ status: nextStatus, issuedAt: new Date() }).where(eq(inventoryRequests.id, id));
+    await recordAuditInTransaction(tx, actor, "inventory.request.issue", "inventory_request", id, `صرف طلب ${request.ref} إلى ${request.requestedByName}`);
+    const updated = (await tx.select().from(inventoryRequests).where(eq(inventoryRequests.id, id)).limit(1))[0]!;
+    return { ...updated, items: await tx.select().from(inventoryRequestItems).where(eq(inventoryRequestItems.requestId, id)) };
+  });
+}
+export async function listAccidents(): Promise<Array<Omit<Accident, "najmReportUrl"> & { hasNajmReport: boolean }> | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db.select().from(accidents).where(isNull(accidents.archivedAt)).orderBy(desc(accidents.occurredAt), desc(accidents.createdAt));
+  return rows.map(({ najmReportUrl, ...row }) => ({ ...row, hasNajmReport: Boolean(najmReportUrl) }));
+}
+export async function getAccident(id: number) {
+  const db = await getDb();
+  if (!db) return null;
+  return (await db.select().from(accidents).where(and(eq(accidents.id, id), isNull(accidents.archivedAt))).limit(1))[0] ?? null;
+}
+export async function listAccidentEvents(id: number): Promise<AccidentEvent[] | null> {
+  const db = await getDb();
+  if (!db) return null;
+  return db.select().from(accidentEvents).where(eq(accidentEvents.accidentId, id)).orderBy(desc(accidentEvents.createdAt));
+}
+export async function createAccident(input: Omit<InsertAccident, "id" | "workflowStage" | "reportedByUserId" | "reportedByName" | "closedAt">, actor: LedgerActor & { name: string }) {
+  const db = await getDb();
+  if (!db) return null;
+  return db.transaction(async tx => {
+    const [inserted] = await tx.insert(accidents).values({ ...input, workflowStage: "بلاغ", reportedByUserId: actor.id ?? null, reportedByName: actor.name });
+    const id = Number(inserted.insertId);
+    await tx.insert(accidentEvents).values({ accidentId: id, fromStage: null, toStage: "بلاغ", details: "إنشاء بلاغ حادث", actorUserId: actor.id ?? null, actorName: actor.name });
+    await recordAuditInTransaction(tx, actor, "accident.create", "accident", id, `إنشاء بلاغ حادث ${input.ref} للمركبة ${input.vehiclePlate}`);
+    return (await tx.select().from(accidents).where(eq(accidents.id, id)).limit(1))[0] ?? null;
+  });
+}
+export async function updateAccident(id: number, input: Partial<Pick<InsertAccident, "occurredAt" | "location" | "description" | "najmReportNo" | "najmReportName" | "najmReportUrl" | "faultPercent" | "estimatedRepairCost" | "insurerName" | "insurerClaimRef" | "insurerClaimStatus" | "settlementAmount" | "resolutionNotes">>, actor: LedgerActor & { name: string }) {
+  const db = await getDb();
+  if (!db) return null;
+  return db.transaction(async tx => {
+    await tx.execute(sql`SELECT id FROM accidents WHERE id = ${id} AND archivedAt IS NULL FOR UPDATE`);
+    const current = (await tx.select().from(accidents).where(and(eq(accidents.id, id), isNull(accidents.archivedAt))).limit(1))[0];
+    if (!current) return null;
+    if (["مغلق", "ملغي"].includes(current.workflowStage)) throw new Error("لا يمكن تعديل حادث مغلق أو ملغي");
+    await tx.update(accidents).set(input).where(eq(accidents.id, id));
+    if (Object.keys(input).length) await recordAuditInTransaction(tx, actor, "accident.update", "accident", id, `تعديل بلاغ الحادث ${current.ref}`);
+    return (await tx.select().from(accidents).where(eq(accidents.id, id)).limit(1))[0] ?? null;
+  });
+}
+export async function advanceAccident(id: number, target: AccidentStage, input: Partial<Pick<InsertAccident, "faultPercent" | "estimatedRepairCost" | "insurerName" | "insurerClaimRef" | "insurerClaimStatus" | "settlementAmount" | "resolutionNotes">>, actor: LedgerActor & { name: string }) {
+  const db = await getDb();
+  if (!db) return null;
+  return db.transaction(async tx => {
+    await tx.execute(sql`SELECT id FROM accidents WHERE id = ${id} AND archivedAt IS NULL FOR UPDATE`);
+    const current = (await tx.select().from(accidents).where(and(eq(accidents.id, id), isNull(accidents.archivedAt))).limit(1))[0];
+    if (!current) return null;
+    const data = { ...current, ...input };
+    const nextStage = nextAccidentStage(current.workflowStage as AccidentStage, target, data);
+    await tx.update(accidents).set({ ...input, workflowStage: nextStage, ...(nextStage === "مغلق" ? { closedAt: new Date() } : {}) }).where(eq(accidents.id, id));
+    await tx.insert(accidentEvents).values({ accidentId: id, fromStage: current.workflowStage, toStage: nextStage, details: input.resolutionNotes ?? input.insurerClaimRef ?? null, actorUserId: actor.id ?? null, actorName: actor.name });
+    await recordAuditInTransaction(tx, actor, "accident.advance", "accident", id, `نقل الحادث ${current.ref} من ${current.workflowStage} إلى ${nextStage}`);
+    return (await tx.select().from(accidents).where(eq(accidents.id, id)).limit(1))[0] ?? null;
+  });
+}
 export async function updateSetting(id: number, input: Partial<typeof settingCatalog.$inferInsert>) { const db = await getDb(); if (!db) return null; await db.update(settingCatalog).set(input).where(eq(settingCatalog.id, id)); return (await db.select().from(settingCatalog).where(eq(settingCatalog.id, id)).limit(1))[0] ?? null; }
 export async function archiveSetting(id: number) { const db = await getDb(); if (!db) return false; await db.update(settingCatalog).set({ active: 0 }).where(eq(settingCatalog.id, id)); return true; }
 export async function listRepresentatives(clientId: number) { const db = await getDb(); return db ? db.select().from(clientRepresentatives).where(and(eq(clientRepresentatives.clientId, clientId), isNull(clientRepresentatives.archivedAt))) : null; }
@@ -1554,5 +2132,9 @@ export async function updateUserAccess(id: number, input: { permissions?: string
 export async function listSettings(category?: string) { const db = await getDb(); if (!db) return null; return category ? db.select().from(settingCatalog).where(eq(settingCatalog.category, category)) : db.select().from(settingCatalog); }
 export async function upsertSetting(input: typeof settingCatalog.$inferInsert) { const db = await getDb(); if (!db) return null; const result = await db.insert(settingCatalog).values(input); return Number(result[0].insertId); }
 export async function deleteSetting(id: number) { const db = await getDb(); if (!db) return false; await db.delete(settingCatalog).where(eq(settingCatalog.id, id)); return true; }
-export async function listAuditLogs() { const db = await getDb(); return db ? db.select().from(auditLogs).orderBy(desc(auditLogs.createdAt)).limit(200) : null; }
+export async function listAuditLogs() {
+  const db = await getDb();
+  return db ? db.select({ id: auditLogs.id, userId: auditLogs.userId, action: auditLogs.action, entityType: auditLogs.entityType, entityId: auditLogs.entityId, details: auditLogs.details, createdAt: auditLogs.createdAt, actorName: users.name, actorUsername: users.username })
+    .from(auditLogs).leftJoin(users, eq(auditLogs.userId, users.id)).orderBy(desc(auditLogs.createdAt)).limit(200) : null;
+}
 export async function createAuditLog(input: typeof auditLogs.$inferInsert): Promise<AuditLog | null> { const db = await getDb(); if (!db) return null; const result = await db.insert(auditLogs).values(input); const rows = await db.select().from(auditLogs).where(eq(auditLogs.id, Number(result[0].insertId))).limit(1); return rows[0] ?? null; }

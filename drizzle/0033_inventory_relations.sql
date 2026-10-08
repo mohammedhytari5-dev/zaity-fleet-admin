@@ -1,0 +1,5 @@
+ALTER TABLE `inventory_movements` ADD CONSTRAINT `inventory_movements_itemId_inventory_items_id_fk` FOREIGN KEY (`itemId`) REFERENCES `inventory_items`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `inventory_request_items` ADD CONSTRAINT `inventory_request_items_requestId_inventory_requests_id_fk` FOREIGN KEY (`requestId`) REFERENCES `inventory_requests`(`id`) ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `inventory_request_items` ADD CONSTRAINT `inventory_request_items_itemId_inventory_items_id_fk` FOREIGN KEY (`itemId`) REFERENCES `inventory_items`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `inventory_requests` ADD CONSTRAINT `inventory_requests_requestedByUserId_users_id_fk` FOREIGN KEY (`requestedByUserId`) REFERENCES `users`(`id`) ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `inventory_requests` ADD CONSTRAINT `inventory_requests_approvedByUserId_users_id_fk` FOREIGN KEY (`approvedByUserId`) REFERENCES `users`(`id`) ON DELETE set null ON UPDATE no action;

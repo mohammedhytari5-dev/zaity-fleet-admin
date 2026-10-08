@@ -26,3 +26,11 @@ describe("maintenance finance visibility", () => {
     expect(maintenanceEventForViewer(approval, true).details).toBe(approval.details);
   });
 });
+
+describe("maintenance vehicle visibility", () => {
+  it("hides linked vehicle identity when the viewer lacks vehicle permission", () => {
+    expect(maintenanceRecordForViewer({ id: 3, vehicleId: 8, vehicle: "ABC-123", reason: "محرك" }, false, false))
+      .toMatchObject({ id: 3, vehicle: "—", reason: "محرك" });
+    expect(maintenanceRecordForViewer({ id: 3, vehicleId: 8, vehicle: "ABC-123" }, false, false)).not.toHaveProperty("vehicleId");
+  });
+});

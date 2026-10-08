@@ -1,5 +1,13 @@
 export type ClaimStatus = "غير مرفوعة" | "جديدة" | "تحت الإجراء" | "تم اعتمادها" | "تم صرفها" | "مرفوضة" | "ملغاة";
 
+export function canAcceptContractPayment(input: { total: number; collected: number; amount: number }): boolean {
+  return input.total >= 0 && input.collected >= 0 && input.amount > 0 && input.amount <= input.total - input.collected;
+}
+
+export function canSetContractCollection(input: { total: number; targetCollected: number; ledgerCollected: number }): boolean {
+  return input.total >= 0 && input.targetCollected >= input.ledgerCollected && input.targetCollected <= input.total;
+}
+
 const CLAIM_TRANSITIONS: Record<ClaimStatus, ClaimStatus[]> = {
   "غير مرفوعة": ["جديدة", "ملغاة"],
   "جديدة": ["تحت الإجراء", "مرفوضة", "ملغاة"],
@@ -23,6 +31,33 @@ export function canUpdateClaim(input: {
   if (nextStatus === "تم صرفها" && input.currentStatus !== "تم صرفها") return false;
   if (nextAmount < input.paid || (input.currentStatus === "تم صرفها" && nextAmount > input.paid)) return false;
   return true;
+}
+
+/** Keep the customer/contract audit trail stable after any active receipt references the claim. */
+export function canChangeClaimReferences(input: {
+  hasActivePayments: boolean;
+  clientChanged: boolean;
+  contractChanged: boolean;
+}): boolean {
+  return !input.hasActivePayments || (!input.clientChanged && !input.contractChanged);
+}
+
+export class ClaimReferenceConflictError extends Error {
+  constructor() {
+    super("لا يمكن تغيير العميل أو العقد بعد تسجيل دفعات على المطالبة؛ حافظ على سجل التحصيل كما هو.");
+    this.name = "ClaimReferenceConflictError";
+  }
+}
+
+export function canArchiveClaim(hasActivePayments: boolean): boolean {
+  return !hasActivePayments;
+}
+
+export class ClaimPaymentHistoryError extends Error {
+  constructor() {
+    super("لا يمكن أرشفة مطالبة لها دفعات مسجلة؛ ألغِ الدفعات أولًا إذا كان ذلك صحيحًا محاسبيًا.");
+    this.name = "ClaimPaymentHistoryError";
+  }
 }
 
 export function validatePaymentLinkConsistency(input: {

@@ -7,3 +7,10 @@ function isCalendarDate(value: string): boolean {
 export function isValidReportPeriod(from: string, to: string): boolean {
   return isCalendarDate(from) && isCalendarDate(to) && from <= to;
 }
+
+export function reportPeriodExclusiveEnd(to: string): string | null {
+  if (!isCalendarDate(to)) return null;
+  const date = new Date(`${to}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().slice(0, 10);
+}

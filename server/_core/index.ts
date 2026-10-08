@@ -9,24 +9,14 @@ import { registerApiNotFound } from "./apiRouting";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
+import { configuredPort, resolveListenPort } from "./listen-port";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
-    const server = net.createServer();
-    server.listen(port, () => {
-      server.close(() => resolve(true));
-    });
-    server.on("error", () => resolve(false));
+    const probe = net.createServer();
+    probe.once("error", () => resolve(false));
+    probe.listen(port, () => probe.close(() => resolve(true)));
   });
-}
-
-async function findAvailablePort(startPort: number = 3000): Promise<number> {
-  for (let port = startPort; port < startPort + 20; port++) {
-    if (await isPortAvailable(port)) {
-      return port;
-    }
-  }
-  throw new Error(`No available port found starting from ${startPort}`);
 }
 
 async function startServer() {
@@ -54,8 +44,8 @@ async function startServer() {
     serveStatic(app);
   }
 
-  const preferredPort = parseInt(process.env.PORT || "3000");
-  const port = await findAvailablePort(preferredPort);
+  const preferredPort = configuredPort(process.env.PORT);
+  const port = await resolveListenPort(preferredPort, process.env.NODE_ENV === "production", isPortAvailable);
 
   if (port !== preferredPort) {
     console.log(`Port ${preferredPort} is busy, using port ${port} instead`);

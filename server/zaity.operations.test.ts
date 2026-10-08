@@ -75,6 +75,18 @@ describe("Zaity operations", () => {
     await expect(caller.notifications.list()).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
+  it("allows dashboard users to read their task queue but restricts assignment management to admins", async () => {
+    const ctx: TrpcContext = {
+      user: { ...adminUser, role: "user" as const, permissions: JSON.stringify(["dashboard"]) },
+      req: { protocol: "https", headers: {} } as TrpcContext["req"],
+      res: {} as TrpcContext["res"],
+    };
+    const caller = appRouter.createCaller(ctx);
+    await expect(caller.tasks.list()).resolves.not.toBeUndefined();
+    await expect(caller.tasks.assignees()).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(caller.tasks.create({ title: "مهمة اختبار", dueAt: "2026-10-12", assigneeUserId: 2 })).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
   it("requires module access before linking projects to clients or contracts", async () => {
     const ctx: TrpcContext = { user: { ...adminUser, role: "user" as const, permissions: JSON.stringify(["projects"]) }, req: { protocol: "https", headers: {} } as TrpcContext["req"], res: {} as TrpcContext["res"] };
     const caller = appRouter.createCaller(ctx);
@@ -182,6 +194,17 @@ describe("Zaity operations", () => {
     const ctx: TrpcContext = { user: adminUser, req: { protocol: "https", headers: {} } as TrpcContext["req"], res: {} as TrpcContext["res"] };
     await expect(appRouter.createCaller(ctx).payments.create({ amount: 100, paidAt: "2026-09-30", method: "تحويل" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
+  it("requires client access before creating or changing payment relationships", async () => {
+    const ctx: TrpcContext = {
+      user: { ...adminUser, role: "user" as const, permissions: JSON.stringify(["finance"]) },
+      req: { protocol: "https", headers: {} } as TrpcContext["req"],
+      res: {} as TrpcContext["res"],
+    };
+    const caller = appRouter.createCaller(ctx);
+    await expect(caller.payments.create({ clientId: 3, contractId: null, claimId: null, amount: 100, paidAt: "2026-09-30", method: "تحويل" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(caller.payments.update({ id: 1, data: { claimId: 7 } })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(caller.payments.update({ id: 1, data: { clientId: null, contractId: 8 } })).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
   it("protects operational mutations added in the operations suite", async () => {
     const ctx: TrpcContext = { user: undefined, req: { protocol: "https", headers: {} } as TrpcContext["req"], res: {} as TrpcContext["res"] };
     await expect(appRouter.createCaller(ctx).tasks.create({ title: "مهمة اختبار" })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
@@ -227,9 +250,17 @@ describe("Zaity operations", () => {
 
   it("does not allow maintenance-only users to enter invoice amounts or financial attachments", async () => {
     const ctx: TrpcContext = { user: { ...adminUser, role: "user" as const, permissions: JSON.stringify(["maintenance"]) }, req: { protocol: "https", headers: {} } as TrpcContext["req"], res: {} as TrpcContext["res"] };
-    await expect(appRouter.createCaller(ctx).maintenance.create({ ref: "MT-TEST", vehicleId: 1, vehicle: "1234", type: "إصلاح", manager: "اختبار", start: "2026-10-03", due: "2026-10-03", status: "جديد", cost: "500 ر.س" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    const caller = appRouter.createCaller(ctx);
+    await expect(caller.maintenance.create({ ref: "MT-TEST", vehicleId: 1, vehicle: "1234", type: "إصلاح", manager: "اختبار", start: "2026-10-03", due: "2026-10-03", status: "جديد", quoteName: "عرض سعر", quoteUrl: "data:application/pdf;base64,JVBERi0xLjQK", estimatedCost: 500, laborCost: 250 })).rejects.toMatchObject({ code: "FORBIDDEN" });
     await expect(appRouter.createCaller(ctx).maintenance.update({ id: 1, data: { cost: "500 SAR" } })).rejects.toMatchObject({ code: "FORBIDDEN" });
-    await expect(appRouter.createCaller(ctx).maintenance.update({ id: 1, data: { receiptUrl: "data:application/pdf;base64,ZmFrZQ==" } })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(appRouter.createCaller(ctx).maintenance.update({ id: 1, data: { receiptUrl: "data:application/pdf;base64,JVBERi0xLjQK" } })).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("requires approved supplier invoices as the source of actual maintenance cost", async () => {
+    const ctx: TrpcContext = { user: { ...adminUser, role: "user" as const, permissions: JSON.stringify(["maintenance", "finance"]) }, req: { protocol: "https", headers: {} } as TrpcContext["req"], res: {} as TrpcContext["res"] };
+    const caller = appRouter.createCaller(ctx);
+    await expect(caller.maintenance.update({ id: 1, data: { cost: "500 SAR" } })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+    await expect(caller.maintenance.update({ id: 1, data: { receiptUrl: "data:application/pdf;base64,JVBERi0xLjQK" } })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
   });
 
   it("requires vehicle permission when maintenance actions link to or change a vehicle", async () => {

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { LockKeyhole, LogIn, ShieldCheck, UserRound } from "lucide-react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
 
@@ -11,8 +12,10 @@ export default function Login() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const utils = trpc.useUtils();
+  const queryClient = useQueryClient();
   const login = trpc.auth.login.useMutation({
     onSuccess: async (loggedInUser) => {
+      queryClient.clear();
       utils.auth.me.setData(undefined, loggedInUser);
       toast.success("تم تسجيل الدخول بنجاح");
       navigate("/dashboard");

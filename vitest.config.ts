@@ -1,7 +1,9 @@
 import { defineConfig } from "vitest/config";
 import path from "path";
 
-const templateRoot = path.resolve(import.meta.dirname);
+// Vitest bundles TypeScript configs into a temporary directory before loading.
+// Using import.meta.dirname here can therefore resolve outside the project.
+const templateRoot = path.resolve(process.cwd());
 
 export default defineConfig({
   root: templateRoot,
