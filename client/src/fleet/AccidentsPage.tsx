@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { formatCompanyDate } from "@shared/date-utils";
 import { readUploadDataUrl, SUPPORTED_UPLOAD_ACCEPT } from "@/lib/fileUploads";
+import { Download, Eye, FileText, Upload } from "lucide-react";
 import type { Row, Vehicle, Driver } from "./types";
 import {
   Badge,
@@ -13,6 +14,8 @@ import {
   FormActions,
   exportCsv,
   formatSAR,
+  LinkedDocumentsSection,
+  DocumentPreviewModal,
 } from "./common";
 
 export function AccidentDetailModal({ accident, onClose }: { accident: Row; onClose: () => void }) {
@@ -20,6 +23,7 @@ export function AccidentDetailModal({ accident, onClose }: { accident: Row; onCl
   const { data: record } = trpc.accidents.detail.useQuery({ id: accident.id });
   const { data: events = [] } = trpc.accidents.events.useQuery({ id: accident.id });
   const advance = trpc.accidents.advance.useMutation();
+  const createDocument = trpc.documents.create.useMutation();
   const [faultPercent, setFaultPercent] = useState("");
   const [repairCost, setRepairCost] = useState("");
   const [insurer, setInsurer] = useState("");
@@ -27,6 +31,11 @@ export function AccidentDetailModal({ accident, onClose }: { accident: Row; onCl
   const [claimStatus, setClaimStatus] = useState("مرفوعة");
   const [settlement, setSettlement] = useState("");
   const [notes, setNotes] = useState("");
+  const [stageFile, setStageFile] = useState<File | null>(null);
+  const [stageDocName, setStageDocName] = useState("");
+  const [uploadingStage, setUploadingStage] = useState(false);
+  const [previewNajm, setPreviewNajm] = useState(false);
+
   const current = (record ?? accident) as Row;
 
   const nextStage: Record<string, string | null> = {
@@ -39,7 +48,22 @@ export function AccidentDetailModal({ accident, onClose }: { accident: Row; onCl
     "ملغي": null,
   };
 
-  const advanceToNext = () => {
+  const getStageDocPlaceholder = (stage: string) => {
+    switch (stage) {
+      case "تقدير الإصلاح":
+        return { label: "تقرير تقدير الورشة / تكلفة الإصلاح", type: "تقدير إصلاح" };
+      case "مطالبة التأمين":
+        return { label: "نموذج مطالبة التأمين / إشعار المطالبة", type: "مطالبة تأمين" };
+      case "التسوية":
+        return { label: "مخالصة وسند استلام التعويض", type: "مخالصة تسوية" };
+      case "تحديد المسؤولية":
+        return { label: "تقرير المرور / إشعار تحديد المسؤولية", type: "تقرير المرور" };
+      default:
+        return { label: "مستند داعم للمرحلة", type: "مستند حادث" };
+    }
+  };
+
+  const advanceToNext = async () => {
     const toStage = nextStage[String(current.workflowStage)];
     if (!toStage) return;
     const data: Record<string, unknown> = { resolutionNotes: notes.trim() || undefined };
@@ -57,19 +81,48 @@ export function AccidentDetailModal({ accident, onClose }: { accident: Row; onCl
     }
     if (toStage === "مغلق") data.settlementAmount = Number(settlement);
 
-    advance.mutate(
-      { id: current.id, toStage: toStage as any, data: data as any },
-      {
-        onSuccess: () => {
-          void utils.accidents.list.invalidate();
-          void utils.accidents.detail.invalidate({ id: current.id });
-          void utils.accidents.events.invalidate({ id: current.id });
-          toast.success(`تم نقل الحادث إلى مرحلة ${toStage}`);
-        },
-        onError: (error) => toast.error(`تعذر نقل الحادث: ${error.message}`),
+    setUploadingStage(true);
+    try {
+      if (stageFile) {
+        const fileUrl = await readUploadDataUrl(stageFile);
+        const docConfig = getStageDocPlaceholder(toStage);
+        await createDocument.mutateAsync({
+          name: stageDocName.trim() || `${docConfig.label} - ${current.ref}`,
+          entity: `حادث ${current.ref} (${current.vehiclePlate})`,
+          entityType: "حادث",
+          entityId: current.id,
+          type: docConfig.type,
+          expiry: "—",
+          status: "ساري",
+          fileName: stageFile.name,
+          fileUrl,
+        });
+        await utils.documents.list.invalidate();
       }
-    );
+
+      advance.mutate(
+        { id: current.id, toStage: toStage as any, data: data as any },
+        {
+          onSuccess: () => {
+            void utils.accidents.list.invalidate();
+            void utils.accidents.detail.invalidate({ id: current.id });
+            void utils.accidents.events.invalidate({ id: current.id });
+            setStageFile(null);
+            setStageDocName("");
+            toast.success(`تم نقل الحادث إلى مرحلة ${toStage} بنجاح`);
+          },
+          onError: (error) => toast.error(`تعذر نقل الحادث: ${error.message}`),
+        }
+      );
+    } catch (err: any) {
+      toast.error(err.message || "تعذر إرفاق مستند المرحلة");
+    } finally {
+      setUploadingStage(false);
+    }
   };
+
+  const toStageName = nextStage[String(current.workflowStage)];
+  const stageDocConfig = toStageName ? getStageDocPlaceholder(toStageName) : null;
 
   return (
     <Modal title={`بلاغ الحادث · ${current.ref}`} onClose={onClose} wide>
@@ -109,19 +162,61 @@ export function AccidentDetailModal({ accident, onClose }: { accident: Row; onCl
           </div>
         ))}
       </div>
+
       {current.najmReportUrl && (
-        <section className="surface" style={{ marginTop: "1rem", padding: "1rem" }}>
-          <strong>تقرير نجم · {current.najmReportName || current.najmReportNo}</strong>
-          <div style={{ display: "flex", gap: ".75rem", marginTop: ".75rem" }}>
-            <a className="btn outline" href={current.najmReportUrl} target="_blank" rel="noreferrer">
-              معاينة التقرير
-            </a>
-            <a className="btn outline" href={current.najmReportUrl} download={current.najmReportName || "najm-report"}>
-              تحميل التقرير
-            </a>
+        <section className="surface" style={{ marginTop: "1rem", padding: "1.1rem" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+            <div>
+              <strong style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 13 }}>
+                <FileText size={17} style={{ color: "var(--teal)" }} />
+                تقرير نجم / البلاغ الأساسي
+              </strong>
+              <small style={{ color: "var(--muted)", display: "block", marginTop: 3 }}>
+                {current.najmReportName || current.najmReportNo || "تقرير الحادث المعتمد"}
+              </small>
+            </div>
+            <div style={{ display: "flex", gap: ".6rem" }}>
+              <button
+                type="button"
+                className="btn outline"
+                onClick={() => setPreviewNajm(true)}
+              >
+                <Eye size={15} /> معاينة داخل النظام
+              </button>
+              <a
+                className="btn outline"
+                href={current.najmReportUrl}
+                download={current.najmReportName || "najm-report"}
+              >
+                <Download size={15} /> تحميل
+              </a>
+            </div>
           </div>
         </section>
       )}
+
+      {/* In-system preview modal for Najm report */}
+      {previewNajm && current.najmReportUrl && (
+        <DocumentPreviewModal
+          title={`تقرير نجم · ${current.ref}`}
+          fileName={current.najmReportName || `najm-report-${current.najmReportNo || current.ref}`}
+          fileUrl={current.najmReportUrl}
+          type="تقرير نجم"
+          entity={`حادث ${current.ref} (${current.vehiclePlate})`}
+          status="ساري"
+          onClose={() => setPreviewNajm(false)}
+        />
+      )}
+
+      {/* Linked documents across all accident stages */}
+      <LinkedDocumentsSection
+        entityType="حادث"
+        entityId={current.id}
+        entityName={`حادث ${current.ref} (${current.vehiclePlate})`}
+        canViewDocuments={true}
+        canUpload={true}
+      />
+
       <section className="surface" style={{ padding: "1rem", marginTop: "1rem" }}>
         <div className="section-head">
           <div>
@@ -145,17 +240,20 @@ export function AccidentDetailModal({ accident, onClose }: { accident: Row; onCl
         </div>
         {(events ?? []).length === 0 && <div className="empty-state">لا يوجد سجل إجراءات.</div>}
       </section>
-      {nextStage[String(current.workflowStage)] && (
-        <section className="surface" style={{ padding: "1rem", marginTop: "1rem" }}>
-          <h3 style={{ marginBottom: ".75rem" }}>الانتقال إلى: {nextStage[String(current.workflowStage)]}</h3>
+
+      {toStageName && (
+        <section className="surface" style={{ padding: "1.25rem", marginTop: "1rem" }}>
+          <h3 style={{ marginBottom: ".85rem", fontSize: 14 }}>
+            الانتقال إلى المرحلة التالية: {toStageName}
+          </h3>
           <div className="form-grid">
-            {nextStage[String(current.workflowStage)] === "تقدير الإصلاح" && (
+            {toStageName === "تقدير الإصلاح" && (
               <>
                 <Field label="نسبة المسؤولية %" type="number" value={faultPercent} onChange={setFaultPercent} />
                 <div className="field-note">رقم تقرير نجم: {current.najmReportNo || "—"}</div>
               </>
             )}
-            {nextStage[String(current.workflowStage)] === "مطالبة التأمين" && (
+            {toStageName === "مطالبة التأمين" && (
               <>
                 <Field
                   label="تقدير تكلفة الإصلاح (SAR)"
@@ -166,7 +264,7 @@ export function AccidentDetailModal({ accident, onClose }: { accident: Row; onCl
                 <Field label="شركة التأمين" value={insurer} onChange={setInsurer} />
               </>
             )}
-            {nextStage[String(current.workflowStage)] === "التسوية" && (
+            {toStageName === "التسوية" && (
               <>
                 <Field label="رقم مطالبة التأمين" value={claimRef} onChange={setClaimRef} />
                 <label className="field">
@@ -180,7 +278,7 @@ export function AccidentDetailModal({ accident, onClose }: { accident: Row; onCl
                 </label>
               </>
             )}
-            {nextStage[String(current.workflowStage)] === "مغلق" && (
+            {toStageName === "مغلق" && (
               <Field
                 label="مبلغ التسوية النهائية (SAR)"
                 type="number"
@@ -189,10 +287,41 @@ export function AccidentDetailModal({ accident, onClose }: { accident: Row; onCl
               />
             )}
             <Field label="ملاحظات الإجراء" value={notes} onChange={setNotes} />
+
+            {/* Document upload for this stage */}
+            {stageDocConfig && (
+              <div style={{ gridColumn: "1 / -1", background: "#f8faf9", padding: "12px", borderRadius: "10px", border: "1px dashed #d1deda" }}>
+                <label className="field" style={{ margin: 0 }}>
+                  <span style={{ fontWeight: 600, color: "var(--ink)", display: "flex", alignItems: "center", gap: 6 }}>
+                    <Upload size={14} style={{ color: "var(--teal)" }} />
+                    إرفاق مستند لهذه المرحلة ({stageDocConfig.label})
+                  </span>
+                  <input
+                    type="file"
+                    accept={SUPPORTED_UPLOAD_ACCEPT}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0] ?? null;
+                      setStageFile(file);
+                      if (file && !stageDocName) setStageDocName(file.name);
+                    }}
+                    style={{ marginTop: 6 }}
+                  />
+                </label>
+                {stageFile && (
+                  <div className="field-note" style={{ marginTop: 6 }}>
+                    الملف المحدد للرفع: <strong>{stageFile.name}</strong>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
           <div className="detail-footer">
-            <button className="btn primary" disabled={advance.isPending} onClick={advanceToNext}>
-              اعتماد المرحلة التالية
+            <button
+              className="btn primary"
+              disabled={advance.isPending || uploadingStage}
+              onClick={advanceToNext}
+            >
+              {uploadingStage ? "جارٍ الرفع والاعتماد..." : "اعتماد المرحلة التالية"}
             </button>
             <button className="btn ghost" onClick={onClose}>
               إغلاق
@@ -208,9 +337,11 @@ export function AccidentsPage({ vehicles, drivers }: { vehicles: Vehicle[]; driv
   const utils = trpc.useUtils();
   const { data = [] } = trpc.accidents.list.useQuery(undefined, { staleTime: 15000 });
   const createAccident = trpc.accidents.create.useMutation();
+  const createDocument = trpc.documents.create.useMutation();
   const [search, setSearch] = useState("");
   const [form, setForm] = useState<Row | null>(null);
   const [selected, setSelected] = useState<Row | null>(null);
+  const [tablePreviewDoc, setTablePreviewDoc] = useState<{ url: string; name: string; title: string; entity: string } | null>(null);
   const [uploading, setUploading] = useState(false);
   const records = data as Row[];
 
@@ -222,8 +353,8 @@ export function AccidentsPage({ vehicles, drivers }: { vehicles: Vehicle[]; driv
 
   const save = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!form?.vehicleId || !form.description || !form.occurredAt) {
-      toast.error("اختر المركبة واكتب وصف الحادث وتاريخه");
+    if (!form?.vehicleId || !form.occurredAt || !form.description || form.description.trim().length < 5) {
+      toast.error("يرجى اختيار المركبة وتاريخ الحادث وكتابة وصف لا يقل عن 5 أحرف");
       return;
     }
     const vehicle = vehicles.find((row) => row.id === Number(form.vehicleId));
@@ -235,7 +366,15 @@ export function AccidentsPage({ vehicles, drivers }: { vehicles: Vehicle[]; driv
     setUploading(true);
     try {
       let najmReportUrl: string | null = null;
-      if (form.reportFile instanceof File) najmReportUrl = await readUploadDataUrl(form.reportFile);
+      let damagePhotosUrl: string | null = null;
+
+      if (form.reportFile instanceof File) {
+        najmReportUrl = await readUploadDataUrl(form.reportFile);
+      }
+      if (form.damageFile instanceof File) {
+        damagePhotosUrl = await readUploadDataUrl(form.damageFile);
+      }
+
       createAccident.mutate(
         {
           ref: `AC-${Date.now()}`,
@@ -251,16 +390,67 @@ export function AccidentsPage({ vehicles, drivers }: { vehicles: Vehicle[]; driv
           najmReportUrl,
         },
         {
-          onSuccess: () => {
+          onSuccess: async (createdAccident: any) => {
+            const accId = createdAccident?.id;
+            const accRef = createdAccident?.ref || `AC-${Date.now()}`;
+
+            // Save Najm Report to central documents table
+            if (najmReportUrl && accId) {
+              try {
+                await createDocument.mutateAsync({
+                  name: `تقرير نجم - ${accRef}`,
+                  entity: `حادث ${accRef} (${vehicle.plate})`,
+                  entityType: "حادث",
+                  entityId: accId,
+                  type: "تقرير نجم",
+                  expiry: "—",
+                  status: "ساري",
+                  fileName: form.reportFile instanceof File ? form.reportFile.name : "najm-report",
+                  fileUrl: najmReportUrl,
+                });
+              } catch (e) {
+                console.error("Failed to link report to documents", e);
+              }
+            }
+
+            // Save Damage Photos to central documents table
+            if (damagePhotosUrl && accId) {
+              try {
+                await createDocument.mutateAsync({
+                  name: `صور أضرار الحادث - ${accRef}`,
+                  entity: `حادث ${accRef} (${vehicle.plate})`,
+                  entityType: "حادث",
+                  entityId: accId,
+                  type: "صور أضرار",
+                  expiry: "—",
+                  status: "ساري",
+                  fileName: form.damageFile instanceof File ? form.damageFile.name : "damage-photos",
+                  fileUrl: damagePhotosUrl,
+                });
+              } catch (e) {
+                console.error("Failed to link damage photos to documents", e);
+              }
+            }
+
             setForm(null);
             void utils.accidents.list.invalidate();
-            toast.success("تم تسجيل بلاغ الحادث");
+            void utils.documents.list.invalidate();
+            toast.success("تم تسجيل بلاغ الحادث وإرفاق المستندات بنجاح");
           },
-          onError: (error) => toast.error(`تعذر تسجيل الحادث: ${error.message}`),
+          onError: (error) => {
+            let msg = error.message;
+            try {
+              const parsed = JSON.parse(error.message);
+              if (Array.isArray(parsed) && parsed[0]?.message) {
+                msg = parsed[0].message;
+              }
+            } catch {}
+            toast.error(`تعذر تسجيل الحادث: ${msg}`);
+          },
         }
       );
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "تعذر إرفاق تقرير نجم");
+      toast.error(error instanceof Error ? error.message : "تعذر تجهيز مرفقات الحادث");
     } finally {
       setUploading(false);
     }
@@ -276,6 +466,7 @@ export function AccidentsPage({ vehicles, drivers }: { vehicles: Vehicle[]; driv
       description: "",
       najmReportNo: "",
       reportFile: null,
+      damageFile: null,
     });
 
   return (
@@ -283,7 +474,7 @@ export function AccidentsPage({ vehicles, drivers }: { vehicles: Vehicle[]; driv
       <PageHeader
         eyebrow="التشغيل / الحوادث والتأمين"
         title="الحوادث"
-        description="سجل بلاغ نجم، تحديد المسؤولية، تقدير الإصلاح، مطالبة شركة التأمين والتسوية النهائية."
+        description="سجل بلاغ نجم، تحديد المسؤولية، تقدير الإصلاح، مطالبة شركة التأمين والتسوية النهائية مع حفظ ومزامنة كافة المستندات."
         action="تسجيل حادث"
         onAction={openNew}
       />
@@ -319,7 +510,7 @@ export function AccidentsPage({ vehicles, drivers }: { vehicles: Vehicle[]; driv
           "المركبة",
           "السائق",
           "تاريخ الحادث",
-          "تقرير نجم",
+          "تقرير نجم / المرفقات",
           "المرحلة",
           "شركة التأمين",
         ]}
@@ -354,15 +545,33 @@ export function AccidentsPage({ vehicles, drivers }: { vehicles: Vehicle[]; driv
             <td>
               <button className="driver-name-button" onClick={() => setSelected(row)}>
                 <strong className="table-primary">{row.ref}</strong>
-                <small>عرض تفاصيل الحادث</small>
+                <small>عرض تفاصيل الحادث والمستندات</small>
               </button>
             </td>
             <td>{row.vehiclePlate}</td>
             <td>{row.driverName || "—"}</td>
             <td>{row.occurredAt}</td>
             <td>
-              {row.najmReportNo || "بانتظار التقرير"}
-              {row.hasNajmReport ? " · مرفق" : ""}
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span>{row.najmReportNo || "بانتظار التقرير"}</span>
+                {row.najmReportUrl && (
+                  <button
+                    type="button"
+                    className="row-menu-btn"
+                    title="معاينة تقرير نجم داخل النظام"
+                    onClick={() =>
+                      setTablePreviewDoc({
+                        url: row.najmReportUrl,
+                        name: row.najmReportName || `najm-${row.ref}`,
+                        title: `تقرير نجم · ${row.ref}`,
+                        entity: `حادث ${row.ref} (${row.vehiclePlate})`,
+                      })
+                    }
+                  >
+                    <Eye size={15} />
+                  </button>
+                )}
+              </div>
             </td>
             <td>
               <Badge>{row.workflowStage}</Badge>
@@ -370,15 +579,28 @@ export function AccidentsPage({ vehicles, drivers }: { vehicles: Vehicle[]; driv
             <td>{row.insurerName || "—"}</td>
             <td className="actions-cell">
               <button className="btn outline" onClick={() => setSelected(row)}>
-                التفاصيل والإجراء
+                التفاصيل والمستندات
               </button>
             </td>
           </tr>
         ))}
       </TableShell>
 
+      {/* Table Row In-System Preview Modal */}
+      {tablePreviewDoc && (
+        <DocumentPreviewModal
+          title={tablePreviewDoc.title}
+          fileName={tablePreviewDoc.name}
+          fileUrl={tablePreviewDoc.url}
+          type="تقرير نجم"
+          entity={tablePreviewDoc.entity}
+          status="ساري"
+          onClose={() => setTablePreviewDoc(null)}
+        />
+      )}
+
       {form && (
-        <Modal title="تسجيل بلاغ حادث" onClose={() => setForm(null)} wide>
+        <Modal title="تسجيل بلاغ حادث جديد" onClose={() => setForm(null)} wide>
           <form onSubmit={save}>
             <div className="form-grid">
               <label className="field">
@@ -445,14 +667,15 @@ export function AccidentsPage({ vehicles, drivers }: { vehicles: Vehicle[]; driv
                 }
               />
               <Field
-                label="وصف الحادث *"
+                label="وصف الحادث * (5 أحرف على الأقل)"
                 value={form.description}
                 onChange={(value) =>
                   setForm((prev) => (prev ? { ...prev, description: value } : prev))
                 }
+                placeholder="مثال: صدم من الخلف أثناء التوقف عند الإشارة..."
               />
               <label className="field">
-                <span>تقرير نجم / صور الضرر</span>
+                <span>تقرير نجم / تقرير المرور (PDF أو صورة)</span>
                 <input
                   type="file"
                   accept={SUPPORTED_UPLOAD_ACCEPT}
@@ -463,11 +686,32 @@ export function AccidentsPage({ vehicles, drivers }: { vehicles: Vehicle[]; driv
                   }
                 />
               </label>
-              {form.reportFile && <div className="field-note">المرفق: {form.reportFile.name}</div>}
+              <label className="field">
+                <span>صور أضرار الحادث (اختياري)</span>
+                <input
+                  type="file"
+                  accept="image/*,.pdf"
+                  onChange={(event) =>
+                    setForm((prev) =>
+                      prev ? { ...prev, damageFile: event.target.files?.[0] ?? null } : prev
+                    )
+                  }
+                />
+              </label>
+              {form.reportFile && (
+                <div className="field-note" style={{ gridColumn: "1 / -1" }}>
+                  تقرير الحادث المرفق: <strong>{form.reportFile.name}</strong>
+                </div>
+              )}
+              {form.damageFile && (
+                <div className="field-note" style={{ gridColumn: "1 / -1" }}>
+                  صور الأضرار المرفقة: <strong>{form.damageFile.name}</strong>
+                </div>
+              )}
             </div>
             <FormActions
               onCancel={() => setForm(null)}
-              label={uploading || createAccident.isPending ? "جارٍ الحفظ..." : "حفظ بلاغ الحادث"}
+              label={uploading || createAccident.isPending ? "جارٍ الحفظ والمزامنة..." : "حفظ بلاغ الحادث والمستندات"}
             />
           </form>
         </Modal>

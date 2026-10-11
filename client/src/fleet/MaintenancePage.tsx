@@ -489,51 +489,63 @@ export function MaintenancePage({
 
       <div className="stats-banner">
         <div>
-          <Wrench size={17} />
-          <span>طلبات مفتوحة</span>
-          <strong>{maintenance.filter(isOpen).length.toLocaleString("en-US")}</strong>
+          <Wrench size={18} />
+          <div className="stats-banner-info">
+            <span>طلبات مفتوحة</span>
+            <strong>{maintenance.filter(isOpen).length.toLocaleString("en-US")}</strong>
+          </div>
         </div>
         <div>
-          <Clock3 size={17} />
-          <span>متأخرة</span>
-          <strong className="red-text">{overdue.length.toLocaleString("en-US")}</strong>
+          <Clock3 size={18} />
+          <div className="stats-banner-info">
+            <span>متأخرة</span>
+            <strong className="red-text">{overdue.length.toLocaleString("en-US")}</strong>
+          </div>
         </div>
         <div>
-          <AlertCircle size={17} />
-          <span>طارئة / عاجلة</span>
-          <strong className="red-text">
-            {
-              maintenance.filter(
-                (item) => isOpen(item) && ["طارئ", "عاجل"].includes(String(item.priority))
-              ).length
-            }
-          </strong>
+          <AlertCircle size={18} />
+          <div className="stats-banner-info">
+            <span>طارئة / عاجلة</span>
+            <strong className="red-text">
+              {
+                maintenance.filter(
+                  (item) => isOpen(item) && ["طارئ", "عاجل"].includes(String(item.priority))
+                ).length
+              }
+            </strong>
+          </div>
         </div>
         <div>
-          <CheckCircle2 size={17} />
-          <span>بانتظار الاعتماد</span>
-          <strong>
-            {maintenance.filter((item) => item.approvalStatus === "بانتظار الاعتماد").length.toLocaleString("en-US")}
-          </strong>
+          <CheckCircle2 size={18} />
+          <div className="stats-banner-info">
+            <span>بانتظار الاعتماد</span>
+            <strong>
+              {maintenance.filter((item) => item.approvalStatus === "بانتظار الاعتماد").length.toLocaleString("en-US")}
+            </strong>
+          </div>
         </div>
         {canApprove && (
           <>
             <div>
-              <CircleDollarSign size={17} />
-              <span>مصروف الصيانة المعتمد هذا الشهر</span>
-              <strong>
-                {monthlyCostQuery.isFetching
-                  ? "جارٍ التحميل"
-                  : monthlyCostQuery.isError
-                  ? "تعذر التحميل"
-                  : formatSAR(monthlyCostQuery.data ?? 0)}
-              </strong>
-              <small>حسب تاريخ قيد المصروف؛ الفواتير غير المعتمدة مستبعدة.</small>
+              <CircleDollarSign size={18} />
+              <div className="stats-banner-info">
+                <span>مصروف الصيانة المعتمد هذا الشهر</span>
+                <strong>
+                  {monthlyCostQuery.isFetching
+                    ? "جارٍ التحميل"
+                    : monthlyCostQuery.isError
+                    ? "تعذر التحميل"
+                    : formatSAR(monthlyCostQuery.data ?? 0)}
+                </strong>
+                <small>حسب تاريخ قيد المصروف؛ الفواتير غير المعتمدة مستبعدة.</small>
+              </div>
             </div>
             <div>
-              <CalendarDays size={17} />
-              <span>إجمالي الطلبات</span>
-              <strong>{maintenance.length.toLocaleString("en-US")}</strong>
+              <CalendarDays size={18} />
+              <div className="stats-banner-info">
+                <span>إجمالي الطلبات</span>
+                <strong>{maintenance.length.toLocaleString("en-US")}</strong>
+              </div>
             </div>
           </>
         )}

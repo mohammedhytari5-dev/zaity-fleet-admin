@@ -1,5 +1,5 @@
 import React from "react";
-import { Modal, Badge, formatSAR, DocumentFileActions } from "../common";
+import { Modal, Badge, formatSAR, DocumentFileActions, LinkedDocumentsSection } from "../common";
 import { Truck, Pencil } from "lucide-react";
 import { resolveRenewalStatus } from "@shared/date-utils";
 import { isLinkedDocument } from "@/lib/documentRelations";
@@ -436,45 +436,24 @@ export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
         </section>
       )}
 
-      {/* Linked Documents */}
-      <section className="surface" style={{ padding: "1rem", marginTop: "1rem" }}>
-        <div className="section-head">
-          <div>
-            <h3>المستندات المرتبطة</h3>
-            <span>
-              {canAccess("documents")
-                ? "المستندات المحفوظة باسم هذا الموظف"
-                : "يلزم إذن المستندات لعرض المرفقات"}
-            </span>
-          </div>
-        </div>
-        {canAccess("documents") ? (
-          employeeDocuments.filter((doc) =>
-            isLinkedDocument(doc, "موظف", profile.id)
-          ).length ? (
-            <div className="compact-list">
-              {employeeDocuments
-                .filter((doc) => isLinkedDocument(doc, "موظف", profile.id))
-                .map((doc) => (
-                  <div className="compact-row" key={doc.id}>
-                    <div className="compact-main">
-                      <strong>{doc.name}</strong>
-                      <small>
-                        {doc.type} · ينتهي {doc.expiry}
-                      </small>
-                    </div>
-                    <Badge>{doc.status}</Badge>
-                    <DocumentFileActions file={doc} />
-                  </div>
-                ))}
-            </div>
-          ) : (
-            <div className="empty-state" style={{ padding: "1.5rem" }}>
-              لا توجد مستندات مرتبطة بهذا الموظف.
-            </div>
-          )
-        ) : null}
-      </section>
+      {/* Linked Documents with Direct Upload and In-System Preview */}
+      <LinkedDocumentsSection
+        entityType="موظف"
+        entityId={profile.id}
+        entityName={`موظف · ${profile.name} (${profile.jobTitle || profile.employeeNo})`}
+        canViewDocuments={canAccess("documents")}
+        canUpload={true}
+      />
+
+      {profile.driverId && (
+        <LinkedDocumentsSection
+          entityType="سائق"
+          entityId={profile.driverId}
+          entityName={`سائق · ${profile.name} (رخصة قيادة ووثائق تشغيل)`}
+          canViewDocuments={canAccess("documents")}
+          canUpload={true}
+        />
+      )}
 
       <div className="form-actions" style={{ marginTop: "1.5rem" }}>
         <button className="btn ghost" onClick={onClose}>

@@ -2276,16 +2276,23 @@ export async function updateAccident(id: number, input: Partial<Pick<InsertAccid
     return (await tx.select().from(accidents).where(eq(accidents.id, id)).limit(1))[0] ?? null;
   });
 }
-export async function advanceAccident(id: number, target: AccidentStage, input: Partial<Pick<InsertAccident, "faultPercent" | "estimatedRepairCost" | "insurerName" | "insurerClaimRef" | "insurerClaimStatus" | "settlementAmount" | "resolutionNotes">>, actor: LedgerActor & { name: string }) {
+export async function advanceAccident(id: number, target: AccidentStage, input: Partial<Pick<InsertAccident, "najmReportNo" | "faultPercent" | "estimatedRepairCost" | "insurerName" | "insurerClaimRef" | "insurerClaimStatus" | "settlementAmount" | "resolutionNotes">>, actor: LedgerActor & { name: string }) {
   const db = await getDb();
   if (!db) return null;
   return db.transaction(async tx => {
     await tx.execute(sql`SELECT id FROM accidents WHERE id = ${id} AND archivedAt IS NULL FOR UPDATE`);
     const current = (await tx.select().from(accidents).where(and(eq(accidents.id, id), isNull(accidents.archivedAt))).limit(1))[0];
     if (!current) return null;
-    const data = { ...current, ...input };
+    const normalizedNajm = input.najmReportNo !== undefined ? normalizeNajmReportNo(input.najmReportNo) : current.najmReportNo;
+    const data = { ...current, ...input, najmReportNo: normalizedNajm };
     const nextStage = nextAccidentStage(current.workflowStage as AccidentStage, target, data);
-    await tx.update(accidents).set({ ...input, workflowStage: nextStage, ...(nextStage === "مغلق" ? { closedAt: new Date() } : {}) }).where(eq(accidents.id, id));
+    const updatePayload: Record<string, unknown> = {
+      ...input,
+      workflowStage: nextStage,
+      ...(input.najmReportNo !== undefined ? { najmReportNo: normalizedNajm } : {}),
+      ...(nextStage === "مغلق" ? { closedAt: new Date() } : {}),
+    };
+    await tx.update(accidents).set(updatePayload).where(eq(accidents.id, id));
     await tx.insert(accidentEvents).values({ accidentId: id, fromStage: current.workflowStage, toStage: nextStage, details: input.resolutionNotes ?? input.insurerClaimRef ?? null, actorUserId: actor.id ?? null, actorName: actor.name });
     await recordAuditInTransaction(tx, actor, "accident.advance", "accident", id, `نقل الحادث ${current.ref} من ${current.workflowStage} إلى ${nextStage}`);
     return (await tx.select().from(accidents).where(eq(accidents.id, id)).limit(1))[0] ?? null;

@@ -28,6 +28,9 @@ import {
   Activity,
   Archive,
   ChevronDown,
+  AlertTriangle,
+  CheckCircle,
+  Eye,
 } from "lucide-react";
 import type {
   ModuleKey,
@@ -49,8 +52,10 @@ import {
   formatSAR,
   LinkedDocumentsSection,
   DocumentFileActions,
+  DocumentPreviewModal,
   MetricCard,
 } from "./common";
+import { AccidentDetailModal } from "./AccidentsPage";
 
 export function DetailModal({
   row,
@@ -76,7 +81,11 @@ export function DetailModal({
       ? `تفاصيل المهمة · ${row.title}`
       : "تفاصيل السجل";
   const linkedEntityType =
-    module === "clients"
+    module === "vehicles"
+      ? "مركبة"
+      : module === "drivers"
+      ? "سائق"
+      : module === "clients"
       ? "عميل"
       : module === "employees"
       ? "موظف"
@@ -139,7 +148,23 @@ export function DetailModal({
         <LinkedDocumentsSection
           entityType={linkedEntityType}
           entityId={row.id}
+          entityName={
+            module === "vehicles"
+              ? `مركبة · ${row.plate}`
+              : module === "drivers"
+              ? `سائق · ${row.name}`
+              : module === "clients"
+              ? `عميل · ${row.name}`
+              : module === "employees"
+              ? `موظف · ${row.name}`
+              : module === "projects"
+              ? `مشروع · ${row.name}`
+              : module === "maintenance"
+              ? `صيانة · ${row.ref || row.id}`
+              : undefined
+          }
           canViewDocuments={canAccess("documents")}
+          canUpload={true}
         />
       )}
       <div className="detail-footer">
@@ -358,6 +383,9 @@ export function RecordForm({
   const maintenanceQuery = trpc.maintenance.list.useQuery(undefined, {
     enabled: canAccess("maintenance"),
   });
+  const accidentQuery = trpc.accidents.list.useQuery(undefined, {
+    enabled: canAccess("accidents"),
+  });
 
   const vehicles = canAccess("vehicles") ? (vehicleQuery.data ?? []) : [];
   const drivers = canAccess("drivers") ? (driverQuery.data ?? []) : [];
@@ -367,6 +395,7 @@ export function RecordForm({
   const projects = canAccess("projects") ? (projectQuery.data ?? []) : [];
   const employees = canAccess("employees") ? (employeeQuery.data ?? []) : [];
   const maintenance = canAccess("maintenance") ? (maintenanceQuery.data ?? []) : [];
+  const accidents = canAccess("accidents") ? (accidentQuery.data ?? []) : [];
 
   const getDocumentEntities = (type: string): Row[] =>
     type === "مركبة"
@@ -375,6 +404,8 @@ export function RecordForm({
       ? drivers
       : type === "موظف"
       ? employees
+      : type === "حادث"
+      ? (accidents as Row[])
       : type === "مشروع"
       ? projects
       : type === "عميل"
@@ -1050,6 +1081,7 @@ export function RecordForm({
                 <option>مركبة</option>
                 <option>سائق</option>
                 <option>موظف</option>
+                <option>حادث</option>
                 <option>مشروع</option>
                 <option>عميل</option>
                 <option>عقد</option>
@@ -1072,11 +1104,13 @@ export function RecordForm({
                     ...prev,
                     entityId: item?.id ?? null,
                     entity: item
-                      ? item.plate ||
-                        item.ref ||
-                        item.name ||
-                        item.title ||
-                        `#${item.id}`
+                      ? item.ref && item.vehiclePlate
+                        ? `${item.ref} (${item.vehiclePlate})`
+                        : item.plate ||
+                          item.ref ||
+                          item.name ||
+                          item.title ||
+                          `#${item.id}`
                       : "—",
                   }));
                 }}
@@ -1085,11 +1119,13 @@ export function RecordForm({
                 {getDocumentEntities(String(form.entityType || "مركبة")).map(
                   (entity: any) => (
                     <option key={entity.id} value={entity.id}>
-                      {entity.plate ||
-                        entity.ref ||
-                        entity.name ||
-                        entity.title ||
-                        `#${entity.id}`}
+                      {entity.ref && entity.vehiclePlate
+                        ? `${entity.ref} · ${entity.vehiclePlate} (${entity.workflowStage || ""})`
+                        : entity.plate ||
+                          entity.ref ||
+                          entity.name ||
+                          entity.title ||
+                          `#${entity.id}`}
                     </option>
                   )
                 )}
@@ -1986,6 +2022,9 @@ export function VehicleProfileModal({
     { vehicleId: vehicle.id },
     { enabled: canAccess("finance") }
   );
+  const accidentsQuery = trpc.accidents.list.useQuery(undefined, {
+    enabled: canAccess("accidents"),
+  });
   const expenseCreate = trpc.vehicles.expenseCreate.useMutation();
   const expenseUpdate = trpc.vehicles.expenseUpdate.useMutation();
   const expenseArchive = trpc.vehicles.expenseArchive.useMutation();
@@ -1994,9 +2033,25 @@ export function VehicleProfileModal({
   const [expenseOpen, setExpenseOpen] = useState(false);
   const [revenueOpen, setRevenueOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [selectedAccident, setSelectedAccident] = useState<Row | null>(null);
+  const [previewAccidentDoc, setPreviewAccidentDoc] = useState<{
+    url: string;
+    name: string;
+    title: string;
+    entity: string;
+  } | null>(null);
   const [expandedExpenseGroup, setExpandedExpenseGroup] = useState<string | null>(
     null
   );
+
+  const linkedAccidents = useMemo(() => {
+    if (!accidentsQuery.data) return [];
+    return (accidentsQuery.data as any[]).filter(
+      (a) =>
+        Number(a.vehicleId) === Number(vehicle.id) ||
+        (a.vehiclePlate && a.vehiclePlate.trim() === vehicle.plate.trim())
+    );
+  }, [accidentsQuery.data, vehicle.id, vehicle.plate]);
   const blankExpense = () => ({
     category: "أخرى",
     amount: "",
@@ -2293,33 +2348,219 @@ export function VehicleProfileModal({
             )}
           </div>
         )}
-        {canAccess("documents") && (
-          <div className="compact-list" style={{ marginTop: ".6rem" }}>
-            {linkedDocuments.length ? (
-              linkedDocuments.map((item) => (
-                <div className="compact-row" key={`doc-${item.id}`}>
-                  <div className="compact-main">
-                    <strong>{item.name}</strong>
-                    <small>
-                      {item.type} · انتهاء {item.expiry}
-                    </small>
-                  </div>
-                  <Badge>{item.status}</Badge>
-                  <DocumentFileActions file={item} />
-                </div>
-              ))
-            ) : (
-              <div className="empty-state" style={{ padding: "1rem" }}>
-                لا توجد مستندات مرتبطة.
-              </div>
-            )}
-          </div>
-        )}
       </section>
-      {!canAccess("documents") && (
-        <div className="field-note" role="status" style={{ marginTop: ".5rem" }}>
-          المستندات المرتبطة مخفية؛ يلزم منح صلاحية «المستندات» لعرضها.
-        </div>
+
+      {/* قسم المستندات والمرفقات المرتبطة بالمركبة */}
+      <LinkedDocumentsSection
+        entityType="مركبة"
+        entityId={vehicle.id}
+        entityName={`مركبة · ${vehicle.plate} (${vehicle.brand} ${vehicle.model})`}
+        canViewDocuments={canAccess("documents")}
+        canUpload={true}
+      />
+
+      {/* قسم سجل الحوادث والتأمين المرتبط بالمركبة */}
+      {canAccess("accidents") && (
+        <section className="surface" style={{ padding: "1rem", marginTop: "1rem" }}>
+          <div className="section-head">
+            <div>
+              <h3 style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                <AlertTriangle
+                  size={18}
+                  style={{
+                    color: linkedAccidents.length ? "var(--warning)" : "var(--teal)",
+                  }}
+                />
+                سجل الحوادث والتأمين
+                <Badge>
+                  {linkedAccidents.length
+                    ? `${linkedAccidents.length} بلاغ مسجل`
+                    : "السجل نظيف"}
+                </Badge>
+              </h3>
+              <span>
+                الحوادث وبلاغات نجم وتكاليف الإصلاح ومطالبات التأمين الخاصة بالمركبة {vehicle.plate}
+              </span>
+            </div>
+          </div>
+
+          {linkedAccidents.length === 0 ? (
+            <div
+              className="empty-state"
+              style={{
+                padding: "1.25rem",
+                background: "rgba(16, 185, 129, 0.05)",
+                border: "1px dashed rgba(16, 185, 129, 0.3)",
+                borderRadius: "8px",
+                textAlign: "center",
+              }}
+            >
+              <CheckCircle
+                size={28}
+                style={{
+                  color: "var(--teal)",
+                  margin: "0 auto .5rem",
+                  display: "block",
+                }}
+              />
+              <strong style={{ fontSize: "0.95rem" }}>لا توجد أي حوادث مسجلة لهذه المركبة</strong>
+              <small style={{ color: "var(--muted)", display: "block", marginTop: 4 }}>
+                سجل المركبة نظيف وخالٍ من أي حوادث مرورية أو مطالبات تأمينية حتى تاريخه.
+              </small>
+            </div>
+          ) : (
+            <>
+              <div className="quick-metrics" style={{ marginBottom: "1rem" }}>
+                <div>
+                  <span>إجمالي الحوادث</span>
+                  <strong>{linkedAccidents.length.toLocaleString("en-US")}</strong>
+                </div>
+                <div>
+                  <span>حوادث قيد الإجراء</span>
+                  <strong className="orange-text">
+                    {
+                      linkedAccidents.filter(
+                        (a) =>
+                          a.workflowStage !== "مغلق" &&
+                          a.workflowStage !== "ملغي"
+                      ).length
+                    }
+                  </strong>
+                </div>
+                <div>
+                  <span>تقدير الإصلاح الإجمالي</span>
+                  <strong className="red-text">
+                    {formatSAR(
+                      linkedAccidents.reduce(
+                        (sum, a) => sum + (Number(a.estimatedRepairCost) || 0),
+                        0
+                      )
+                    )}
+                  </strong>
+                </div>
+                <div>
+                  <span>التعويضات المحصلة</span>
+                  <strong className="green-text">
+                    {formatSAR(
+                      linkedAccidents.reduce(
+                        (sum, a) => sum + (Number(a.settlementAmount) || 0),
+                        0
+                      )
+                    )}
+                  </strong>
+                </div>
+              </div>
+
+              <div className="compact-list">
+                {linkedAccidents.map((accident) => {
+                  const estCost = Number(accident.estimatedRepairCost) || 0;
+                  const setAmount = Number(accident.settlementAmount) || 0;
+                  return (
+                    <div
+                      className="compact-row"
+                      key={`vehicle-acc-${accident.id}`}
+                      style={{ alignItems: "center" }}
+                    >
+                      <span
+                        className="vehicle-avatar"
+                        style={{
+                          background: "rgba(239, 68, 68, 0.1)",
+                          color: "var(--red)",
+                        }}
+                      >
+                        <AlertTriangle size={16} />
+                      </span>
+                      <div className="compact-main">
+                        <strong
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "0.5rem",
+                          }}
+                        >
+                          بلاغ {accident.ref} · {accident.accidentDate}
+                          {accident.driverName && accident.driverName !== "—" && (
+                            <small style={{ color: "var(--muted)" }}>
+                              (السائق: {accident.driverName})
+                            </small>
+                          )}
+                        </strong>
+                        <small style={{ display: "block", marginTop: 2 }}>
+                          {accident.najmReportNo
+                            ? `تقرير نجم: ${accident.najmReportNo}`
+                            : "بدون تقرير نجم"}
+                          {accident.faultPercent !== null &&
+                          accident.faultPercent !== undefined
+                            ? ` · نسبة الخطأ: ${accident.faultPercent}%`
+                            : ""}
+                          {accident.insurerName && accident.insurerName !== "—"
+                            ? ` · التأمين: ${accident.insurerName}`
+                            : ""}
+                        </small>
+                      </div>
+                      <Badge>{String(accident.workflowStage || "بلاغ")}</Badge>
+                      <div
+                        className="compact-main"
+                        style={{ textAlign: "left", minWidth: 100 }}
+                      >
+                        <strong>
+                          {setAmount > 0
+                            ? formatSAR(setAmount)
+                            : estCost > 0
+                            ? formatSAR(estCost)
+                            : "—"}
+                        </strong>
+                        <small style={{ display: "block" }}>
+                          {setAmount > 0
+                            ? "مبلغ التسوية"
+                            : estCost > 0
+                            ? "تقدير الإصلاح"
+                            : "بانتظار التقدير"}
+                        </small>
+                      </div>
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: ".4rem",
+                          alignItems: "center",
+                        }}
+                      >
+                        {accident.najmReportUrl && (
+                          <button
+                            type="button"
+                            className="btn outline"
+                            title="معاينة تقرير نجم داخل النظام"
+                            style={{ height: 30, padding: "0 8px", fontSize: 12 }}
+                            onClick={() =>
+                              setPreviewAccidentDoc({
+                                url: accident.najmReportUrl,
+                                name:
+                                  accident.najmReportName ||
+                                  `najm-${accident.najmReportNo || accident.ref}`,
+                                title: `تقرير نجم · ${accident.ref}`,
+                                entity: `حادث ${accident.ref} (${vehicle.plate})`,
+                              })
+                            }
+                          >
+                            <Eye size={14} /> تقرير نجم
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="btn outline"
+                          style={{ height: 30, padding: "0 10px", fontSize: 12 }}
+                          onClick={() => setSelectedAccident(accident)}
+                        >
+                          التفاصيل والمستندات
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </section>
       )}
       {!canAccess("finance") ? (
         <div className="empty-state" style={{ marginTop: "1rem" }}>
@@ -3002,6 +3243,25 @@ export function VehicleProfileModal({
           إغلاق الملف
         </button>
       </div>
+
+      {selectedAccident && (
+        <AccidentDetailModal
+          accident={selectedAccident}
+          onClose={() => setSelectedAccident(null)}
+        />
+      )}
+
+      {previewAccidentDoc && (
+        <DocumentPreviewModal
+          title={previewAccidentDoc.title}
+          fileName={previewAccidentDoc.name}
+          fileUrl={previewAccidentDoc.url}
+          type="تقرير نجم"
+          entity={previewAccidentDoc.entity}
+          status="ساري"
+          onClose={() => setPreviewAccidentDoc(null)}
+        />
+      )}
     </Modal>
   );
 }

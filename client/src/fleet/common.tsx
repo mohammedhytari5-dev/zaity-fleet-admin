@@ -24,6 +24,8 @@ import {
   CircleDollarSign,
   Clock3,
   Download,
+  ExternalLink,
+  Eye,
   FileCheck2,
   FileText,
   Filter,
@@ -32,6 +34,7 @@ import {
   Package,
   Pencil,
   Plus,
+  Printer,
   Receipt,
   Search,
   Settings2,
@@ -45,6 +48,8 @@ import {
   UsersRound,
   Wrench,
   X,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 import type {
   ModuleKey,
@@ -334,68 +339,404 @@ export function TableShell({
   );
 }
 
-export function DocumentFileActions({ file }: { file: Document }) {
-  const utils = trpc.useUtils();
-  const [loading, setLoading] = useState(false);
-  if (!file.hasFile && !file.fileUrl) return null;
-  const retrieve = async (mode: "preview" | "download") => {
-    const previewTab = mode === "preview" ? window.open("about:blank", "_blank") : null;
-    if (previewTab) previewTab.opener = null;
-    setLoading(true);
-    try {
-      const attachment = file.fileUrl
-        ? { name: file.fileName || file.name, url: file.fileUrl }
-        : await utils.documents.file.fetch({ id: file.id });
-      if (!attachment?.url) throw new Error("لم يتم العثور على ملف المستند");
-      if (mode === "preview") {
-        if (previewTab) previewTab.location.href = attachment.url;
-        else window.location.assign(attachment.url);
+export function DocumentPreviewModal({
+  title,
+  fileUrl,
+  fileName,
+  type,
+  entity,
+  status,
+  onClose,
+}: {
+  title: string;
+  fileUrl: string;
+  fileName?: string;
+  type?: string;
+  entity?: string;
+  status?: string;
+  onClose: () => void;
+}) {
+  const [zoom, setZoom] = useState(1);
+  const [rotation, setRotation] = useState(0);
+
+  const cleanUrl = (fileUrl || "").trim();
+  const displayName = fileName || title || "مستند";
+  const isImage =
+    /\.(png|jpe?g|webp|gif|svg|bmp)(\?.*)?$/i.test(displayName) ||
+    cleanUrl.startsWith("data:image/");
+  const isPdf =
+    /\.pdf(\?.*)?$/i.test(displayName) ||
+    cleanUrl.startsWith("data:application/pdf");
+
+  const handleDownload = () => {
+    const link = document.createElement("a");
+    link.href = cleanUrl;
+    link.download = displayName;
+    link.click();
+  };
+
+  const handleOpenExternal = () => {
+    const win = window.open();
+    if (win) {
+      win.opener = null;
+      if (isPdf) {
+        win.document.write(
+          `<title>${displayName}</title><iframe src="${cleanUrl}" frameborder="0" style="border:0; width:100vw; height:100vh;" allowfullscreen></iframe>`
+        );
+      } else if (isImage) {
+        win.document.write(
+          `<title>${displayName}</title><body style="margin:0; background:#0f172a; display:flex; align-items:center; justify-content:center; min-height:100vh;"><img src="${cleanUrl}" style="max-width:98%; max-height:98vh; object-fit:contain;" /></body>`
+        );
       } else {
-        if (previewTab) previewTab.close();
-        const link = document.createElement("a");
-        link.href = attachment.url;
-        link.download = attachment.name || file.fileName || file.name || "document";
-        link.click();
+        win.location.href = cleanUrl;
       }
-    } catch (error: any) {
-      previewTab?.close();
-      toast.error(error.message || "تعذر فتح المستند");
-    } finally {
-      setLoading(false);
+    } else {
+      window.location.assign(cleanUrl);
     }
   };
+
+  const handlePrint = () => {
+    if (isPdf || isImage) {
+      const printWin = window.open();
+      if (printWin) {
+        printWin.opener = null;
+        printWin.document.write(
+          `<title>${displayName}</title><body style="margin:0;"><img src="${cleanUrl}" style="max-width:100%;" onload="window.print(); window.close();" /></body>`
+        );
+      }
+    } else {
+      window.print();
+    }
+  };
+
   return (
-    <div className="row-actions">
-      <button className="row-menu-btn" title="تحميل المستند" aria-label={`تحميل ${file.name}`} disabled={loading} onClick={() => void retrieve("download")}>
-        <Download size={16} />
-      </button>
-      <button className="row-menu-btn" title="معاينة المستند" aria-label={`معاينة ${file.name}`} disabled={loading} onClick={() => void retrieve("preview")}>
-        <BookOpen size={16} />
-      </button>
+    <div className="preview-modal-overlay" onClick={onClose}>
+      <div className="preview-modal-dialog" onClick={(e) => e.stopPropagation()}>
+        <div className="preview-modal-head">
+          <div className="preview-modal-title">
+            <span className="file-icon">
+              <FileText size={18} />
+            </span>
+            <div>
+              <strong>{displayName}</strong>
+              <small style={{ color: "var(--muted)", display: "block" }}>
+                {type ? `${type} · ` : ""}
+                {entity ? `مرتبط بـ: ${entity}` : ""}
+              </small>
+            </div>
+            {status && <Badge>{status}</Badge>}
+          </div>
+          <button className="icon-btn" onClick={onClose} aria-label="إغلاق">
+            <X size={19} />
+          </button>
+        </div>
+
+        <div className="preview-modal-toolbar">
+          <div className="preview-toolbar-group">
+            {isImage && (
+              <>
+                <button
+                  className="preview-toolbar-btn"
+                  title="تصغير"
+                  onClick={() => setZoom((z) => Math.max(0.5, z - 0.25))}
+                >
+                  <ZoomOut size={15} />
+                  <span>تصغير</span>
+                </button>
+                <button
+                  className="preview-toolbar-btn"
+                  title="إعادة ضبط الحجم"
+                  onClick={() => {
+                    setZoom(1);
+                    setRotation(0);
+                  }}
+                >
+                  <span>{Math.round(zoom * 100)}%</span>
+                </button>
+                <button
+                  className="preview-toolbar-btn"
+                  title="تكبير"
+                  onClick={() => setZoom((z) => Math.min(3, z + 0.25))}
+                >
+                  <ZoomIn size={15} />
+                  <span>تكبير</span>
+                </button>
+              </>
+            )}
+            <button
+              className="preview-toolbar-btn"
+              title="طباعة"
+              onClick={handlePrint}
+            >
+              <Printer size={15} />
+              <span>طباعة</span>
+            </button>
+            <button
+              className="preview-toolbar-btn"
+              title="فتح في نافذة كاملة"
+              onClick={handleOpenExternal}
+            >
+              <ExternalLink size={15} />
+              <span>نافذة كاملة</span>
+            </button>
+          </div>
+
+          <div className="preview-toolbar-group">
+            <button
+              className="preview-toolbar-btn primary"
+              title="تحميل المستند"
+              onClick={handleDownload}
+            >
+              <Download size={15} />
+              <span>تحميل المستند</span>
+            </button>
+          </div>
+        </div>
+
+        <div className={`preview-content-area ${!isImage ? "light-bg" : ""}`}>
+          {isImage ? (
+            <img
+              src={cleanUrl}
+              alt={displayName}
+              className="preview-image-element"
+              style={{
+                transform: `scale(${zoom}) rotate(${rotation}deg)`,
+              }}
+            />
+          ) : isPdf ? (
+            <iframe
+              src={cleanUrl}
+              title={displayName}
+              className="preview-iframe-element"
+            />
+          ) : (
+            <div className="preview-fallback-card">
+              <span className="file-icon" style={{ width: 56, height: 56 }}>
+                <FileText size={30} />
+              </span>
+              <strong style={{ fontSize: 16 }}>{displayName}</strong>
+              <p style={{ color: "var(--muted)", fontSize: 12 }}>
+                هذا النوع من الملفات جاهز للتحميل والفتح المباشر بأمان.
+              </p>
+              <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+                <button className="btn primary" onClick={handleDownload}>
+                  <Download size={16} /> تحميل الملف
+                </button>
+                <button className="btn outline" onClick={handleOpenExternal}>
+                  <ExternalLink size={16} /> فتح خارجي
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
 
-export function LinkedDocumentsSection({ entityType, entityId, canViewDocuments }: { entityType: string; entityId: number; canViewDocuments: boolean }) {
-  const query = trpc.documents.list.useQuery(undefined, { staleTime: 0, enabled: canViewDocuments });
-  const linked = ((query.data as Document[] | undefined) ?? []).filter(document => isLinkedDocument(document, entityType, entityId));
+export function DocumentFileActions({
+  file,
+  showLabels = false,
+}: {
+  file: Document;
+  showLabels?: boolean;
+}) {
+  const utils = trpc.useUtils();
+  const [loading, setLoading] = useState(false);
+  const [previewActive, setPreviewActive] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(file.fileUrl || null);
+
+  if (!file.hasFile && !file.fileUrl) return null;
+
+  const handlePreview = async () => {
+    if (previewUrl) {
+      setPreviewActive(true);
+      return;
+    }
+    setLoading(true);
+    try {
+      const attachment = await utils.documents.file.fetch({ id: file.id });
+      if (!attachment?.url) throw new Error("لم يتم العثور على ملف المستند");
+      setPreviewUrl(attachment.url);
+      setPreviewActive(true);
+    } catch (error: any) {
+      toast.error(error.message || "تعذر تحميل معاينة المستند");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDownload = async () => {
+    setLoading(true);
+    try {
+      const url =
+        file.fileUrl || (await utils.documents.file.fetch({ id: file.id }))?.url;
+      if (!url) throw new Error("لم يتم العثور على رابط الملف");
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = file.fileName || file.name || "document";
+      link.click();
+    } catch (error: any) {
+      toast.error(error.message || "تعذر تحميل المستند");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
-    <section className="surface" style={{ padding: "1rem", marginTop: "1rem" }}>
-      <div className="section-head">
-        <div>
-          <h3>المستندات المرتبطة</h3>
-          <span>{canViewDocuments ? `${linked.length} مستند` : "يلزم إذن المستندات لعرض المرفقات"}</span>
-        </div>
+    <>
+      <div className="row-actions">
+        <button
+          className="row-menu-btn"
+          title="معاينة المستند داخل النظام"
+          aria-label={`معاينة ${file.name}`}
+          disabled={loading}
+          onClick={() => void handlePreview()}
+        >
+          <Eye size={16} />
+          {showLabels && <span>معاينة</span>}
+        </button>
+        <button
+          className="row-menu-btn"
+          title="تحميل المستند"
+          aria-label={`تحميل ${file.name}`}
+          disabled={loading}
+          onClick={() => void handleDownload()}
+        >
+          <Download size={16} />
+          {showLabels && <span>تحميل</span>}
+        </button>
       </div>
+
+      {previewActive && previewUrl && (
+        <DocumentPreviewModal
+          title={file.name}
+          fileName={file.fileName || undefined}
+          fileUrl={previewUrl}
+          type={file.type}
+          entity={file.entity}
+          status={file.status}
+          onClose={() => setPreviewActive(false)}
+        />
+      )}
+    </>
+  );
+}
+
+export function LinkedDocumentsSection({
+  entityType,
+  entityId,
+  entityName,
+  canViewDocuments,
+  canUpload = true,
+}: {
+  entityType: string;
+  entityId: number;
+  entityName?: string;
+  canViewDocuments: boolean;
+  canUpload?: boolean;
+}) {
+  const utils = trpc.useUtils();
+  const query = trpc.documents.list.useQuery(undefined, {
+    staleTime: 0,
+    enabled: canViewDocuments,
+  });
+  const createDocument = trpc.documents.create.useMutation();
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [uploadName, setUploadName] = useState("");
+  const [uploadType, setUploadType] = useState("");
+  const [uploadExpiry, setUploadExpiry] = useState("");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+
+  const linked = ((query.data as Document[] | undefined) ?? []).filter((document) =>
+    isLinkedDocument(document, entityType, entityId)
+  );
+
+  const handleUploadSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedFile) {
+      toast.error("يرجى اختيار ملف لرفعه");
+      return;
+    }
+    setUploading(true);
+    try {
+      const fileUrl = await readUploadDataUrl(selectedFile);
+      await createDocument.mutateAsync({
+        name: uploadName.trim() || selectedFile.name,
+        entity: entityName || `${entityType} #${entityId}`,
+        entityType: entityType as any,
+        entityId,
+        type: uploadType.trim() || "مستند",
+        expiry: uploadExpiry || "—",
+        status: "ساري",
+        fileName: selectedFile.name,
+        fileUrl,
+      });
+      await utils.documents.list.invalidate();
+      toast.success("تم رفع وإرفاق المستند بنجاح");
+      setShowUploadModal(false);
+      setSelectedFile(null);
+      setUploadName("");
+      setUploadType("");
+      setUploadExpiry("");
+    } catch (error: any) {
+      toast.error(error.message || "تعذر رفع المستند");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const quickTypePresets: Record<string, string[]> = {
+    مركبة: ["استمارة مركبة", "فحص دوري", "وثيقة تأمين", "كرت تشغيل", "عقد صيانة", "أخرى"],
+    سائق: ["رخصة قيادة", "هوية / إقامة", "عقد عمل", "فحص طبي", "كرت تشغيل", "شهادة تدريب", "أخرى"],
+    موظف: ["هوية / إقامة", "عقد عمل", "مؤهل علمي", "فحص طبي", "شهادة خبرة", "أخرى"],
+    حادث: ["تقرير نجم", "تقرير المرور", "تقدير الورشة", "مطالبة تأمين", "سند تسوية", "صور أضرار", "أخرى"],
+    عقد: ["نسخة العقد الموقعة", "ملحق عقد", "أمر شراء عميل", "محضر تسليم", "أخرى"],
+    عميل: ["سجل تجاري", "شهادة ضريبية", "عقد اتفاق", "هوية مفوض", "أخرى"],
+    مشروع: ["وثيقة ترسية", "عقد مشروع", "محضر تسليم موقع", "أخرى"],
+    صيانة: ["عرض سعر ورشة", "فاتورة صيانة", "تقرير فحص فني", "أخرى"],
+    مطالبة: ["نموذج مطالبة", "فاتورة مطالبة", "تقرير حادث", "إشعار تحويل", "أخرى"],
+  };
+  const presets = quickTypePresets[entityType] ?? ["وثيقة رسمية", "فاتورة", "إيصال", "عقد", "أخرى"];
+
+  return (
+    <section className="surface" style={{ padding: "1.25rem", marginTop: "1rem" }}>
+      <div className="section-head" style={{ alignItems: "center", marginBottom: ".75rem" }}>
+        <div>
+          <h3 style={{ fontSize: 14 }}>المستندات والمرفقات المرتبطة</h3>
+          <span>
+            {canViewDocuments
+              ? `${linked.length} مستند مسجل لهذا السجل`
+              : "يلزم إذن المستندات لعرض المرفقات"}
+          </span>
+        </div>
+        {canViewDocuments && canUpload && (
+          <button
+            type="button"
+            className="btn outline"
+            onClick={() => setShowUploadModal(true)}
+            style={{ height: 32, fontSize: 12, padding: "0 10px" }}
+          >
+            <Plus size={15} /> إرفاق مستند جديد
+          </button>
+        )}
+      </div>
+
       {!canViewDocuments ? (
-        <div className="field-note" role="status">يلزم منح صلاحية «المستندات» لعرض المرفقات.</div>
+        <div className="field-note" role="status">
+          يلزم منح صلاحية «المستندات» لعرض المرفقات.
+        </div>
       ) : linked.length ? (
         <div className="compact-list">
-          {linked.map(document => (
+          {linked.map((document) => (
             <div className="compact-row" key={document.id}>
               <div className="compact-main">
-                <strong>{document.name}</strong>
-                <small>{document.type} · ينتهي {document.expiry}</small>
+                <strong style={{ fontSize: 12 }}>{document.name}</strong>
+                <small>
+                  {document.type} · ينتهي {document.expiry}
+                  {document.fileName ? ` · ${document.fileName}` : ""}
+                </small>
               </div>
               <Badge>{document.status}</Badge>
               <DocumentFileActions file={document} />
@@ -403,7 +744,77 @@ export function LinkedDocumentsSection({ entityType, entityId, canViewDocuments 
           ))}
         </div>
       ) : (
-        <div className="empty-state" style={{ padding: "1.25rem" }}>لا توجد مستندات مرتبطة بهذا السجل.</div>
+        <div className="empty-state" style={{ padding: "1.25rem" }}>
+          لا توجد مستندات مرتبطة بهذا السجل حتى الآن.
+        </div>
+      )}
+
+      {showUploadModal && (
+        <Modal
+          title={`إرفاق مستند جديد · ${entityName || `${entityType} #${entityId}`}`}
+          onClose={() => setShowUploadModal(false)}
+        >
+          <form onSubmit={handleUploadSubmit}>
+            <div className="form-grid single">
+              <Field
+                label="اسم / عنوان المستند"
+                value={uploadName}
+                onChange={setUploadName}
+                placeholder="مثال: استمارة المركبة، تقرير ورشة، رخصة القيادة..."
+              />
+              <Field
+                label="نوع وتصنيف المستند"
+                value={uploadType}
+                onChange={setUploadType}
+                placeholder="اختر من التصنيفات السريعة أدناه أو اكتب تصنيفًا..."
+              />
+              <div style={{ display: "flex", flexWrap: "wrap", gap: ".35rem", marginBottom: ".5rem" }}>
+                {presets.map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    className={`btn outline ${uploadType === preset ? "primary" : ""}`}
+                    style={{ height: 26, padding: "0 8px", fontSize: 11, borderRadius: 4 }}
+                    onClick={() => {
+                      setUploadType(preset);
+                      if (!uploadName || presets.includes(uploadName.split(" - ")[0])) {
+                        setUploadName(`${preset} - ${entityName || `${entityType} #${entityId}`}`);
+                      }
+                    }}
+                  >
+                    {preset}
+                  </button>
+                ))}
+              </div>
+              <Field
+                label="تاريخ الانتهاء (إن وجد)"
+                type="date"
+                value={uploadExpiry}
+                onChange={setUploadExpiry}
+              />
+              <label className="field">
+                <span>الملف المرفق *</span>
+                <input
+                  type="file"
+                  accept={SUPPORTED_UPLOAD_ACCEPT}
+                  required
+                  onChange={(e) => {
+                    const file = e.target.files?.[0] ?? null;
+                    setSelectedFile(file);
+                    if (file && !uploadName) setUploadName(file.name);
+                  }}
+                />
+              </label>
+              {selectedFile && (
+                <div className="field-note">الملف المختار: {selectedFile.name}</div>
+              )}
+            </div>
+            <FormActions
+              onCancel={() => setShowUploadModal(false)}
+              label={uploading ? "جارٍ الرفع..." : "حفظ وربط المستند"}
+            />
+          </form>
+        </Modal>
       )}
     </section>
   );

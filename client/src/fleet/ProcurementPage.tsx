@@ -19,7 +19,10 @@ import {
   Zap,
   Printer,
   ArrowUpLeft,
+  Eye,
 } from "lucide-react";
+import { DocumentPreviewModal } from "./common";
+import { readUploadDataUrl, SUPPORTED_UPLOAD_ACCEPT } from "@/lib/fileUploads";
 
 type ModuleKey = string;
 
@@ -481,6 +484,12 @@ function QuoteComparisonModal({
   const [awardModal, setAwardModal] = useState<PurchaseQuoteRow | null>(null);
   const [awardReason, setAwardReason] = useState("السعر الأقل مع مطابقة المواصفات وسرعة التوريد");
   const [poPrintOpen, setPoPrintOpen] = useState(false);
+  const [previewQuoteDoc, setPreviewQuoteDoc] = useState<{
+    url: string;
+    name: string;
+    title: string;
+    entity: string;
+  } | null>(null);
   const issuePoMutation = trpc.procurement.issuePoAndPayable.useMutation();
 
   const handleIssuePoAndPayable = async () => {
@@ -506,6 +515,8 @@ function QuoteComparisonModal({
     warrantyPeriod: "سنة واحدة",
     supplierRating: 4,
     notes: "",
+    quoteFileUrl: "" as string | undefined,
+    quoteFileName: "" as string | undefined,
   });
 
   const quotes = (quotesQuery.data ?? []) as unknown as PurchaseQuoteRow[];
@@ -541,6 +552,8 @@ function QuoteComparisonModal({
         warrantyPeriod: quoteForm.warrantyPeriod || "لا يوجد",
         supplierRating: quoteForm.supplierRating || 4,
         notes: quoteForm.notes,
+        quoteFileUrl: quoteForm.quoteFileUrl || undefined,
+        quoteFileName: quoteForm.quoteFileName || undefined,
       });
       toast.success("تمت إضافة عرض السعر للمحضر");
       setAddQuoteOpen(false);
@@ -555,6 +568,8 @@ function QuoteComparisonModal({
         warrantyPeriod: "سنة واحدة",
         supplierRating: 4,
         notes: "",
+        quoteFileUrl: "",
+        quoteFileName: "",
       });
       void utils.procurement.listQuotes.invalidate({ requestId: request.id });
       onRefresh();
@@ -785,6 +800,32 @@ function QuoteComparisonModal({
                     </select>
                   </label>
                   <label className="field" style={{ gridColumn: "span 2" }}>
+                    <span>ملف أو صورة عرض السعر (PDF / صورة)</span>
+                    <input
+                      type="file"
+                      accept={SUPPORTED_UPLOAD_ACCEPT}
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        try {
+                          const url = await readUploadDataUrl(file);
+                          setQuoteForm((prev) => ({
+                            ...prev,
+                            quoteFileUrl: url,
+                            quoteFileName: file.name,
+                          }));
+                        } catch (err: any) {
+                          toast.error(err.message || "تعذر قراءة الملف");
+                        }
+                      }}
+                    />
+                    {quoteForm.quoteFileName && (
+                      <small style={{ color: "var(--teal)", fontWeight: 600 }}>
+                        الملف المرفق: {quoteForm.quoteFileName}
+                      </small>
+                    )}
+                  </label>
+                  <label className="field" style={{ gridColumn: "span 2" }}>
                     <span>ملاحظات إضافية على العرض</span>
                     <input
                       type="text"
@@ -906,44 +947,64 @@ function QuoteComparisonModal({
                         <td>{q.warrantyPeriod}</td>
                         <td>{"⭐".repeat(Math.max(1, Math.min(5, q.supplierRating)))}</td>
                         <td className="actions-cell">
-                          {isSelected ? (
-                            <span
-                              style={{
-                                background: "#10b981",
-                                color: "#fff",
-                                padding: ".3rem .6rem",
-                                borderRadius: ".4rem",
-                                fontSize: ".8rem",
-                                fontWeight: "bold",
-                                display: "inline-flex",
-                                alignItems: "center",
-                                gap: ".3rem",
-                              }}
-                            >
-                              <Award size={14} /> العرض المعتمد
-                            </span>
-                          ) : (
-                            <div style={{ display: "flex", gap: ".4rem" }}>
-                              {canApproveFinance && request.status !== "معتمد" && (
-                                <button
-                                  className="btn primary"
-                                  style={{ padding: ".3rem .65rem", fontSize: ".8rem" }}
-                                  onClick={() => setAwardModal(q)}
-                                >
-                                  اعتماد وترسية
-                                </button>
-                              )}
-                              {request.status !== "معتمد" && (
-                                <button
-                                  className="row-menu-btn danger"
-                                  title="حذف العرض"
-                                  onClick={() => handleDeleteQuote(q.id)}
-                                >
-                                  <Trash2 size={14} />
-                                </button>
-                              )}
-                            </div>
-                          )}
+                          <div style={{ display: "flex", gap: ".4rem", alignItems: "center" }}>
+                            {q.quoteFileUrl && (
+                              <button
+                                type="button"
+                                className="btn outline"
+                                title="معاينة عرض السعر داخل النظام"
+                                style={{ padding: ".3rem .55rem", fontSize: ".8rem" }}
+                                onClick={() =>
+                                  setPreviewQuoteDoc({
+                                    url: q.quoteFileUrl!,
+                                    name: q.quoteFileName || `عرض-سعر-${q.supplierName}`,
+                                    title: `عرض سعر · ${q.supplierName}`,
+                                    entity: `طلب شراء ${request.ref}`,
+                                  })
+                                }
+                              >
+                                <Eye size={13} /> معاينة
+                              </button>
+                            )}
+                            {isSelected ? (
+                              <span
+                                style={{
+                                  background: "#10b981",
+                                  color: "#fff",
+                                  padding: ".3rem .6rem",
+                                  borderRadius: ".4rem",
+                                  fontSize: ".8rem",
+                                  fontWeight: "bold",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: ".3rem",
+                                }}
+                              >
+                                <Award size={14} /> العرض المعتمد
+                              </span>
+                            ) : (
+                              <>
+                                {canApproveFinance && request.status !== "معتمد" && (
+                                  <button
+                                    className="btn primary"
+                                    style={{ padding: ".3rem .65rem", fontSize: ".8rem" }}
+                                    onClick={() => setAwardModal(q)}
+                                  >
+                                    اعتماد وترسية
+                                  </button>
+                                )}
+                                {request.status !== "معتمد" && (
+                                  <button
+                                    className="row-menu-btn danger"
+                                    title="حذف العرض"
+                                    onClick={() => handleDeleteQuote(q.id)}
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                )}
+                              </>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -1006,6 +1067,19 @@ function QuoteComparisonModal({
           request={request}
           quote={winningQuote}
           onClose={() => setPoPrintOpen(false)}
+        />
+      )}
+
+      {/* نافذة معاينة عرض السعر داخل النظام */}
+      {previewQuoteDoc && (
+        <DocumentPreviewModal
+          title={previewQuoteDoc.title}
+          fileName={previewQuoteDoc.name}
+          fileUrl={previewQuoteDoc.url}
+          type="عرض سعر مورد"
+          entity={previewQuoteDoc.entity}
+          status="ساري"
+          onClose={() => setPreviewQuoteDoc(null)}
         />
       )}
     </div>
