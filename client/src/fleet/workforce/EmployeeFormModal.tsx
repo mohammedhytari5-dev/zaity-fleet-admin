@@ -178,30 +178,53 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                 checked={Boolean(form.isDriver)}
                 onChange={(e) => {
                   const checked = e.target.checked;
-                  setForm((prev) =>
-                    prev
-                      ? {
-                          ...prev,
-                          isDriver: checked,
-                          jobTitle:
-                            checked &&
-                            (!prev.jobTitle || prev.jobTitle === "موظف")
-                              ? "سائق أسطول"
-                              : prev.jobTitle,
-                          department:
-                            checked &&
-                            (!prev.department || prev.department === "الإدارة")
-                              ? "الحركة والأسطول"
-                              : prev.department,
-                        }
-                      : prev
-                  );
+                  setForm((prev) => {
+                    if (!prev) return prev;
+                    if (checked) {
+                      return {
+                        ...prev,
+                        isDriver: true,
+                        jobTitle: (!prev.jobTitle || prev.jobTitle === "موظف") ? "سائق أسطول" : prev.jobTitle,
+                        department: (!prev.department || prev.department === "الإدارة") ? "الحركة والأسطول" : prev.department,
+                      };
+                    } else {
+                      return {
+                        ...prev,
+                        isDriver: false,
+                        driverVehicleId: null,
+                        jobTitle: prev.jobTitle?.includes("سائق") ? "موظف" : prev.jobTitle,
+                        department: (prev.department?.includes("سائق") || prev.department === "الحركة والأسطول") ? "الإدارة" : prev.department,
+                      };
+                    }
+                  });
                 }}
                 style={{ width: "18px", height: "18px", cursor: "pointer" }}
               />
-              <span>🚗 تعيين كسائق أسطول (ربط مباشر بالمركبات، الرخص، والحوادث)</span>
+              <span>🚗 تعيين كسائق أسطول (ربط مباشر بالمركبات، الرخص، وسجلات الأسطول)</span>
             </label>
-            {form.isDriver && <Badge>سائق أسطول</Badge>}
+            {form.isDriver ? (
+              <span style={{
+                background: "#dbeafe",
+                color: "#1e40af",
+                padding: "0.2rem 0.6rem",
+                borderRadius: "6px",
+                fontSize: "0.8rem",
+                fontWeight: 700,
+              }}>
+                سائق أسطول
+              </span>
+            ) : (
+              <span style={{
+                background: "#dcfce7",
+                color: "#15803d",
+                padding: "0.2rem 0.6rem",
+                borderRadius: "6px",
+                fontSize: "0.8rem",
+                fontWeight: 700,
+              }}>
+                موظف إدارة / تشغيل
+              </span>
+            )}
           </div>
 
           {form.isDriver && (

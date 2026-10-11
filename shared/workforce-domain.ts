@@ -88,6 +88,7 @@ export class WorkforceMember {
   readonly residencyExpiry: string;
   readonly insuranceExpiry: string;
   readonly userId: number | null;
+  readonly driverId: number | null;
   readonly notes?: string;
   readonly compensation: SalaryCompensation;
 
@@ -106,6 +107,7 @@ export class WorkforceMember {
     residencyExpiry?: string;
     insuranceExpiry?: string;
     userId?: number | null;
+    driverId?: number | null;
     notes?: string;
     compensation?: SalaryCompensation;
   }) {
@@ -123,6 +125,7 @@ export class WorkforceMember {
     this.residencyExpiry = props.residencyExpiry || "—";
     this.insuranceExpiry = props.insuranceExpiry || "—";
     this.userId = props.userId ?? null;
+    this.driverId = props.driverId && Number(props.driverId) > 0 ? Number(props.driverId) : null;
     this.notes = props.notes;
     this.compensation = props.compensation || new SalaryCompensation();
   }
@@ -131,7 +134,7 @@ export class WorkforceMember {
    * Polymorphic indicator overridden by DriverWorkforceMember
    */
   isDriver(): boolean {
-    return Boolean(this.jobTitle?.includes("سائق"));
+    return Boolean(this.driverId && Number(this.driverId) > 0);
   }
 
   isActive(): boolean {
@@ -195,7 +198,7 @@ export class WorkforceMember {
  * Implements Polymorphism & Inheritance for fleet drivers with specialized attributes.
  */
 export class DriverWorkforceMember extends WorkforceMember {
-  readonly driverId: number;
+  override readonly driverId: number | null;
   readonly licenseNumber: string;
   readonly licenseType: string;
   readonly licenseRenewal: string;
@@ -220,7 +223,7 @@ export class DriverWorkforceMember extends WorkforceMember {
     userId?: number | null;
     notes?: string;
     compensation?: SalaryCompensation;
-    driverId: number;
+    driverId?: number | null;
     licenseNumber?: string;
     licenseType?: string;
     licenseRenewal?: string;
@@ -229,7 +232,7 @@ export class DriverWorkforceMember extends WorkforceMember {
     isSyntheticDriver?: boolean;
   }) {
     super(props);
-    this.driverId = props.driverId;
+    this.driverId = props.driverId && Number(props.driverId) > 0 ? Number(props.driverId) : null;
     this.licenseNumber = props.licenseNumber || props.nationalId || "—";
     this.licenseType = props.licenseType || "خصوصي";
     this.licenseRenewal = props.licenseRenewal || "—";
@@ -309,9 +312,12 @@ export class WorkforceFactory {
     matchedVehicle?: any
   ): WorkforceMember | DriverWorkforceMember {
     const comp = SalaryCompensation.fromRecord(rawEmployee);
-    const isDriver = Boolean(rawEmployee.driverId || matchedDriver || rawEmployee.jobTitle?.includes("سائق"));
+    const hasDriverLink = Boolean(
+      (rawEmployee.driverId && Number(rawEmployee.driverId) > 0) ||
+      Boolean(matchedDriver)
+    );
 
-    if (isDriver) {
+    if (hasDriverLink) {
       return new DriverWorkforceMember({
         id: rawEmployee.id,
         employeeNo: rawEmployee.employeeNo || `EMP-${rawEmployee.id}`,
@@ -329,7 +335,7 @@ export class WorkforceFactory {
         userId: rawEmployee.userId,
         notes: rawEmployee.notes,
         compensation: comp,
-        driverId: rawEmployee.driverId || matchedDriver?.id || 0,
+        driverId: rawEmployee.driverId || matchedDriver?.id || null,
         licenseNumber: matchedDriver?.idNo || rawEmployee.nationalId,
         licenseType: matchedDriver?.license || "خصوصي",
         licenseRenewal: matchedDriver?.renewal || "—",

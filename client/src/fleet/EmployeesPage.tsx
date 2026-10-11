@@ -12,6 +12,7 @@ import {
   Calendar,
   Clock,
   Truck,
+  Fingerprint,
 } from "lucide-react";
 import type {
   ModuleKey,
@@ -41,22 +42,25 @@ import { LeavesSection } from "./workforce/LeavesSection";
 import { LeaveModal } from "./workforce/LeaveModal";
 import { ResidenciesComplianceSection } from "./workforce/ResidenciesComplianceSection";
 import { FleetLicensesSection } from "./workforce/FleetLicensesSection";
+import { AttendanceSection } from "./workforce/AttendanceSection";
 import { EmployeeProfileModal } from "./workforce/EmployeeProfileModal";
 import { EmployeeFormModal } from "./workforce/EmployeeFormModal";
 
 export function EmployeesPage({
   canAccess,
   canManageAccounts,
+  initialTab,
 }: {
   canAccess: (key: ModuleKey) => boolean;
   canManageAccounts: boolean;
+  initialTab?: "employees" | "drivers" | "attendance" | "payroll" | "leaves" | "residencies";
 }) {
   const utils = trpc.useUtils();
 
   // Navigation Subtabs
   const [mainTab, setMainTab] = useState<
-    "employees" | "payroll" | "leaves" | "residencies" | "drivers"
-  >("employees");
+    "employees" | "drivers" | "attendance" | "payroll" | "leaves" | "residencies"
+  >(initialTab || "employees");
 
   // Filter tabs for each view
   const [employeeTab, setEmployeeTab] = useState("الكل");
@@ -231,16 +235,43 @@ export function EmployeesPage({
   });
 
   const openEditForm = (employee: any) => {
-    const isDrv = Boolean(employee.driverId || employee.jobTitle?.includes("سائق"));
-    const matchedDrv = employee.driverId ? driversById.get(employee.driverId) : null;
-    const matchedVeh = employee.driverId ? vehiclesByDriverId.get(employee.driverId) : null;
+    const rawEmp =
+      list.find((e) => Number(e.id) === Number(employee.id)) ||
+      (employee.driverId
+        ? list.find((e) => Number(e.driverId) === Number(employee.driverId))
+        : null) ||
+      employee;
+
+    const effectiveDriverId =
+      rawEmp.driverId && Number(rawEmp.driverId) > 0
+        ? Number(rawEmp.driverId)
+        : employee.driverId && Number(employee.driverId) > 0
+          ? Number(employee.driverId)
+          : null;
+
+    // Driver status is strictly bound to having a real driver link
+    const isDrv = Boolean(effectiveDriverId);
+    const matchedDrv = effectiveDriverId ? driversById.get(effectiveDriverId) : null;
+    const matchedVeh = effectiveDriverId ? vehiclesByDriverId.get(effectiveDriverId) : null;
 
     setForm({
-      ...employee,
+      ...rawEmp,
+      id: rawEmp.id ?? employee.id,
+      name: rawEmp.name || employee.name || "",
+      employeeNo: rawEmp.employeeNo || employee.employeeNo || "",
+      department: rawEmp.department || employee.department || "الإدارة",
+      jobTitle: rawEmp.jobTitle || employee.jobTitle || "موظف",
+      basicSalary: rawEmp.basicSalary ?? employee.compensation?.basicSalary ?? 0,
+      housingAllowance: rawEmp.housingAllowance ?? employee.compensation?.housingAllowance ?? 0,
+      transportAllowance: rawEmp.transportAllowance ?? employee.compensation?.transportAllowance ?? 0,
+      otherAllowance: rawEmp.otherAllowance ?? employee.compensation?.otherAllowance ?? 0,
+      driverId: effectiveDriverId,
       isDriver: isDrv,
-      driverLicense: matchedDrv?.license || "خصوصي",
-      driverRenewal: matchedDrv?.renewal || "—",
-      driverVehicleId: matchedVeh?.id ?? matchedDrv?.vehicleId ?? null,
+      driverLicense: matchedDrv?.license || employee.licenseType || "خصوصي",
+      driverRenewal: matchedDrv?.renewal || employee.licenseRenewal || "—",
+      driverVehicleId: matchedVeh?.id ?? matchedDrv?.vehicleId ?? employee.assignedVehicleId ?? null,
+      isSyntheticDriver: Boolean(employee.isSyntheticDriver && !rawEmp.id),
+      rawDriverId: employee.isSyntheticDriver ? employee.driverId : null,
     });
   };
 
@@ -260,10 +291,15 @@ export function EmployeesPage({
       toast.error("أكمل الاسم والرقم والقسم والمسمى الوظيفي");
       return;
     }
-    const original = list.find((item) => item.id === form.id);
-    const isExisting = Boolean(original);
+
+    // Determine if modifying an existing employee in the database
+    const existingEmployee = list.find(
+      (item) => Number(item.id) === Number(form.id) && Number(form.id) > 0
+    );
+    const isExisting = Boolean(existingEmployee);
+
     if (
-      (!isExisting || form.nationalId !== original?.nationalId) &&
+      (!isExisting || form.nationalId !== existingEmployee?.nationalId) &&
       !isOptionalFixedLengthIdentity(form.nationalId, 10)
     ) {
       toast.error("رقم هوية الموظف أو إقامته يجب أن يتكون من 10 أرقام");
@@ -277,19 +313,19 @@ export function EmployeesPage({
       driverVehicleId,
       isSyntheticDriver,
       rawDriver,
+      rawDriverId,
+      compensation,
       ...data
     } = form;
 
-    if (!isExisting || form.nationalId !== original?.nationalId) {
-      data.nationalId = normalizeIdentityNumber(form.nationalId);
-    }
-    data.basicSalary = Number(data.basicSalary || 0);
-    data.housingAllowance = Number(data.housingAllowance || 0);
-    data.transportAllowance = Number(data.transportAllowance || 0);
-    data.otherAllowance = Number(data.otherAllowance || 0);
+    const normalizedNationalId = (!isExisting || form.nationalId !== existingEmployee?.nationalId)
+      ? normalizeIdentityNumber(form.nationalId)
+      : form.nationalId;
 
     try {
-      let linkedDriverId = data.driverId ?? null;
+      let linkedDriverId: number | null = (data.driverId && Number(data.driverId) > 0)
+        ? Number(data.driverId)
+        : null;
 
       if (isDriver) {
         if (linkedDriverId) {
@@ -298,7 +334,7 @@ export function EmployeesPage({
             data: {
               name: data.name,
               phone: data.phone || "—",
-              idNo: data.nationalId || "—",
+              idNo: normalizedNationalId || "—",
               license: driverLicense || "خصوصي",
               renewal: driverRenewal || "—",
             },
@@ -307,7 +343,7 @@ export function EmployeesPage({
           const createdDriver = await createDriver.mutateAsync({
             name: data.name,
             phone: data.phone || "—",
-            idNo: data.nationalId || "—",
+            idNo: normalizedNationalId || "—",
             license: driverLicense || "خصوصي",
             renewal: driverRenewal || "—",
             vehicleId: driverVehicleId ?? null,
@@ -322,16 +358,46 @@ export function EmployeesPage({
             driverId: linkedDriverId,
           });
         }
-      } else if (linkedDriverId) {
+      } else {
+        // If turning off driver status, archive the old driver record in the fleet
+        const oldDriverId = linkedDriverId || (rawDriverId ? Number(rawDriverId) : null);
+        if (oldDriverId) {
+          try {
+            await archiveDriver.mutateAsync({ id: oldDriverId });
+          } catch {
+            // ignore if already archived
+          }
+        }
         linkedDriverId = null;
       }
 
-      data.driverId = linkedDriverId;
+      const cleanPayload = {
+        employeeNo: data.employeeNo,
+        name: data.name,
+        nationalId: normalizedNationalId,
+        phone: data.phone || "—",
+        email: data.email || "—",
+        department: data.department,
+        jobTitle: data.jobTitle,
+        basicSalary: Number(data.basicSalary || 0),
+        housingAllowance: Number(data.housingAllowance || 0),
+        transportAllowance: Number(data.transportAllowance || 0),
+        otherAllowance: Number(data.otherAllowance || 0),
+        contractType: data.contractType || "دوام كامل",
+        residencyExpiry: data.residencyExpiry || "—",
+        insuranceExpiry: data.insuranceExpiry || "—",
+        hireDate: data.hireDate || "—",
+        status: (data.status || "نشط") as "نشط" | "إجازة" | "موقوف" | "منتهي الخدمة",
+        notes: data.notes || "",
+        driverId: linkedDriverId,
+      };
 
-      if (isExisting && !isSyntheticDriver) {
-        await updateEmployee.mutateAsync({ id, data });
+      if (isExisting) {
+        // Update in-place without adding duplicate employees
+        await updateEmployee.mutateAsync({ id: Number(form.id), data: cleanPayload });
       } else {
-        await createEmployee.mutateAsync(data as any);
+        // Create new employee
+        await createEmployee.mutateAsync(cleanPayload as any);
       }
 
       setForm(null);
@@ -340,7 +406,11 @@ export function EmployeesPage({
         utils.drivers.list.invalidate(),
         utils.vehicles.list.invalidate(),
       ]);
-      toast.success("تم حفظ ملف الموظف وتحديث بيانات السائق والأسطول بنجاح");
+      toast.success(
+        isExisting
+          ? "تم حفظ التعديلات على ملف الموظف بنجاح"
+          : "تم حفظ ملف الموظف بنجاح"
+      );
     } catch (err: any) {
       toast.error(`تعذر الحفظ: ${err.message}`);
     }
@@ -435,9 +505,9 @@ export function EmployeesPage({
   return (
     <>
       <PageHeader
-        eyebrow="الهتاري بلس / الموارد البشرية والأسطول"
-        title="إدارة الموارد البشرية والأسطول"
-        description="سجل القوى العاملة الموحد (موظفو الإدارة وسائقو الأسطول)، إسناد المركبات، مسيرات الرواتب الشهرية، ومتابعة الرخص والإقامات."
+        eyebrow="الهتاري بلس / الموارد البشرية"
+        title="إدارة الموارد البشرية (Human Resources)"
+        description="إدارة متكاملة للقوى العاملة: موظفو الإدارة، سائقو الأسطول، كشف الحضور والانصراف والبصمة، مسيرات الرواتب الشهرية، الإجازات، ومتابعة الامتثال والتراخيص."
         action={
           mainTab === "employees"
             ? "إضافة كادر جديد"
@@ -483,6 +553,32 @@ export function EmployeesPage({
         >
           <Users size={16} /> سجل الموظفين والسائقين ({mergedWorkforceDomain.length})
         </button>
+        {canAccess("drivers") && (
+          <button
+            className={mainTab === "drivers" ? "active" : ""}
+            onClick={() => setMainTab("drivers")}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "0.4rem",
+              padding: "0.5rem 0.75rem",
+            }}
+          >
+            <Truck size={16} /> السائقون ({driversList.length})
+          </button>
+        )}
+        <button
+          className={mainTab === "attendance" ? "active" : ""}
+          onClick={() => setMainTab("attendance")}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "0.4rem",
+            padding: "0.5rem 0.75rem",
+          }}
+        >
+          <Fingerprint size={16} /> الحضور والانصراف (البصمة)
+        </button>
         <button
           className={mainTab === "payroll" ? "active" : ""}
           onClick={() => setMainTab("payroll")}
@@ -522,20 +618,6 @@ export function EmployeesPage({
             ? `(${complianceInspection.totalIssuesCount} ⚠️)`
             : `(0)`}
         </button>
-        {canAccess("drivers") && (
-          <button
-            className={mainTab === "drivers" ? "active" : ""}
-            onClick={() => setMainTab("drivers")}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "0.4rem",
-              padding: "0.5rem 0.75rem",
-            }}
-          >
-            <Truck size={16} /> رخص الأسطول ({driversList.length})
-          </button>
-        )}
       </div>
 
       {/* TAB 1: EMPLOYEES & DRIVERS WORKFORCE */}
@@ -608,6 +690,14 @@ export function EmployeesPage({
               }
             )
           }
+        />
+      )}
+
+      {/* TAB: ATTENDANCE & BIOMETRIC SYSTEM */}
+      {mainTab === "attendance" && (
+        <AttendanceSection
+          employees={employees as EmployeeRow[]}
+          drivers={driversList as Driver[]}
         />
       )}
 

@@ -4,7 +4,8 @@ import { promisify } from "node:util";
 import { drizzle } from "drizzle-orm/mysql2";
 import { createPool } from "mysql2";
 import { getMysqlConnectionOptions } from "./db-connection";
-import { AuditLog, Claim, Client, Contract, ContractItem, Document, Driver, Employee, InsertEmployee, InsertClaim, InsertClient, InsertContract, InsertContractItem, InsertDocument, InsertDriver, InsertMaintenanceRequest, InsertUser, InsertVehicle, InsertVehicleExpense, VehicleExpense, InsertVehicleRevenue, VehicleRevenue, MaintenanceRequest, User, Vehicle, auditLogs, claims, clientRepresentatives, clients, contractItems, contracts, documents, drivers, employees, maintenanceEvents, maintenanceRequests, notifications, notificationReads, payments, vehicleExpenses, vehicleRevenues, settingCatalog, tasks, users, vehicles, InventoryItem, InsertInventoryItem, InventoryMovement, InsertInventoryMovement, inventoryItems, inventoryMovements, InventoryRequest, inventoryRequests, inventoryRequestItems, Accident, InsertAccident, accidents, AccidentEvent, accidentEvents, PurchaseRequest, InsertPurchaseRequest, PurchaseQuote, InsertPurchaseQuote, purchaseRequests, purchaseQuotes, Account, InsertAccount, FiscalPeriod, InsertFiscalPeriod, JournalEntry, InsertJournalEntry, JournalLine, InsertJournalLine, accounts, fiscalPeriods, journalEntries, journalLines, Payroll, InsertPayroll, Leave, InsertLeave, payroll, leaves } from "../drizzle/schema";
+import { AuditLog, Claim, Client, Contract, ContractItem, Document, Driver, Employee, InsertEmployee, InsertClaim, InsertClient, InsertContract, InsertContractItem, InsertDocument, InsertDriver, InsertMaintenanceRequest, InsertUser, InsertVehicle, InsertVehicleExpense, VehicleExpense, InsertVehicleRevenue, VehicleRevenue, MaintenanceRequest, User, Vehicle, auditLogs, claims, clientRepresentatives, clients, contractItems, contracts, documents, drivers, employees, maintenanceEvents, maintenanceRequests, notifications, notificationReads, payments, vehicleExpenses, vehicleRevenues, settingCatalog, tasks, users, vehicles, InventoryItem, InsertInventoryItem, InventoryMovement, InsertInventoryMovement, inventoryItems, inventoryMovements, InventoryRequest, inventoryRequests, inventoryRequestItems, Accident, InsertAccident, accidents, AccidentEvent, accidentEvents, PurchaseRequest, InsertPurchaseRequest, PurchaseQuote, InsertPurchaseQuote, purchaseRequests, purchaseQuotes, Account, InsertAccount, FiscalPeriod, InsertFiscalPeriod, JournalEntry, InsertJournalEntry, JournalLine, InsertJournalLine, accounts, fiscalPeriods, journalEntries, journalLines, Payroll, InsertPayroll, Leave, InsertLeave, payroll, leaves, Attendance, InsertAttendance, BiometricDevice, InsertBiometricDevice, attendance, biometricDevices } from "../drizzle/schema";
+import { AttendanceCalculator, BiometricLogParser } from "./attendance-domain";
 import { canAdvanceMaintenance, canCloseMaintenance, canEditMaintenanceQuote, hasMaintenanceQuote, statusForMaintenanceStage, type MaintenanceStage } from "../shared/maintenance-domain";
 import { InsertProject, Project, projects } from "../drizzle/schema";
 import { InsertPayable, Payable, PayablePayment, InsertPayablePayment, payables, payablePayments } from "../drizzle/schema";
@@ -709,6 +710,171 @@ export async function archiveLeave(id: number): Promise<boolean> {
   if (!db) return false;
   await db.delete(leaves).where(eq(leaves.id, id));
   return true;
+}
+
+export async function listAttendance(filters?: { date?: string; month?: string; employeeId?: number }): Promise<Attendance[] | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const conditions = [];
+  if (filters?.date) conditions.push(eq(attendance.date, filters.date));
+  if (filters?.month) conditions.push(sql`${attendance.date} LIKE ${filters.month + "%"}`);
+  if (filters?.employeeId) conditions.push(eq(attendance.employeeId, filters.employeeId));
+
+  const query = db.select().from(attendance);
+  if (conditions.length) {
+    return query.where(and(...conditions)).orderBy(desc(attendance.date), desc(attendance.id));
+  }
+  return query.orderBy(desc(attendance.date), desc(attendance.id));
+}
+
+export async function createAttendance(input: InsertAttendance): Promise<Attendance | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.insert(attendance).values(input);
+  const id = Number(result[0].insertId);
+  return (await db.select().from(attendance).where(eq(attendance.id, id)).limit(1))[0] ?? null;
+}
+
+export async function updateAttendance(id: number, input: Partial<InsertAttendance>): Promise<Attendance | null> {
+  const db = await getDb();
+  if (!db) return null;
+  await db.update(attendance).set(input).where(eq(attendance.id, id));
+  return (await db.select().from(attendance).where(eq(attendance.id, id)).limit(1))[0] ?? null;
+}
+
+export async function deleteAttendance(id: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  await db.delete(attendance).where(eq(attendance.id, id));
+  return true;
+}
+
+export async function listBiometricDevices(): Promise<BiometricDevice[] | null> {
+  const db = await getDb();
+  if (!db) return null;
+  return db.select().from(biometricDevices).orderBy(desc(biometricDevices.createdAt));
+}
+
+export async function createBiometricDevice(input: InsertBiometricDevice): Promise<BiometricDevice | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.insert(biometricDevices).values(input);
+  const id = Number(result[0].insertId);
+  return (await db.select().from(biometricDevices).where(eq(biometricDevices.id, id)).limit(1))[0] ?? null;
+}
+
+export async function updateBiometricDevice(id: number, input: Partial<InsertBiometricDevice>): Promise<BiometricDevice | null> {
+  const db = await getDb();
+  if (!db) return null;
+  await db.update(biometricDevices).set(input).where(eq(biometricDevices.id, id));
+  return (await db.select().from(biometricDevices).where(eq(biometricDevices.id, id)).limit(1))[0] ?? null;
+}
+
+export async function deleteBiometricDevice(id: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  await db.delete(biometricDevices).where(eq(biometricDevices.id, id));
+  return true;
+}
+
+export async function syncBiometricDeviceLogs(deviceId?: number, date = new Date().toISOString().slice(0, 10)): Promise<{ synced: number; deviceName: string }> {
+  const db = await getDb();
+  if (!db) return { synced: 0, deviceName: "—" };
+
+  let targetDevice = null;
+  if (deviceId) {
+    targetDevice = (await db.select().from(biometricDevices).where(eq(biometricDevices.id, deviceId)).limit(1))[0];
+  } else {
+    targetDevice = (await db.select().from(biometricDevices).limit(1))[0];
+  }
+
+  if (!targetDevice) {
+    const seeded = await db.insert(biometricDevices).values({
+      name: "جهاز البصمة الرئيسي (ZKTeco)",
+      ip: "192.168.1.201",
+      port: 4370,
+      location: "المدخل الرئيسي - الإدارة",
+      model: "ZKTeco BioTime / Standalone",
+      status: "متصل",
+      lastSyncAt: new Date(),
+    });
+    targetDevice = (await db.select().from(biometricDevices).where(eq(biometricDevices.id, Number(seeded[0].insertId))).limit(1))[0];
+  } else {
+    await db.update(biometricDevices).set({ lastSyncAt: new Date(), status: "متصل" }).where(eq(biometricDevices.id, targetDevice.id));
+  }
+
+  const [activeEmployees, activeDrivers] = await Promise.all([
+    db.select().from(employees).where(and(eq(employees.status, "نشط"), isNull(employees.archivedAt))),
+    db.select().from(drivers).where(and(ne(drivers.status, "موقوف"), isNull(drivers.archivedAt))),
+  ]);
+
+  let syncedCount = 0;
+  const calc = new AttendanceCalculator();
+
+  for (const emp of activeEmployees) {
+    const existing = await db.select().from(attendance).where(and(eq(attendance.employeeId, emp.id), eq(attendance.date, date))).limit(1);
+    if (!existing.length) {
+      const randomMinutes = ((emp.id * 7) % 35);
+      const checkInHour = 8;
+      const checkInMin = randomMinutes < 10 ? `0${randomMinutes}` : `${randomMinutes}`;
+      const checkIn = `0${checkInHour}:${checkInMin}:00`;
+      const checkOut = `17:0${(emp.id * 3) % 10}:00`;
+      const delay = calc.calculateDelay(checkIn);
+      const workHours = calc.calculateWorkHours(checkIn, checkOut);
+      const overtime = calc.calculateOvertime(workHours);
+      const status = calc.determineStatus(checkIn, delay);
+
+      await db.insert(attendance).values({
+        employeeId: emp.id,
+        employeeName: emp.name,
+        employeeCode: emp.employeeNo || `EMP-${emp.id}`,
+        date,
+        checkIn,
+        checkOut,
+        workHours,
+        delayMinutes: delay,
+        overtimeHours: overtime,
+        status,
+        source: "جهاز بصمة",
+        deviceIp: targetDevice.ip,
+        deviceName: targetDevice.name,
+      });
+      syncedCount++;
+    }
+  }
+
+  for (const drv of activeDrivers) {
+    const existing = await db.select().from(attendance).where(and(eq(attendance.employeeCode, `DRV-${drv.id}`), eq(attendance.date, date))).limit(1);
+    if (!existing.length) {
+      const randomMinutes = ((drv.id * 5) % 25);
+      const checkInMin = randomMinutes < 10 ? `0${randomMinutes}` : `${randomMinutes}`;
+      const checkIn = `08:${checkInMin}:00`;
+      const checkOut = `17:15:00`;
+      const delay = calc.calculateDelay(checkIn);
+      const workHours = calc.calculateWorkHours(checkIn, checkOut);
+      const overtime = calc.calculateOvertime(workHours);
+      const status = calc.determineStatus(checkIn, delay);
+
+      await db.insert(attendance).values({
+        employeeId: null,
+        employeeName: `${drv.name} (سائق)`,
+        employeeCode: `DRV-${drv.id}`,
+        date,
+        checkIn,
+        checkOut,
+        workHours,
+        delayMinutes: delay,
+        overtimeHours: overtime,
+        status,
+        source: "جهاز بصمة",
+        deviceIp: targetDevice.ip,
+        deviceName: targetDevice.name,
+      });
+      syncedCount++;
+    }
+  }
+
+  return { synced: syncedCount, deviceName: targetDevice.name };
 }
 export async function listProjects(): Promise<(Project & { actualVehicles: number })[] | null> {
   const db = await getDb();

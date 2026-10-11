@@ -351,6 +351,13 @@
       "when": 1791705600000,
       "tag": "0049_add_payroll_and_leaves",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "5",
+      "when": 1791720000000,
+      "tag": "0050_add_attendance_and_biometrics",
+      "breakpoints": true
     }
   ]
 }

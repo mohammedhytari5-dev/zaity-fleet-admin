@@ -1,6 +1,6 @@
 import React from "react";
 import { TableShell, Badge, exportCsv, formatSAR } from "../common";
-import { FileText, Pencil, Archive, Truck } from "lucide-react";
+import { FileText, Pencil, Archive, Truck, User } from "lucide-react";
 import { resolveRenewalStatus } from "@shared/date-utils";
 import {
   WorkforceMember,
@@ -142,22 +142,32 @@ export const WorkforceTable: React.FC<WorkforceTableProps> = ({
                 className="driver-name-button"
                 onClick={() => onViewProfile(member)}
               >
-                <span className="avatar">{member.name.slice(0, 1)}</span>
+                <span
+                  className="avatar"
+                  style={{
+                    background: isDrv ? "#dbeafe" : "#dcfce7",
+                    color: isDrv ? "#1e40af" : "#15803d",
+                    fontWeight: 700,
+                  }}
+                >
+                  {member.name.trim().slice(0, 1)}
+                </span>
                 <span>
                   <span
                     style={{
                       display: "inline-flex",
                       alignItems: "center",
-                      gap: "0.4rem",
+                      gap: "0.45rem",
                     }}
                   >
                     <strong>{member.name}</strong>
-                    {isDrv && (
+                    {isDrv ? (
                       <span
                         style={{
-                          background: "#dbeafe",
-                          color: "#1e40af",
-                          padding: "0.15rem 0.5rem",
+                          background: "#eff6ff",
+                          border: "1px solid #bfdbfe",
+                          color: "#1d4ed8",
+                          padding: "0.15rem 0.55rem",
                           borderRadius: "6px",
                           fontSize: "0.75rem",
                           fontWeight: 700,
@@ -168,6 +178,23 @@ export const WorkforceTable: React.FC<WorkforceTableProps> = ({
                       >
                         <Truck size={12} /> سائق أسطول
                       </span>
+                    ) : (
+                      <span
+                        style={{
+                          background: "#f0fdf4",
+                          border: "1px solid #bbf7d0",
+                          color: "#15803d",
+                          padding: "0.15rem 0.55rem",
+                          borderRadius: "6px",
+                          fontSize: "0.75rem",
+                          fontWeight: 700,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "0.25rem",
+                        }}
+                      >
+                        <User size={12} /> كادر إداري / تشغيلي
+                      </span>
                     )}
                   </span>
                   <small>
@@ -175,7 +202,7 @@ export const WorkforceTable: React.FC<WorkforceTableProps> = ({
                       ? member.email
                       : isDrv
                       ? `سائق أسطول · اضغط لعرض الملف`
-                      : "اضغط لعرض الملف الكامل"}
+                      : "كادر إداري وتشغيلي · اضغط لعرض الملف"}
                   </small>
                 </span>
               </button>

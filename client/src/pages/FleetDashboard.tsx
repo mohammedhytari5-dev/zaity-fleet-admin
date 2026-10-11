@@ -139,8 +139,7 @@ const navGroups: {
         icon: ShoppingCart,
       },
       { key: "documents", label: "المستندات", icon: FileCheck2 },
-      { key: "drivers", label: "السائقون", icon: UserRound },
-      { key: "employees", label: "الموظفون", icon: UsersRound },
+      { key: "employees", label: "الموارد البشرية (HR)", icon: UsersRound },
       { key: "clients", label: "العملاء", icon: UsersRound },
     ],
   },
@@ -1826,11 +1825,10 @@ export default function FleetDashboard() {
         onAction={onAction}
       />
     ) : active === "drivers" ? (
-      <DriversPage
-        drivers={drivers}
-        onOpenForm={(row) => setModal({ module: "drivers", row })}
-        onAction={onAction}
-        onView={setDriverDetail}
+      <EmployeesPage
+        canAccess={canAccess}
+        canManageAccounts={user?.role === "admin"}
+        initialTab="drivers"
       />
     ) : active === "clients" ? (
       <ClientsPage

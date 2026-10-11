@@ -231,6 +231,37 @@ export type LeaveRow = Row & {
   createdAt?: string | Date;
 };
 
+export type AttendanceRow = Row & {
+  employeeId?: number | null;
+  employeeName: string;
+  employeeCode: string;
+  date: string;
+  checkIn?: string | null;
+  checkOut?: string | null;
+  workHours?: number | null;
+  delayMinutes?: number | null;
+  overtimeHours?: number | null;
+  status: "حاضر" | "تأخير" | "غياب" | "إجازة" | "استئذان" | "عطلة";
+  source: "جهاز بصمة" | "يدوي" | "تطبيق" | "ملف";
+  deviceIp?: string | null;
+  deviceName?: string | null;
+  notes?: string | null;
+  createdAt?: string | Date;
+};
+
+export type BiometricDeviceRow = Row & {
+  name: string;
+  ip: string;
+  port: number;
+  commKey?: string | null;
+  location?: string | null;
+  model?: string | null;
+  status: "متصل" | "غير متصل" | "جاري المزامنة";
+  lastSyncAt?: string | Date | null;
+  autoSync: number;
+  notes?: string | null;
+};
+
 export type ImportConfig = {
   label: string;
   columns: { key: string; header: string; required?: boolean; hint?: string }[];

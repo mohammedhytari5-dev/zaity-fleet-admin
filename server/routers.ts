@@ -18,7 +18,8 @@ import { driverRecordForViewer } from "./driver-access";
 import { projectRecordForViewer } from "./project-access";
 import { notificationModule, notificationsVisibleTo } from "./notification-access";
 import { claimRecordForViewer, contractRecordForViewer, paymentRecordForViewer } from "./contract-access";
-import { archiveClaim, archiveClient, archiveContract, archiveDocument, archiveDriver, archiveMaintenanceRequest, advanceMaintenanceRequest, decideMaintenanceApproval, settleMaintenanceAdvance, listMaintenanceEvents, archivePayment, archiveVehicleExpense, archiveVehicleRevenue, archiveProject, archiveSetting, deleteSetting, archiveVehicle, assignVehicleDriver, authenticateLocalUser, LastActiveAdminDemotionError, createLocalUser, createAuditLog, recordLoginAttempt, revokeUserSessions, createClaim, createClient, createContract, createDocument, createDriver, createEmployee, updateEmployee, archiveEmployee, listEmployees, linkEmployeeUser, createMaintenanceRequest, createNotification, createPayment, createProject, createPayable, registerPayablePayment, updatePayable, updatePayableStatus, listPayables, getPayableReceipt, createRepresentative, createTask, createVehicle, createVehicleExpense, createVehicleRevenue, getVehicleFinancialProfile, getVehicleReceipt, listVehicleFinancialSummaries, updateVehicleExpense, listAuditLogs, listClaims, listClients, listContracts, listDocuments, listDrivers, listMaintenanceRequests, listNotifications, getNotification, listPayments, listProjects, listRepresentatives, listSettings, listTasks, listTaskAssignees, listUsers, listVehicles, getCompanyReport, getMaintenanceCostForPeriod, getContractRelatedModuleAccess, markNotificationRead, updateClaim, updatePayment, updateSetting, updateClient, updateContract, updateContractStatus, updateProject, updateUserRole, updateUserAccess, updateDocument, updateDriver, updateMaintenanceRequest, updateTask, updateVehicle, upsertSetting, getDocument, listInventoryItems, listInventoryMovements, createInventoryItem, updateInventoryItem, recordInventoryMovement, archiveInventoryItem, listInventoryRequests, createInventoryRequest, decideInventoryRequest, issueInventoryRequest, listAccidents, getAccident, listAccidentEvents, createAccident, updateAccident, advanceAccident, listPurchaseRequests, getPurchaseRequest, createPurchaseRequest, updatePurchaseRequest, archivePurchaseRequest, listPurchaseQuotes, createPurchaseQuote, updatePurchaseQuote, selectPurchaseQuote, deletePurchaseQuote, issuePurchaseOrder, seedAccountsIfEmpty, listAccounts, createAccount, updateAccount, archiveAccount, listFiscalPeriods, createFiscalPeriod, closeFiscalPeriod, reopenFiscalPeriod, listJournalEntries, getJournalEntry, createJournalEntry, reverseJournalEntryRecord, getAccountLedger, getTrialBalance, getIncomeStatement, getBalanceSheet, createTaxInvoice, listTaxInvoices, getTaxInvoice, getVatDeclaration, listPayroll, createPayroll, updatePayroll, deletePayroll, generateMonthlyPayroll, listLeaves, createLeave, updateLeave, archiveLeave } from "./db";
+import { archiveClaim, archiveClient, archiveContract, archiveDocument, archiveDriver, archiveMaintenanceRequest, advanceMaintenanceRequest, decideMaintenanceApproval, settleMaintenanceAdvance, listMaintenanceEvents, archivePayment, archiveVehicleExpense, archiveVehicleRevenue, archiveProject, archiveSetting, deleteSetting, archiveVehicle, assignVehicleDriver, authenticateLocalUser, LastActiveAdminDemotionError, createLocalUser, createAuditLog, recordLoginAttempt, revokeUserSessions, createClaim, createClient, createContract, createDocument, createDriver, createEmployee, updateEmployee, archiveEmployee, listEmployees, linkEmployeeUser, createMaintenanceRequest, createNotification, createPayment, createProject, createPayable, registerPayablePayment, updatePayable, updatePayableStatus, listPayables, getPayableReceipt, createRepresentative, createTask, createVehicle, createVehicleExpense, createVehicleRevenue, getVehicleFinancialProfile, getVehicleReceipt, listVehicleFinancialSummaries, updateVehicleExpense, listAuditLogs, listClaims, listClients, listContracts, listDocuments, listDrivers, listMaintenanceRequests, listNotifications, getNotification, listPayments, listProjects, listRepresentatives, listSettings, listTasks, listTaskAssignees, listUsers, listVehicles, getCompanyReport, getMaintenanceCostForPeriod, getContractRelatedModuleAccess, markNotificationRead, updateClaim, updatePayment, updateSetting, updateClient, updateContract, updateContractStatus, updateProject, updateUserRole, updateUserAccess, updateDocument, updateDriver, updateMaintenanceRequest, updateTask, updateVehicle, upsertSetting, getDocument, listInventoryItems, listInventoryMovements, createInventoryItem, updateInventoryItem, recordInventoryMovement, archiveInventoryItem, listInventoryRequests, createInventoryRequest, decideInventoryRequest, issueInventoryRequest, listAccidents, getAccident, listAccidentEvents, createAccident, updateAccident, advanceAccident, listPurchaseRequests, getPurchaseRequest, createPurchaseRequest, updatePurchaseRequest, archivePurchaseRequest, listPurchaseQuotes, createPurchaseQuote, updatePurchaseQuote, selectPurchaseQuote, deletePurchaseQuote, issuePurchaseOrder, seedAccountsIfEmpty, listAccounts, createAccount, updateAccount, archiveAccount, listFiscalPeriods, createFiscalPeriod, closeFiscalPeriod, reopenFiscalPeriod, listJournalEntries, getJournalEntry, createJournalEntry, reverseJournalEntryRecord, getAccountLedger, getTrialBalance, getIncomeStatement, getBalanceSheet, createTaxInvoice, listTaxInvoices, getTaxInvoice, getVatDeclaration, listPayroll, createPayroll, updatePayroll, deletePayroll, generateMonthlyPayroll, listLeaves, createLeave, updateLeave, archiveLeave, listAttendance, createAttendance, updateAttendance, deleteAttendance, listBiometricDevices, createBiometricDevice, updateBiometricDevice, deleteBiometricDevice, syncBiometricDeviceLogs } from "./db";
+import { AttendanceCalculator, BiometricLogParser } from "./attendance-domain";
 import { canEditMaintenanceQuote, maintenanceStages, type MaintenanceStage } from "../shared/maintenance-domain";
 import { maintenanceEventForViewer, maintenanceRecordForViewer } from "./maintenance-access";
 import { scopeCompanyReport } from "./report-access";
@@ -163,7 +164,7 @@ const employeeFields = {
   residencyExpiry: z.string().max(32).default("—"),
   insuranceExpiry: z.string().max(32).default("—"),
   hireDate: z.string().max(32).default("—"), status: z.enum(["نشط", "إجازة", "موقوف", "منتهي الخدمة"]).default("نشط"), notes: z.string().max(4000).optional(),
-  driverId: z.number().int().positive().nullable().optional(),
+  driverId: z.preprocess((val) => (val === 0 || val === "0" || val === "" || val === undefined ? null : val), z.number().int().positive().nullable().optional()),
 };
 const employeeInput = z.object({ ...employeeFields, nationalId: identityInput(10, "رقم هوية الموظف أو إقامته يجب أن يتكون من 10 أرقام") });
 const employeeUpdateInput = z.object({ id: z.number().int().positive(), data: z.object(employeeFields).partial() });
@@ -496,6 +497,121 @@ export const appRouter = router({
       .mutation(async ({ input }) => ({
         success: await archiveLeave(input.id),
       })),
+  }),
+  attendance: router({
+    list: permissionProcedure("employees").input(z.object({
+      date: z.string().optional(),
+      month: z.string().optional(),
+      employeeId: z.number().int().positive().optional(),
+    }).optional()).query(async ({ input }) => (await listAttendance(input)) ?? []),
+    create: permissionProcedure("employees").input(z.object({
+      employeeId: z.number().int().positive().nullable().optional(),
+      employeeName: z.string().min(2).max(160),
+      employeeCode: z.string().max(60).default("—"),
+      date: z.string().min(8).max(32),
+      checkIn: z.string().max(32).nullable().optional(),
+      checkOut: z.string().max(32).nullable().optional(),
+      workHours: z.number().nonnegative().optional(),
+      delayMinutes: z.number().int().nonnegative().optional(),
+      overtimeHours: z.number().nonnegative().optional(),
+      status: z.enum(["حاضر", "تأخير", "غياب", "إجازة", "استئذان", "عطلة"]).default("حاضر"),
+      source: z.enum(["جهاز بصمة", "يدوي", "تطبيق", "ملف"]).default("يدوي"),
+      deviceIp: z.string().max(64).optional(),
+      deviceName: z.string().max(120).optional(),
+      notes: z.string().max(2000).optional(),
+    })).mutation(async ({ input }) => {
+      const calc = new AttendanceCalculator();
+      const delay = input.delayMinutes ?? calc.calculateDelay(input.checkIn);
+      const workHours = input.workHours ?? calc.calculateWorkHours(input.checkIn, input.checkOut);
+      const overtime = input.overtimeHours ?? calc.calculateOvertime(workHours);
+      const status = input.status === "حاضر" && delay > 0 ? "تأخير" : input.status;
+      return createAttendance({
+        ...input,
+        delayMinutes: delay,
+        workHours,
+        overtimeHours: overtime,
+        status,
+      });
+    }),
+    update: permissionProcedure("employees").input(z.object({
+      id: z.number().int().positive(),
+      data: z.object({
+        checkIn: z.string().max(32).nullable().optional(),
+        checkOut: z.string().max(32).nullable().optional(),
+        workHours: z.number().nonnegative().optional(),
+        delayMinutes: z.number().int().nonnegative().optional(),
+        overtimeHours: z.number().nonnegative().optional(),
+        status: z.enum(["حاضر", "تأخير", "غياب", "إجازة", "استئذان", "عطلة"]).optional(),
+        notes: z.string().max(2000).optional(),
+      }),
+    })).mutation(async ({ input }) => {
+      return updateAttendance(input.id, input.data);
+    }),
+    delete: permissionProcedure("employees").input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => {
+      return { success: await deleteAttendance(input.id) };
+    }),
+    sync: permissionProcedure("employees").input(z.object({
+      deviceId: z.number().int().positive().optional(),
+      date: z.string().optional(),
+    }).optional()).mutation(async ({ input }) => {
+      return syncBiometricDeviceLogs(input?.deviceId, input?.date);
+    }),
+    importLogs: permissionProcedure("employees").input(z.object({
+      fileContent: z.string().min(5),
+    })).mutation(async ({ input }) => {
+      const parsed = BiometricLogParser.parseCsvOrDat(input.fileContent);
+      const calc = new AttendanceCalculator();
+      let imported = 0;
+      for (const item of parsed) {
+        const delay = calc.calculateDelay(item.checkIn);
+        const workHours = calc.calculateWorkHours(item.checkIn, item.checkOut);
+        const overtime = calc.calculateOvertime(workHours);
+        const status = calc.determineStatus(item.checkIn, delay);
+        await createAttendance({
+          employeeName: item.employeeCode,
+          employeeCode: item.employeeCode,
+          date: item.date,
+          checkIn: item.checkIn,
+          checkOut: item.checkOut,
+          delayMinutes: delay,
+          workHours,
+          overtimeHours: overtime,
+          status,
+          source: "ملف",
+        });
+        imported++;
+      }
+      return { imported };
+    }),
+    devices: router({
+      list: permissionProcedure("employees").query(async () => (await listBiometricDevices()) ?? []),
+      create: permissionProcedure("employees").input(z.object({
+        name: z.string().min(2).max(160),
+        ip: z.string().min(7).max(64),
+        port: z.number().int().positive().default(4370),
+        commKey: z.string().max(64).default("0"),
+        location: z.string().max(160).default("—"),
+        model: z.string().max(100).default("ZKTeco Standalone"),
+        autoSync: z.number().int().default(1),
+        notes: z.string().max(2000).optional(),
+      })).mutation(async ({ input }) => createBiometricDevice(input)),
+      update: permissionProcedure("employees").input(z.object({
+        id: z.number().int().positive(),
+        data: z.object({
+          name: z.string().min(2).max(160).optional(),
+          ip: z.string().min(7).max(64).optional(),
+          port: z.number().int().positive().optional(),
+          commKey: z.string().max(64).optional(),
+          location: z.string().max(160).optional(),
+          model: z.string().max(100).optional(),
+          autoSync: z.number().int().optional(),
+          notes: z.string().max(2000).optional(),
+        }),
+      })).mutation(async ({ input }) => updateBiometricDevice(input.id, input.data)),
+      delete: permissionProcedure("employees").input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => {
+        return { success: await deleteBiometricDevice(input.id) };
+      }),
+    }),
   }),
   maintenance: router({
     list: permissionProcedure("maintenance").query(async ({ ctx }) => (await listMaintenanceRequests() ?? []).map(row => maintenanceRecordForViewer(row, hasModulePermission(ctx.user, "finance"), hasModulePermission(ctx.user, "vehicles")))),

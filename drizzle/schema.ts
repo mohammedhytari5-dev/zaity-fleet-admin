@@ -452,6 +452,42 @@ export const leaves = mysqlTable("leaves", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
+export const attendance = mysqlTable("attendance", {
+  id: int("id").autoincrement().primaryKey(),
+  employeeId: int("employeeId"),
+  employeeName: varchar("employeeName", { length: 160 }).notNull(),
+  employeeCode: varchar("employeeCode", { length: 60 }).notNull().default("—"),
+  date: varchar("date", { length: 32 }).notNull(),
+  checkIn: varchar("checkIn", { length: 32 }),
+  checkOut: varchar("checkOut", { length: 32 }),
+  workHours: decimal("workHours", { precision: 6, scale: 2, mode: "number" }).default(0),
+  delayMinutes: int("delayMinutes").default(0),
+  overtimeHours: decimal("overtimeHours", { precision: 6, scale: 2, mode: "number" }).default(0),
+  status: mysqlEnum("status", ["حاضر", "تأخير", "غياب", "إجازة", "استئذان", "عطلة"]).notNull().default("حاضر"),
+  source: mysqlEnum("source", ["جهاز بصمة", "يدوي", "تطبيق", "ملف"]).notNull().default("جهاز بصمة"),
+  deviceIp: varchar("deviceIp", { length: 64 }),
+  deviceName: varchar("deviceName", { length: 120 }),
+  notes: text("notes"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const biometricDevices = mysqlTable("biometric_devices", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 160 }).notNull(),
+  ip: varchar("ip", { length: 64 }).notNull(),
+  port: int("port").notNull().default(4370),
+  commKey: varchar("commKey", { length: 64 }).default("0"),
+  location: varchar("location", { length: 160 }).default("—"),
+  model: varchar("model", { length: 100 }).default("ZKTeco Standalone"),
+  status: mysqlEnum("status", ["متصل", "غير متصل", "جاري المزامنة"]).notNull().default("متصل"),
+  lastSyncAt: timestamp("lastSyncAt"),
+  autoSync: int("autoSync").notNull().default(1),
+  notes: text("notes"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
 export const maintenanceRequests = mysqlTable(
   "maintenance_requests",
   {
@@ -1854,3 +1890,7 @@ export type Payroll = typeof payroll.$inferSelect;
 export type InsertPayroll = typeof payroll.$inferInsert;
 export type Leave = typeof leaves.$inferSelect;
 export type InsertLeave = typeof leaves.$inferInsert;
+export type Attendance = typeof attendance.$inferSelect;
+export type InsertAttendance = typeof attendance.$inferInsert;
+export type BiometricDevice = typeof biometricDevices.$inferSelect;
+export type InsertBiometricDevice = typeof biometricDevices.$inferInsert;

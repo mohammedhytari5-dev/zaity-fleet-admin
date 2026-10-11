@@ -29,7 +29,7 @@ export const WorkforceStatsCards: React.FC<WorkforceStatsCardsProps> = ({
       </div>
       <div>
         <span>موظفو الإدارة والتشغيل</span>
-        <strong>{staffCount.toLocaleString("en-US")}</strong>
+        <strong style={{ color: "#15803d" }}>{staffCount.toLocaleString("en-US")}</strong>
       </div>
       <div>
         <span>على رأس العمل</span>
