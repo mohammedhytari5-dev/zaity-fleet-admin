@@ -224,7 +224,7 @@ const documentInput = z.object({
   entityId: z.number().int().positive().nullable().default(null),
   entityType: z.enum(["مركبة", "سائق", "موظف", "مشروع", "عميل", "عقد", "مطالبة", "صيانة", "حادث"]).default("مركبة"),
   type: z.string().max(80).default("مركبة"),
-  expiry: z.string().max(32).default("—"),
+  expiry: z.string().max(32).nullable().optional(),
   status: z.enum(["ساري", "قريبًا", "متأخر", "منتهي"]).default("ساري"),
   owner: z.string().max(160).default("—"),
   fileName: z.string().max(255).optional(),

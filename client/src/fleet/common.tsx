@@ -668,7 +668,7 @@ export function LinkedDocumentsSection({
         entityType: entityType as any,
         entityId,
         type: uploadType.trim() || "مستند",
-        expiry: uploadExpiry || "—",
+        expiry: uploadExpiry.trim() || undefined,
         status: "ساري",
         fileName: selectedFile.name,
         fileUrl,
@@ -734,7 +734,8 @@ export function LinkedDocumentsSection({
               <div className="compact-main">
                 <strong style={{ fontSize: 12 }}>{document.name}</strong>
                 <small>
-                  {document.type} · ينتهي {document.expiry}
+                  {document.type}
+                  {document.expiry && document.expiry !== "—" ? ` · ينتهي ${document.expiry}` : ""}
                   {document.fileName ? ` · ${document.fileName}` : ""}
                 </small>
               </div>

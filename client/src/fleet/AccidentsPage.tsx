@@ -24,6 +24,9 @@ export function AccidentDetailModal({ accident, onClose }: { accident: Row; onCl
   const { data: events = [] } = trpc.accidents.events.useQuery({ id: accident.id });
   const advance = trpc.accidents.advance.useMutation();
   const createDocument = trpc.documents.create.useMutation();
+  const [najmReportNo, setNajmReportNo] = useState(
+    accident.najmReportNo && accident.najmReportNo !== "—" ? accident.najmReportNo : ""
+  );
   const [faultPercent, setFaultPercent] = useState("");
   const [repairCost, setRepairCost] = useState("");
   const [insurer, setInsurer] = useState("");
@@ -68,18 +71,45 @@ export function AccidentDetailModal({ accident, onClose }: { accident: Row; onCl
     if (!toStage) return;
     const data: Record<string, unknown> = { resolutionNotes: notes.trim() || undefined };
     if (toStage === "تقدير الإصلاح") {
-      data.faultPercent = Number(faultPercent);
-      data.najmReportNo = current.najmReportNo;
+      const activeNajm = (najmReportNo || current.najmReportNo || "").trim();
+      if (!activeNajm || activeNajm === "—") {
+        toast.error("يرجى إدخال رقم تقرير نجم قبل الانتقال للمرحلة التالية");
+        return;
+      }
+      if (faultPercent === "" || isNaN(Number(faultPercent)) || Number(faultPercent) < 0 || Number(faultPercent) > 100) {
+        toast.error("يرجى تحديد نسبة المسؤولية من 0 إلى 100٪");
+        return;
+      }
+      data.faultPercent = Math.round(Number(faultPercent));
+      data.najmReportNo = activeNajm;
     }
     if (toStage === "مطالبة التأمين") {
+      if (!repairCost || isNaN(Number(repairCost)) || Number(repairCost) < 0) {
+        toast.error("يرجى إدخال تقدير تكلفة الإصلاح");
+        return;
+      }
+      if (!insurer.trim()) {
+        toast.error("يرجى إدخال اسم شركة التأمين");
+        return;
+      }
       data.estimatedRepairCost = Number(repairCost);
       data.insurerName = insurer.trim();
     }
     if (toStage === "التسوية") {
+      if (!claimRef.trim()) {
+        toast.error("يرجى إدخال رقم مطالبة التأمين");
+        return;
+      }
       data.insurerClaimRef = claimRef.trim();
       data.insurerClaimStatus = claimStatus;
     }
-    if (toStage === "مغلق") data.settlementAmount = Number(settlement);
+    if (toStage === "مغلق") {
+      if (!settlement || isNaN(Number(settlement)) || Number(settlement) < 0) {
+        toast.error("يرجى إدخال مبلغ التسوية النهائية");
+        return;
+      }
+      data.settlementAmount = Number(settlement);
+    }
 
     setUploadingStage(true);
     try {
@@ -92,7 +122,6 @@ export function AccidentDetailModal({ accident, onClose }: { accident: Row; onCl
           entityType: "حادث",
           entityId: current.id,
           type: docConfig.type,
-          expiry: "—",
           status: "ساري",
           fileName: stageFile.name,
           fileUrl,
@@ -249,8 +278,19 @@ export function AccidentDetailModal({ accident, onClose }: { accident: Row; onCl
           <div className="form-grid">
             {toStageName === "تقدير الإصلاح" && (
               <>
-                <Field label="نسبة المسؤولية %" type="number" value={faultPercent} onChange={setFaultPercent} />
-                <div className="field-note">رقم تقرير نجم: {current.najmReportNo || "—"}</div>
+                <Field
+                  label="رقم تقرير نجم *"
+                  value={najmReportNo}
+                  onChange={setNajmReportNo}
+                  placeholder="أدخل رقم تقرير نجم"
+                />
+                <Field
+                  label="نسبة المسؤولية % *"
+                  type="number"
+                  value={faultPercent}
+                  onChange={setFaultPercent}
+                  placeholder="0 إلى 100"
+                />
               </>
             )}
             {toStageName === "مطالبة التأمين" && (
@@ -403,7 +443,6 @@ export function AccidentsPage({ vehicles, drivers }: { vehicles: Vehicle[]; driv
                   entityType: "حادث",
                   entityId: accId,
                   type: "تقرير نجم",
-                  expiry: "—",
                   status: "ساري",
                   fileName: form.reportFile instanceof File ? form.reportFile.name : "najm-report",
                   fileUrl: najmReportUrl,
@@ -422,7 +461,6 @@ export function AccidentsPage({ vehicles, drivers }: { vehicles: Vehicle[]; driv
                   entityType: "حادث",
                   entityId: accId,
                   type: "صور أضرار",
-                  expiry: "—",
                   status: "ساري",
                   fileName: form.damageFile instanceof File ? form.damageFile.name : "damage-photos",
                   fileUrl: damagePhotosUrl,

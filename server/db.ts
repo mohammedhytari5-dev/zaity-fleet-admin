@@ -1129,10 +1129,20 @@ async function documentEntityName(db: DbExecutor, entityType: string, entityId: 
   return null;
 }
 
+function sanitizeDocumentExpiry(val: unknown): string | null {
+  if (typeof val !== "string") return null;
+  const trimmed = val.trim();
+  if (!trimmed || trimmed === "—") return null;
+  return /^\d{4}-\d{2}-\d{2}$/.test(trimmed) ? trimmed : null;
+}
+
 export async function createDocument(input: InsertDocument): Promise<Document | null> {
   const db = await getDb();
   if (!db) return null;
-  const normalized = { ...input };
+  const normalized = {
+    ...input,
+    expiry: sanitizeDocumentExpiry(input.expiry),
+  };
   if (input.entityId) {
     const name = await documentEntityName(db, input.entityType || "مركبة", input.entityId);
     if (!name) return null;
@@ -1150,6 +1160,9 @@ export async function updateDocument(id: number, input: Partial<InsertDocument>)
   const current = (await db.select().from(documents).where(and(eq(documents.id, id), isNull(documents.archivedAt))).limit(1))[0];
   if (!current) return null;
   const normalized = { ...input };
+  if (input.expiry !== undefined) {
+    normalized.expiry = sanitizeDocumentExpiry(input.expiry);
+  }
   const entityType = input.entityType ?? current.entityType;
   const entityId = input.entityId === undefined ? current.entityId : input.entityId;
   if (entityId) {
