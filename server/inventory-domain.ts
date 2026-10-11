@@ -16,15 +16,33 @@ export function inventoryStockStatus(onHand: number, reorderLevel: number): "ن�
   return onHand <= reorderLevel ? "منخفض" : "متوفر";
 }
 
-export type InventoryRequestStatus = "بانتظار الاعتماد" | "معتمد" | "مرفوض" | "مصروف";
-export type InventoryRequestAction = "اعتماد" | "رفض" | "صرف";
+export type InventoryRequestStatus = "بانتظار الاعتماد" | "معتمد" | "معتمد جزئيًا" | "مرفوض" | "مصروف";
+export type InventoryRequestAction = "اعتماد" | "تعديل الاعتماد" | "رفض" | "صرف";
 
 export function nextInventoryRequestStatus(current: InventoryRequestStatus, action: InventoryRequestAction): InventoryRequestStatus {
   if (current === "بانتظار الاعتماد" && action === "اعتماد") return "معتمد";
   if (current === "بانتظار الاعتماد" && action === "رفض") return "مرفوض";
-  if (current === "معتمد" && action === "صرف") return "مصروف";
+  if ((current === "معتمد" || current === "معتمد جزئيًا") && action === "تعديل الاعتماد") return current;
+  if ((current === "معتمد" || current === "معتمد جزئيًا") && action === "صرف") return "مصروف";
   if (action === "صرف" && current !== "معتمد") throw new Error("يجب اعتماد طلب الصرف قبل إخراج الأصناف");
   throw new Error("تم اتخاذ قرار على هذا الطلب مسبقًا");
+}
+
+export function validateInventoryApprovalQuantities(
+  lines: Array<{ requestLineId: number; requestedQuantity: number; approvedQuantity: number }>,
+): "معتمد" | "معتمد جزئيًا" {
+  if (lines.length === 0) throw new Error("لا توجد أصناف في طلب الصرف");
+  let approvedLineCount = 0;
+  for (const line of lines) {
+    if (!Number.isSafeInteger(line.requestedQuantity) || line.requestedQuantity <= 0
+      || !Number.isSafeInteger(line.approvedQuantity) || line.approvedQuantity < 0
+      || line.approvedQuantity > line.requestedQuantity) {
+      throw new Error("الكمية المعتمدة يجب أن تكون صفرًا أو أقل من الكمية المطلوبة");
+    }
+    if (line.approvedQuantity > 0) approvedLineCount += 1;
+  }
+  if (approvedLineCount === 0) throw new Error("اعتمد كمية واحدة على الأقل أو ارفض الطلب");
+  return lines.every(line => line.approvedQuantity === line.requestedQuantity) ? "معتمد" : "معتمد جزئيًا";
 }
 
 export function validateInventoryRequestAvailability(
@@ -43,7 +61,7 @@ export function validateInventoryRequestAvailability(
     });
   }
 
-  for (const [itemId, request] of requestedByItem) {
+  for (const [itemId, request] of Array.from(requestedByItem.entries())) {
     const available = onHandByItem.get(itemId);
     if (!Number.isSafeInteger(available) || available! < 0) {
       throw new Error(`تعذر التحقق من رصيد الصنف ${request.name}`);

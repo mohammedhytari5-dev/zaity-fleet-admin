@@ -3,6 +3,7 @@ import { parse as parseCookieHeader } from "cookie";
 import type { Express, Request, Response } from "express";
 import * as db from "../db";
 import { getSessionCookieOptions } from "./cookies";
+import { isMockOAuthAllowed } from "./env";
 import { sdk } from "./sdk";
 
 function getQueryParam(req: Request, key: string): string | undefined {
@@ -11,10 +12,12 @@ function getQueryParam(req: Request, key: string): string | undefined {
 }
 
 export function registerOAuthRoutes(app: Express) {
-  // This route creates a privileged synthetic account. Keep it available only
-  // for explicit local development and tests; unknown deployment environments
-  // must fail closed and never register it.
-  if (process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test") {
+  // This route creates a privileged synthetic account. It must be opted into
+  // explicitly with ALLOW_MOCK_OAUTH=true and is never registered in
+  // production. Previously it was enabled by NODE_ENV=development alone, so a
+  // developer running `pnpm dev` against a real database exposed a one-click
+  // administrator session that required no credentials.
+  if (isMockOAuthAllowed()) {
     app.get("/api/oauth/mock", async (req: Request, res: Response) => {
       const openId = "mock-admin";
       await db.upsertUser({
@@ -28,6 +31,7 @@ export function registerOAuthRoutes(app: Express) {
       const sessionToken = await sdk.createSessionToken(openId, {
         name: "Local Admin",
         expiresInMs: ONE_YEAR_MS,
+        sessionVersion: (await db.getUserByOpenId(openId))?.sessionVersion,
       });
       const cookieOptions = getSessionCookieOptions(req);
       res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS, sameSite: "lax", secure: false });
@@ -75,6 +79,7 @@ export function registerOAuthRoutes(app: Express) {
       const sessionToken = await sdk.createSessionToken(userInfo.openId, {
         name: userInfo.name || "",
         expiresInMs: ONE_YEAR_MS,
+        sessionVersion: (await db.getUserByOpenId(userInfo.openId))?.sessionVersion,
       });
 
       const cookieOptions = getSessionCookieOptions(req);

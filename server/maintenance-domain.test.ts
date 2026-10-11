@@ -1,7 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { canAdvanceMaintenance, canCloseMaintenance, canEditMaintenanceQuote, hasMaintenanceQuote, nextMaintenanceStages } from "../shared/maintenance-domain";
+import { canAdvanceMaintenance, canCloseMaintenance, canEditMaintenanceQuote, hasMaintenanceQuote, maintenanceRestoreStatus, nextMaintenanceStages } from "../shared/maintenance-domain";
 
 describe("maintenance workflow", () => {
+  it("restores the latest original vehicle status across repeated and overlapping repairs", () => {
+    expect(maintenanceRestoreStatus([
+      { id: 2, createdAt: "2026-03-01T10:00:00Z", vehicleStatusBefore: "مؤجرة" },
+      { id: 1, createdAt: "2026-01-01T10:00:00Z", vehicleStatusBefore: "متاحة" },
+    ])).toBe("مؤجرة");
+
+    expect(maintenanceRestoreStatus([
+      { id: 3, createdAt: "2026-04-01T10:00:00Z", vehicleStatusBefore: null },
+      { id: 2, createdAt: "2026-03-01T10:00:00Z", vehicleStatusBefore: "في الصيانة" },
+      { id: 1, createdAt: "2026-01-01T10:00:00Z", vehicleStatusBefore: "متاحة" },
+    ])).toBe("متاحة");
+  });
+
   it("lets legacy intake stages move directly to finance after the quote is completed", () => {
     for (const stage of ["بلاغ", "فحص", "تشخيص", "تقدير تكلفة"] as const) {
       expect(nextMaintenanceStages(stage)).toEqual(["اعتماد"]);

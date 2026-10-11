@@ -10,6 +10,40 @@ function parseLocalCalendarDate(value: string | null | undefined): Date | null {
   return target.getFullYear() === year && target.getMonth() === month - 1 && target.getDate() === day ? target : null;
 }
 
+/**
+ * Whether the value is a real `YYYY-MM-DD` calendar date.
+ *
+ * Rejects impossible dates such as `2026-02-30` and non-padded forms such as
+ * `2026-2-3`, both of which the previous free-form string columns accepted and
+ * which then compared incorrectly in report filters.
+ */
+export function isCalendarDate(value: unknown): value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+/**
+ * Normalises a stored/entered date value to `YYYY-MM-DD`, or null when the value
+ * means "not set".
+ *
+ * The legacy columns used `'—'` (and sometimes an empty string) as the "no date"
+ * sentinel. Both now mean null, and a `d/m/yyyy` value is converted to ISO so it
+ * can be stored in a real DATE column and compared correctly.
+ */
+export function normalizeCalendarDate(value: unknown): string | null {
+  if (value == null) return null;
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === "—") return null;
+  if (isCalendarDate(trimmed)) return trimmed;
+
+  const parsed = parseLocalCalendarDate(trimmed);
+  if (!parsed) return null;
+  const pad = (part: number) => String(part).padStart(2, "0");
+  return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}`;
+}
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 const COMPANY_TIME_ZONE = "Asia/Aden";
 

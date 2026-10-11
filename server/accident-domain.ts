@@ -11,6 +11,30 @@ export type AccidentStageData = {
   settlementAmount?: number | null;
 };
 
+/**
+ * A Najm report number is assigned after the accident is reported, so "no
+ * number yet" is the normal initial state. The storage layer must represent
+ * that state as SQL NULL:
+ *
+ *  - The column carries a UNIQUE index. MySQL treats multiple NULLs as
+ *    distinct, so any number of unreported accidents coexist safely, while two
+ *    accidents can never claim the same report number.
+ *  - A sentinel such as `"—"` or `""` would instead occupy the unique slot and
+ *    make the *second* unreported accident fail with ER_DUP_ENTRY.
+ *  - `updateAccident`/`createAccident` previously forwarded an explicit `null`
+ *    into a `NOT NULL DEFAULT '—'` column, which MySQL rejects with
+ *    ER_BAD_NULL_ERROR under STRICT_ALL_TABLES.
+ *
+ * Normalising every write to NULL-or-a-real-number keeps both failure modes
+ * impossible. Blank input and the legacy `"—"` sentinel are treated as absent.
+ */
+export function normalizeNajmReportNo(value: string | null | undefined): string | null {
+  if (value == null) return null;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === "—") return null;
+  return trimmed;
+}
+
 export function nextAccidentStage(current: AccidentStage, target: AccidentStage, record: AccidentStageData): AccidentStage {
   const transitions: Record<AccidentStage, AccidentStage[]> = {
     "بلاغ": ["تحديد المسؤولية", "ملغي"],

@@ -11,6 +11,8 @@ const financeOnlyMaintenanceFields = [
   "advanceStatus",
   "advanceSettledAt",
   "advanceSettlementReference",
+  "advanceInvoiceTotal",
+  "advanceVariance",
   "approvedByUserId",
   "approvedByName",
   "approvedAt",
@@ -18,6 +20,10 @@ const financeOnlyMaintenanceFields = [
   "fundingIssuedAt",
   "fundingIssuedByUserId",
   "fundingIssuedByName",
+  "projectIdAtRequest",
+  "projectNameAtRequest",
+  "clientIdAtRequest",
+  "clientNameAtRequest",
 ] as const;
 
 export function maintenanceRecordForViewer<T extends object>(record: T, canViewFinance: boolean, canViewVehicles = true): T {

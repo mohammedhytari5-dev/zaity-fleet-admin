@@ -10,6 +10,11 @@ process.env.TEMP = testTemp;
 process.env.TMP = testTemp;
 process.env.TMPDIR = testTemp;
 
+// Deterministic environment for every test file. `server/_core/env.ts` derives
+// ENV.isProduction and the mock-OAuth switch from NODE_ENV at import time, so
+// leaving it unset made behaviour depend on the developer's shell.
+process.env.NODE_ENV ??= "test";
+
 const result = await startVitest(
   "test",
   process.argv.slice(2),

@@ -1,4 +1,4 @@
-import { AXIOS_TIMEOUT_MS, COOKIE_NAME, ONE_YEAR_MS, decodeOAuthState } from "@shared/const";
+import { AXIOS_TIMEOUT_MS, COOKIE_NAME, MIN_SESSION_SECRET_LENGTH, ONE_YEAR_MS, decodeOAuthState } from "@shared/const";
 import { ForbiddenError } from "@shared/_core/errors";
 import axios, { type AxiosInstance } from "axios";
 import { parse as parseCookieHeader } from "cookie";
@@ -22,7 +22,15 @@ export type SessionPayload = {
   openId: string;
   appId: string;
   name: string;
+  sessionVersion: number;
 };
+
+/**
+ * Version recorded by tokens that predate the `sv` claim. They are treated as
+ * version 1 (the column default) so existing sessions keep working, and any
+ * later bump still revokes them.
+ */
+export const LEGACY_SESSION_VERSION = 1;
 
 const EXCHANGE_TOKEN_PATH = `/webdev.v1.WebDevAuthPublicService/ExchangeToken`;
 const GET_USER_INFO_PATH = `/webdev.v1.WebDevAuthPublicService/GetUserInfo`;
@@ -155,6 +163,20 @@ class SDKServer {
 
   private getSessionSecret() {
     const secret = ENV.cookieSecret;
+    // Fail closed. `ENV.cookieSecret` used to fall back to an empty string, so
+    // an unset JWT_SECRET still produced valid HS256 signatures computed from
+    // an empty key - anyone could mint an administrator session. Refuse to sign
+    // or verify instead of silently using a weak key.
+    if (!secret) {
+      throw new Error(
+        "JWT_SECRET is not configured; refusing to sign or verify session tokens."
+      );
+    }
+    if (secret.length < MIN_SESSION_SECRET_LENGTH) {
+      throw new Error(
+        `JWT_SECRET must be at least ${MIN_SESSION_SECRET_LENGTH} characters (got ${secret.length}).`
+      );
+    }
     return new TextEncoder().encode(secret);
   }
 
@@ -165,13 +187,14 @@ class SDKServer {
    */
   async createSessionToken(
     openId: string,
-    options: { expiresInMs?: number; name?: string } = {}
+    options: { expiresInMs?: number; name?: string; sessionVersion?: number } = {}
   ): Promise<string> {
     return this.signSession(
       {
         openId,
         appId: ENV.appId,
         name: options.name || "",
+        sessionVersion: options.sessionVersion ?? LEGACY_SESSION_VERSION,
       },
       options
     );
@@ -190,6 +213,7 @@ class SDKServer {
       openId: payload.openId,
       appId: payload.appId,
       name: payload.name,
+      sv: payload.sessionVersion,
     })
       .setProtectedHeader({ alg: "HS256", typ: "JWT" })
       .setExpirationTime(expirationSeconds)
@@ -198,7 +222,7 @@ class SDKServer {
 
   async verifySession(
     cookieValue: string | undefined | null
-  ): Promise<{ openId: string; appId: string; name: string } | null> {
+  ): Promise<{ openId: string; appId: string; name: string; sessionVersion: number } | null> {
     if (!cookieValue) {
       console.warn("[Auth] Missing session cookie");
       return null;
@@ -209,7 +233,7 @@ class SDKServer {
       const { payload } = await jwtVerify(cookieValue, secretKey, {
         algorithms: ["HS256"],
       });
-      const { openId, appId, name } = payload as Record<string, unknown>;
+      const { openId, appId, name, sv } = payload as Record<string, unknown>;
 
       if (
         !isNonEmptyString(openId) ||
@@ -224,6 +248,7 @@ class SDKServer {
         openId,
         appId,
         name,
+        sessionVersion: Number.isInteger(sv) ? (sv as number) : LEGACY_SESSION_VERSION,
       };
     } catch (error) {
       console.warn("[Auth] Session verification failed", String(error));
@@ -308,6 +333,14 @@ class SDKServer {
 
     if (!user) {
       throw ForbiddenError("User not found");
+    }
+
+    // Revocation check: a token is only valid while it carries the account's
+    // current session version. Changing a password, role or permission set
+    // bumps the version, which invalidates every token issued earlier - so a
+    // stolen session cannot outlive a credential reset.
+    if (user.sessionVersion !== session.sessionVersion) {
+      throw ForbiddenError("Session has been revoked; please sign in again");
     }
 
     await db.upsertUser({

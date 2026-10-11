@@ -1,5 +1,54 @@
 import { describe, expect, it } from "vitest";
-import { formatCompanyDate, isCompanyDateBeforeToday, isExpiredOrWithinUpcomingDays, isWithinUpcomingDays, resolveDocumentStatus, resolveRenewalStatus } from "../shared/date-utils";
+import { formatCompanyDate, isCalendarDate, isCompanyDateBeforeToday, isExpiredOrWithinUpcomingDays, isWithinUpcomingDays, normalizeCalendarDate, resolveDocumentStatus, resolveRenewalStatus } from "../shared/date-utils";
+
+describe("calendar date validation", () => {
+  it("accepts real YYYY-MM-DD dates", () => {
+    expect(isCalendarDate("2026-10-07")).toBe(true);
+    expect(isCalendarDate("2028-01-01")).toBe(true);
+    expect(isCalendarDate("2024-02-29")).toBe(true); // leap year
+  });
+
+  it("rejects impossible, padded and non-string values", () => {
+    // The old free-form columns accepted all of these and then compared them
+    // as text, silently dropping rows out of report periods.
+    expect(isCalendarDate("2026-02-30")).toBe(false);
+    expect(isCalendarDate("2026-2-3")).toBe(false);
+    expect(isCalendarDate("2026-13-01")).toBe(false);
+    expect(isCalendarDate("01/01/2028")).toBe(false);
+    expect(isCalendarDate("—")).toBe(false);
+    expect(isCalendarDate("")).toBe(false);
+    expect(isCalendarDate(null)).toBe(false);
+    expect(isCalendarDate(20261007)).toBe(false);
+  });
+});
+
+describe("calendar date normalisation", () => {
+  it("treats the legacy sentinels and empty values as null", () => {
+    expect(normalizeCalendarDate("—")).toBeNull();
+    expect(normalizeCalendarDate(" — ")).toBeNull();
+    expect(normalizeCalendarDate("")).toBeNull();
+    expect(normalizeCalendarDate("   ")).toBeNull();
+    expect(normalizeCalendarDate(null)).toBeNull();
+    expect(normalizeCalendarDate(undefined)).toBeNull();
+  });
+
+  it("keeps an ISO date as-is", () => {
+    expect(normalizeCalendarDate("2026-10-07")).toBe("2026-10-07");
+    expect(normalizeCalendarDate(" 2026-10-07 ")).toBe("2026-10-07");
+  });
+
+  it("converts the d/m/yyyy values found in the live data", () => {
+    // drivers.renewal held "01/01/2028" and compared as text against ISO dates.
+    expect(normalizeCalendarDate("01/01/2028")).toBe("2028-01-01");
+    expect(normalizeCalendarDate("1/1/2028")).toBe("2028-01-01");
+    expect(normalizeCalendarDate("٠١/٠١/٢٠٢٨")).toBe("2028-01-01");
+  });
+
+  it("returns null for text that holds no date instead of guessing", () => {
+    expect(normalizeCalendarDate("غير محدد")).toBeNull();
+    expect(normalizeCalendarDate("2026-02-30")).toBeNull();
+  });
+});
 
 describe("upcoming date windows", () => {
   const today = new Date(2026, 9, 7, 12);

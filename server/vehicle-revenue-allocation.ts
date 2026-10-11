@@ -1,4 +1,7 @@
-type Payment = { id: number; amount: number; contractId: number | null; claimId: number | null; clientId: number | null; paidAt?: string; method?: string; reference?: string };
+// Dates are now real DATE columns and therefore nullable: NULL means "not set",
+// where the old text columns used the '—' sentinel. Callers pass the column
+// through unchanged and fall back to '—' for display.
+type Payment = { id: number; amount: number; contractId: number | null; claimId: number | null; clientId: number | null; paidAt?: string | null; method?: string | null; reference?: string | null };
 type Claim = { id: number; contractId: number | null };
 type Contract = { id: number; clientId: number | null; client?: string | null; ref?: string | null };
 type ContractItem = { contractId: number; vehicleId: number | null };

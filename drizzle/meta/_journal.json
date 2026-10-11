@@ -246,6 +246,104 @@
       "when": 1791463877831,
       "tag": "0034_accident_workflow",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "5",
+      "when": 1791467526681,
+      "tag": "0035_inventory_partial_approval",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "5",
+      "when": 1791471408549,
+      "tag": "0036_maintenance_advance_reconciliation",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "5",
+      "when": 1791471988359,
+      "tag": "0037_maintenance_assignment_snapshot",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "5",
+      "when": 1791500000000,
+      "tag": "0038_inventory_maintenance_link",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "5",
+      "when": 1791639781812,
+      "tag": "0039_fix_accident_najm_report",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "5",
+      "when": 1791639791152,
+      "tag": "0040_purchase_tables_reconciliation",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "5",
+      "when": 1791640768649,
+      "tag": "0041_user_session_version",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "5",
+      "when": 1791641353083,
+      "tag": "0042_performance_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "5",
+      "when": 1791641682040,
+      "tag": "0043_foreign_keys_for_ledger_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "5",
+      "when": 1791642818960,
+      "tag": "0044_monetary_decimal",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "5",
+      "when": 1791643185353,
+      "tag": "0045_branch_dimension",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "5",
+      "when": 1791643859883,
+      "tag": "0046_calendar_dates",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "5",
+      "when": 1791648850000,
+      "tag": "0047_accounting_ledger",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "5",
+      "when": 1791648960000,
+      "tag": "0048_tax_invoices",
+      "breakpoints": true
     }
   ]
 }

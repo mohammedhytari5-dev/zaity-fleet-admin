@@ -9,6 +9,9 @@ const report = {
   projects: { activeNow: 4, assignedVehicles: 8 },
   documents: { expiredNow: 2 },
   people: { employees: 10, activeEmployees: 9, drivers: 5, availableDrivers: 3 },
+  inventory: { itemCount: 20, lowStockCount: 3, emptyStockCount: 1, receivedMovements: 12, issuedMovements: 8 },
+  accidents: { reportedInPeriod: 2, openNow: 1, estimatedRepairCostInPeriod: 5000, settlementAmountInPeriod: 2500 },
+  taskSummary: { dueInPeriod: 5, completedInPeriod: 2, openInPeriod: 3, overdueNow: 1 },
   details: {
     payments: [{ id: 2, paidAt: "2026-10-03", clientId: 7, client: "عميل سري", contract: "CN-4", claim: "CL-8", amount: 300, method: "تحويل بنكي", reference: "TX-8" }],
     receivablesAging: [{ id: 8, ref: "CL-8", client: "Client A", status: "New", amount: 1000, paid: 200, outstanding: 800, due: "2026-09-01", daysOverdue: 36, agingBucket: "31–60 يوم" }],
@@ -30,12 +33,21 @@ const report = {
       { entityType: "عقد", entityId: 2, expiringInPeriod: true, expiredNow: true, expiringNext30Days: false },
       { entityType: "", entityId: null, expiringInPeriod: false, expiredNow: false, expiringNext30Days: true },
     ],
+    documents: [
+      { id: 1, name: "استمارة", entityType: "مركبة", entityId: 12, hasFile: true, fileUrl: "private-object-key" },
+      { id: 2, name: "عقد", entityType: "عقد", entityId: 2, hasFile: false },
+      { id: 3, name: "غير مصنف", entityType: "جهة غير معروفة", entityId: 3, hasFile: false },
+      { id: 4, name: "مستند عام", entityType: "", entityId: null, hasFile: false },
+    ],
     vehicleProfitability: [{ plate: "1234", expense: 700 }],
     projectProfitability: [{ name: "مشروع سري", revenue: 5000 }],
     clientProfitability: [{ name: "عميل سري", revenue: 5000 }],
     maintenance: [{ id: 4, vehicleId: 12, vehicle: "1234", status: "تنفيذ", cost: "700 SAR" }],
     employees: [{ id: 41, employeeNo: "EMP-41", name: "Employee", department: "Operations", jobTitle: "Supervisor", hireDate: "2026-01-01", status: "Active" }],
     drivers: [{ id: 51, name: "Driver", status: "Available", vehicle: "1234", renewal: "2026-12-01" }],
+    inventoryMovements: [{ id: 101, direction: "صرف", quantity: 2, itemName: "فلتر" }],
+    accidents: [{ id: 61, ref: "AC-61", vehiclePlate: "1234", estimatedRepairCost: 5000, settlementAmount: 2500 }],
+    tasks: [{ id: 71, title: "تجهيز المركبة", assignee: "موظف", dueAt: "2026-10-07", status: "مفتوحة" }],
     operatingExpenses: [
       { id: 10, vehicleId: 12, vehicle: "1234", category: "وقود", amount: 100, projectId: 5, projectName: "مشروع سري", clientId: 7, clientName: "عميل سري", maintenanceRequestId: null, payableId: null },
       { id: 11, vehicleId: 12, vehicle: "1234", category: "صيانة", amount: 200, projectId: 5, projectName: "مشروع سري", clientId: 7, clientName: "عميل سري", maintenanceRequestId: null, payableId: 31, payableVehicleId: 12, payableMaintenanceRequestId: null },
@@ -45,6 +57,18 @@ const report = {
 };
 
 describe("report data access", () => {
+  it("returns only explicitly scoped report sections", () => {
+    const reportWithUnreviewedSection = {
+      ...report,
+      details: { ...report.details, futureInternalData: [{ secret: "must not be exposed" }] },
+    };
+    const result = scopeCompanyReport(reportWithUnreviewedSection, ["reports", "finance"]);
+
+    expect(result.details).not.toHaveProperty("futureInternalData");
+    expect(result.details).not.toHaveProperty("payableSummaryRows");
+    expect(result.details).not.toHaveProperty("documentSummaryRows");
+  });
+
   it("does not expose finance or maintenance costs to a reports-only user", () => {
     const result = scopeCompanyReport(report, ["reports"]);
     expect(result.finance).toEqual({
@@ -64,6 +88,12 @@ describe("report data access", () => {
     expect(result.details.payables).toEqual([]);
     expect(result.details.maintenance).toEqual([]);
     expect(result.maintenance.costInPeriod).toBe(0);
+    expect(result.inventory).toEqual({ itemCount: 0, lowStockCount: 0, emptyStockCount: 0, receivedMovements: 0, issuedMovements: 0 });
+    expect(result.details.inventoryMovements).toEqual([]);
+    expect(result.accidents).toEqual({ reportedInPeriod: 0, openNow: 0, estimatedRepairCostInPeriod: 0, settlementAmountInPeriod: 0 });
+    expect(result.details.accidents).toEqual([]);
+    expect(result.taskSummary).toEqual({ dueInPeriod: 0, completedInPeriod: 0, openInPeriod: 0, overdueNow: 0 });
+    expect(result.details.tasks).toEqual([]);
   });
 
   it("scopes each report section to its module and strips costs without finance permission", () => {
@@ -137,6 +167,10 @@ describe("report data access", () => {
     const result = scopeCompanyReport(report, ["reports", "documents", "vehicles"]);
     expect(result.documents).toEqual({ expiringInPeriod: 1, expiredNow: 1, expiringNext30Days: 1 });
     expect(result.details).not.toHaveProperty("documentSummaryRows");
+    expect(result.details.documents.map((row: any) => row.id)).toEqual([1, 4]);
+    expect(result.details.documents[0]).not.toHaveProperty("entityId");
+    expect(result.details.documents[0]).not.toHaveProperty("fileUrl");
+    expect(scopeCompanyReport(report, ["reports"]).details.documents).toEqual([]);
   });
 
   it("does not reveal assigned vehicle counts to project-only users", () => {
@@ -155,5 +189,34 @@ describe("report data access", () => {
     const reportsOnly = scopeCompanyReport(report, ["reports"]);
     expect(reportsOnly.details.employees).toEqual([]);
     expect(reportsOnly.details.drivers).toEqual([]);
+  });
+
+  it("exposes inventory report details only to inventory users", () => {
+    const inventoryOnly = scopeCompanyReport(report, ["reports", "inventory"]);
+    expect(inventoryOnly.inventory).toMatchObject({ itemCount: 20, lowStockCount: 3, receivedMovements: 12, issuedMovements: 8 });
+    expect(inventoryOnly.details.inventoryMovements).toHaveLength(1);
+    const reportsOnly = scopeCompanyReport(report, ["reports"]);
+    expect(reportsOnly.inventory.receivedMovements).toBe(0);
+    expect(reportsOnly.details.inventoryMovements).toEqual([]);
+  });
+
+  it("scopes accident reports to accident access and redacts financial values without finance access", () => {
+    const operationsOnly = scopeCompanyReport(report, ["reports", "accidents"]);
+    expect(operationsOnly.accidents).toMatchObject({ reportedInPeriod: 2, openNow: 1, estimatedRepairCostInPeriod: 0, settlementAmountInPeriod: 0 });
+    expect(operationsOnly.details.accidents[0]).toMatchObject({ ref: "AC-61", vehiclePlate: "1234" });
+    expect(operationsOnly.details.accidents[0]).not.toHaveProperty("estimatedRepairCost");
+    expect(operationsOnly.details.accidents[0]).not.toHaveProperty("settlementAmount");
+    const finance = scopeCompanyReport(report, ["reports", "accidents", "finance"]);
+    expect(finance.accidents.estimatedRepairCostInPeriod).toBe(5000);
+    expect(finance.details.accidents[0].settlementAmount).toBe(2500);
+  });
+
+  it("exposes team task reports only to administrator scope", () => {
+    const workerReport = scopeCompanyReport(report, ["reports", "dashboard"]);
+    expect(workerReport.taskSummary.overdueNow).toBe(0);
+    expect(workerReport.details.tasks).toEqual([]);
+    const adminReport = scopeCompanyReport(report, ["reports", "dashboard"], { canViewTeamTasks: true });
+    expect(adminReport.taskSummary).toMatchObject({ dueInPeriod: 5, overdueNow: 1 });
+    expect(adminReport.details.tasks).toHaveLength(1);
   });
 });

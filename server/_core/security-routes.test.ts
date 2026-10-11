@@ -4,12 +4,16 @@ import { afterEach, describe, expect, it } from "vitest";
 import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
 import { registerApiNotFound } from "./apiRouting";
+import { ALLOW_MOCK_OAUTH_FLAG } from "./env";
 
 const originalNodeEnv = process.env.NODE_ENV;
+const originalMockFlag = process.env[ALLOW_MOCK_OAUTH_FLAG];
 
 afterEach(() => {
   if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
   else process.env.NODE_ENV = originalNodeEnv;
+  if (originalMockFlag === undefined) delete process.env[ALLOW_MOCK_OAUTH_FLAG];
+  else process.env[ALLOW_MOCK_OAUTH_FLAG] = originalMockFlag;
 });
 
 function registeredPaths(app: express.Express): string[] {
@@ -17,27 +21,43 @@ function registeredPaths(app: express.Express): string[] {
     .flatMap((layer: any) => layer.route ? [layer.route.path] : []);
 }
 
+function mockRouteRegistered(nodeEnv: string | undefined, flag: string | undefined): boolean {
+  if (nodeEnv === undefined) delete process.env.NODE_ENV;
+  else process.env.NODE_ENV = nodeEnv;
+  if (flag === undefined) delete process.env[ALLOW_MOCK_OAUTH_FLAG];
+  else process.env[ALLOW_MOCK_OAUTH_FLAG] = flag;
+
+  const app = express();
+  registerOAuthRoutes(app);
+  return registeredPaths(app).includes("/api/oauth/mock");
+}
+
 describe("security-sensitive HTTP routes", () => {
-  it("does not register the mock OAuth administrator in production", () => {
-    process.env.NODE_ENV = "production";
-    const app = express();
-    registerOAuthRoutes(app);
-    expect(registeredPaths(app)).not.toContain("/api/oauth/mock");
+  it("never registers the mock OAuth administrator in production", () => {
+    // Even an explicit opt-in must not override the production guard.
+    expect(mockRouteRegistered("production", "true")).toBe(false);
+    expect(mockRouteRegistered("production", undefined)).toBe(false);
   });
 
-  it("keeps the mock OAuth route available outside production", () => {
-    process.env.NODE_ENV = "test";
-    const app = express();
-    registerOAuthRoutes(app);
-    expect(registeredPaths(app)).toContain("/api/oauth/mock");
+  it("does not register the mock OAuth route from NODE_ENV alone", () => {
+    // Regression guard: enabling this route merely by running in development
+    // exposed a credential-free administrator session on whatever database the
+    // process was pointed at.
+    expect(mockRouteRegistered("development", undefined)).toBe(false);
+    expect(mockRouteRegistered("test", undefined)).toBe(false);
+    expect(mockRouteRegistered("staging", undefined)).toBe(false);
+    expect(mockRouteRegistered(undefined, undefined)).toBe(false);
   });
 
-  it.each(["staging", "preview", undefined])("does not register mock OAuth for NODE_ENV=%s", nodeEnv => {
-    if (nodeEnv === undefined) delete process.env.NODE_ENV;
-    else process.env.NODE_ENV = nodeEnv;
-    const app = express();
-    registerOAuthRoutes(app);
-    expect(registeredPaths(app)).not.toContain("/api/oauth/mock");
+  it("ignores flags other than the exact opt-in value", () => {
+    expect(mockRouteRegistered("development", "1")).toBe(false);
+    expect(mockRouteRegistered("development", "TRUE")).toBe(false);
+    expect(mockRouteRegistered("development", "")).toBe(false);
+  });
+
+  it("registers the mock OAuth route only with an explicit non-production opt-in", () => {
+    expect(mockRouteRegistered("development", "true")).toBe(true);
+    expect(mockRouteRegistered("test", "true")).toBe(true);
   });
 
   it("requires authentication before serving stored files", async () => {

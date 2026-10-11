@@ -50,3 +50,13 @@ export function statusForMaintenanceStage(stage: MaintenanceStage): "جديد" |
   if (stage === "مرفوض") return "متوقف";
   return "جديد";
 }
+
+export function maintenanceRestoreStatus<T extends string>(
+  requests: Array<{ id: number; createdAt: Date | string; vehicleStatusBefore: T | null }>,
+): T | null {
+  const newestFirst = [...requests].sort((left, right) => {
+    const timeDifference = new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime();
+    return Number.isFinite(timeDifference) && timeDifference !== 0 ? timeDifference : right.id - left.id;
+  });
+  return newestFirst.find(request => request.vehicleStatusBefore && !["في الصيانة", "متوقفة"].includes(request.vehicleStatusBefore))?.vehicleStatusBefore ?? null;
+}

@@ -1,9 +1,12 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { COOKIE_NAME } from "@shared/const";
+import { callerIp } from "./_core/context";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { isSafeFileReference } from "./_core/fileReferences";
+import { isValidMoneyAmount, multiplyMoney, roundMoney, sumMoney } from "@shared/money";
+import { loginRateLimit } from "./login-throttle";
 import { adminProcedure, permissionProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { ONE_YEAR_MS } from "@shared/const";
 import { sdk } from "./_core/sdk";
@@ -15,7 +18,7 @@ import { driverRecordForViewer } from "./driver-access";
 import { projectRecordForViewer } from "./project-access";
 import { notificationModule, notificationsVisibleTo } from "./notification-access";
 import { claimRecordForViewer, contractRecordForViewer, paymentRecordForViewer } from "./contract-access";
-import { archiveClaim, archiveClient, archiveContract, archiveDocument, archiveDriver, archiveMaintenanceRequest, advanceMaintenanceRequest, decideMaintenanceApproval, settleMaintenanceAdvance, listMaintenanceEvents, archivePayment, archiveVehicleExpense, archiveVehicleRevenue, archiveProject, archiveSetting, deleteSetting, archiveVehicle, assignVehicleDriver, authenticateLocalUser, LastActiveAdminDemotionError, createLocalUser, createAuditLog, createClaim, createClient, createContract, createDocument, createDriver, createEmployee, updateEmployee, archiveEmployee, listEmployees, linkEmployeeUser, createMaintenanceRequest, createNotification, createPayment, createProject, createPayable, registerPayablePayment, updatePayable, updatePayableStatus, listPayables, getPayableReceipt, createRepresentative, createTask, createVehicle, createVehicleExpense, createVehicleRevenue, getVehicleFinancialProfile, getVehicleReceipt, listVehicleFinancialSummaries, updateVehicleExpense, listAuditLogs, listClaims, listClients, listContracts, listDocuments, listDrivers, listMaintenanceRequests, listNotifications, getNotification, listPayments, listProjects, listRepresentatives, listSettings, listTasks, listTaskAssignees, listUsers, listVehicles, getCompanyReport, getContractRelatedModuleAccess, markNotificationRead, updateClaim, updatePayment, updateSetting, updateClient, updateContract, updateContractStatus, updateProject, updateUserRole, updateUserAccess, updateDocument, updateDriver, updateMaintenanceRequest, updateTask, updateVehicle, upsertSetting, getDocument, listInventoryItems, listInventoryMovements, createInventoryItem, updateInventoryItem, recordInventoryMovement, archiveInventoryItem, listInventoryRequests, createInventoryRequest, decideInventoryRequest, issueInventoryRequest, listAccidents, getAccident, listAccidentEvents, createAccident, updateAccident, advanceAccident } from "./db";
+import { archiveClaim, archiveClient, archiveContract, archiveDocument, archiveDriver, archiveMaintenanceRequest, advanceMaintenanceRequest, decideMaintenanceApproval, settleMaintenanceAdvance, listMaintenanceEvents, archivePayment, archiveVehicleExpense, archiveVehicleRevenue, archiveProject, archiveSetting, deleteSetting, archiveVehicle, assignVehicleDriver, authenticateLocalUser, LastActiveAdminDemotionError, createLocalUser, createAuditLog, recordLoginAttempt, revokeUserSessions, createClaim, createClient, createContract, createDocument, createDriver, createEmployee, updateEmployee, archiveEmployee, listEmployees, linkEmployeeUser, createMaintenanceRequest, createNotification, createPayment, createProject, createPayable, registerPayablePayment, updatePayable, updatePayableStatus, listPayables, getPayableReceipt, createRepresentative, createTask, createVehicle, createVehicleExpense, createVehicleRevenue, getVehicleFinancialProfile, getVehicleReceipt, listVehicleFinancialSummaries, updateVehicleExpense, listAuditLogs, listClaims, listClients, listContracts, listDocuments, listDrivers, listMaintenanceRequests, listNotifications, getNotification, listPayments, listProjects, listRepresentatives, listSettings, listTasks, listTaskAssignees, listUsers, listVehicles, getCompanyReport, getMaintenanceCostForPeriod, getContractRelatedModuleAccess, markNotificationRead, updateClaim, updatePayment, updateSetting, updateClient, updateContract, updateContractStatus, updateProject, updateUserRole, updateUserAccess, updateDocument, updateDriver, updateMaintenanceRequest, updateTask, updateVehicle, upsertSetting, getDocument, listInventoryItems, listInventoryMovements, createInventoryItem, updateInventoryItem, recordInventoryMovement, archiveInventoryItem, listInventoryRequests, createInventoryRequest, decideInventoryRequest, issueInventoryRequest, listAccidents, getAccident, listAccidentEvents, createAccident, updateAccident, advanceAccident, listPurchaseRequests, getPurchaseRequest, createPurchaseRequest, updatePurchaseRequest, archivePurchaseRequest, listPurchaseQuotes, createPurchaseQuote, updatePurchaseQuote, selectPurchaseQuote, deletePurchaseQuote, issuePurchaseOrder, seedAccountsIfEmpty, listAccounts, createAccount, updateAccount, archiveAccount, listFiscalPeriods, createFiscalPeriod, closeFiscalPeriod, reopenFiscalPeriod, listJournalEntries, getJournalEntry, createJournalEntry, reverseJournalEntryRecord, getAccountLedger, getTrialBalance, getIncomeStatement, getBalanceSheet, createTaxInvoice, listTaxInvoices, getTaxInvoice, getVatDeclaration } from "./db";
 import { canEditMaintenanceQuote, maintenanceStages, type MaintenanceStage } from "../shared/maintenance-domain";
 import { maintenanceEventForViewer, maintenanceRecordForViewer } from "./maintenance-access";
 import { scopeCompanyReport } from "./report-access";
@@ -29,6 +32,18 @@ function requireRecord<T>(record: T | null | undefined, entity: string): T {
   if (!record) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `قاعدة البيانات غير متصلة؛ تعذر حفظ ${entity}` });
   return record;
 }
+
+/**
+ * Monetary input. Columns are `decimal(15,2)`, so at most two decimals can be
+ * stored; rejecting finer input here means a submitted amount is never silently
+ * rounded on insert. Balances are taken from the ledger, never from the client.
+ */
+const moneyInput = z
+  .number()
+  .finite()
+  .nonnegative()
+  .refine(isValidMoneyAmount, "المبلغ يقبل منزلتين عشريتين كحد أقصى");
+const positiveMoneyInput = moneyInput.refine(value => value > 0, "المبلغ يجب أن يكون أكبر من صفر");
 function documentMetadata(document: any) {
   const { fileUrl, ...metadata } = document;
   return { ...metadata, hasFile: Boolean(fileUrl) };
@@ -86,7 +101,7 @@ const vehicleInput = z.object({
   year: z.string().min(4).max(8),
   color: z.string().min(1).max(48),
   mileage: z.string().min(1).max(32),
-  purchasePrice: z.number().int().nonnegative().optional(),
+  purchasePrice: moneyInput.optional(),
   purchaseDate: z.string().max(32).optional(),
   inServiceDate: z.string().max(32).optional(),
   projectId: z.number().int().positive().nullable().default(null),
@@ -121,7 +136,7 @@ const contractItemInput = z.object({
 });
 const contractInput = z.object({
   ref: z.string().min(2).max(40), client: z.string().min(2).max(160), clientId: z.number().int().positive().nullable().default(null), type: z.string().min(2).max(120),
-  startDate: z.string().min(2).max(32), expiry: z.string().min(2).max(32), total: z.number().int().nonnegative().default(0), collected: z.number().int().nonnegative().default(0),
+  startDate: z.string().min(2).max(32), expiry: z.string().min(2).max(32), total: moneyInput.default(0), collected: moneyInput.default(0),
   status: z.enum(["قائم", "مكتمل", "عرض سعر", "ملغي"]).default("قائم"), notes: z.string().max(4000).nullable().optional(), items: z.array(contractItemInput).min(1),
 });
 const driverFields = {
@@ -163,11 +178,11 @@ const maintenanceInput = z.object({
   expectedReturn: z.string().max(32).default("—"),
   status: z.enum(["جديد", "جاري العمل", "بانتظار الفحص", "مكتمل", "متوقف"]).default("جديد"),
   cost: z.string().max(40).optional(),
-  estimatedCost: z.number().int().nonnegative().default(0),
-  quotedPartsCost: z.number().int().nonnegative().default(0),
+  estimatedCost: moneyInput.default(0),
+  quotedPartsCost: moneyInput.default(0),
   quoteName: z.string().max(255).nullable().optional(), quoteUrl: z.string().max(1200000).refine(isSafeFileReference, "مرجع ملف غير صالح").nullable().optional(),
-  laborCost: z.number().int().nonnegative().optional(),
-  partsCost: z.number().int().nonnegative().optional(),
+  laborCost: moneyInput.optional(),
+  partsCost: moneyInput.optional(),
   warrantyUntil: z.string().max(32).default("—"),
   receiptName: z.string().max(255).nullable().optional(), receiptUrl: z.string().max(1200000).refine(isSafeFileReference, "مرجع ملف غير صالح").nullable().optional(),
 });
@@ -198,9 +213,9 @@ const claimInput = z.object({
   clientId: z.number().int().positive().nullable().default(null),
   contract: z.string().min(2).max(40),
   contractId: z.number().int().positive().nullable().default(null),
-  amount: z.number().int().nonnegative().default(0),
+  amount: moneyInput.default(0),
   due: z.string().max(32).default("—"),
-  paid: z.number().int().nonnegative().default(0),
+  paid: moneyInput.default(0),
   submittedAt: z.string().max(32).default("—"),
   followUpAt: z.string().max(32).default("—"),
   notes: z.string().max(4000).optional(),
@@ -209,31 +224,59 @@ const claimInput = z.object({
 const vehicleExpenseInput = z.object({
   vehicleId: z.number().int().positive(),
   category: z.enum(["صيانة", "قطع غيار", "زيوت وفلاتر", "إطارات", "إصلاحات وأعطال", "تأمين", "فحص واستمارة", "مخالفات", "أخرى"]),
-  amount: z.number().int().positive(), spentAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  amount: positiveMoneyInput, spentAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   description: z.string().min(2).max(300), vendor: z.string().max(160).default("—"),
   receiptName: z.string().max(255).optional(), receiptUrl: z.string().max(1200000).refine(isSafeFileReference, "مرجع ملف غير صالح").optional(), notes: z.string().max(4000).optional(),
 });
 const vehicleRevenueInput = z.object({
-  vehicleId: z.number().int().positive(), paymentId: z.number().int().positive(), amount: z.number().int().positive(),
+  vehicleId: z.number().int().positive(), paymentId: z.number().int().positive(), amount: positiveMoneyInput,
   receiptName: z.string().max(255).optional(), receiptUrl: z.string().max(1200000).refine(isSafeFileReference, "مرجع ملف غير صالح").optional(), notes: z.string().max(4000).optional(),
 });
 
 const payableInput = z.object({
   ref: z.string().min(2).max(40), supplier: z.string().min(2).max(200), description: z.string().min(2).max(300),
-  amount: z.number().int().positive(), issueDate: z.string().max(32).default("—"), dueDate: z.string().max(32).default("—"), notes: z.string().max(4000).optional(),
+  amount: positiveMoneyInput, issueDate: z.string().max(32).default("—"), dueDate: z.string().max(32).default("—"), notes: z.string().max(4000).optional(),
   vehicleId: z.number().int().positive().nullable().optional(), maintenanceRequestId: z.number().int().positive().nullable().optional(), vehicleCategory: z.enum(["صيانة", "قطع غيار", "زيوت وفلاتر", "إطارات", "إصلاحات وأعطال", "تأمين", "فحص واستمارة", "مخالفات", "أخرى"]).nullable().optional(),
   receiptName: z.string().max(255).optional(), receiptUrl: z.string().max(1200000).refine(isSafeFileReference, "مرجع ملف غير صالح").optional(),
 });
-const payablePaymentInput = z.object({ payableId: z.number().int().positive(), amount: z.number().int().positive(), paidAt: z.string().min(2).max(32), method: z.string().min(2).max(80), reference: z.string().max(80).default("—"), notes: z.string().max(4000).optional() });
+const payablePaymentInput = z.object({ payableId: z.number().int().positive(), amount: positiveMoneyInput, paidAt: z.string().min(2).max(32), method: z.string().min(2).max(80), reference: z.string().max(80).default("—"), notes: z.string().max(4000).optional() });
 const taskInput = z.object({ title: z.string().min(2).max(200), description: z.string().max(4000).optional(), dueAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), status: z.enum(["مفتوحة", "مكتملة", "ملغاة"]).default("مفتوحة"), assigneeUserId: z.number().int().positive(), relatedEntityType: z.enum(taskRelatedEntityTypes).nullable().default(null), relatedEntityId: z.number().int().positive().nullable().default(null) });
-const paymentInput = z.object({ contractId: z.number().int().positive().nullable().default(null), claimId: z.number().int().positive().nullable().default(null), clientId: z.number().int().positive().nullable().default(null), amount: z.number().int().positive(), paidAt: z.string().min(2).max(32), method: z.string().min(2).max(80), reference: z.string().max(80).default("—"), notes: z.string().max(4000).optional() }).refine(value => Boolean(value.contractId || value.claimId || value.clientId), { message: "يجب ربط الدفعة بعقد أو مطالبة أو عميل" });
+const paymentInput = z.object({ contractId: z.number().int().positive().nullable().default(null), claimId: z.number().int().positive().nullable().default(null), clientId: z.number().int().positive().nullable().default(null), amount: positiveMoneyInput, paidAt: z.string().min(2).max(32), method: z.string().min(2).max(80), reference: z.string().max(80).default("—"), notes: z.string().max(4000).optional() }).refine(value => Boolean(value.contractId || value.claimId || value.clientId), { message: "يجب ربط الدفعة بعقد أو مطالبة أو عميل" });
 const representativeInput = z.object({ clientId: z.number().int().positive(), name: z.string().min(2).max(160), phone: z.string().min(3).max(40) });
 const userCreateInput = z.object({ name: z.string().min(2).max(160), username: z.string().regex(/^[^\s@]{3,40}$/).transform(value => value.toLowerCase()), password: z.string().min(8).max(200), role: z.enum(["user", "admin"]).default("user"), permissions: z.array(z.string().max(80)).max(30).default([]) });
 const settingInput = z.object({ category: z.string().min(2).max(80), key: z.string().min(2).max(80), label: z.string().min(2).max(160), value: z.string().min(1).max(255), active: z.number().int().min(0).max(1).default(1) });
 const inventoryItemInput = z.object({ sku: z.string().trim().min(2).max(64), name: z.string().trim().min(2).max(180), category: z.string().trim().min(2).max(100), unit: z.string().trim().min(1).max(40).default("قطعة"), reorderLevel: z.number().int().nonnegative().default(0), location: z.string().max(160).default("—"), notes: z.string().max(4000).optional() });
 const inventoryMovementInput = z.object({ itemId: z.number().int().positive(), direction: z.literal("استلام"), quantity: z.number().int().positive(), reference: z.string().max(120).default("—"), recipient: z.string().max(160).default("—"), notes: z.string().max(4000).optional() });
 const inventoryRequestInput = z.object({ ref: z.string().min(3).max(48), purpose: z.string().trim().min(3).max(500), items: z.array(z.object({ itemId: z.number().int().positive(), quantity: z.number().int().positive() })).min(1).max(40) }).refine(value => new Set(value.items.map(item => item.itemId)).size === value.items.length, { message: "لا تكرر الصنف نفسه في الطلب" });
-const accidentInput = z.object({ ref: z.string().trim().min(3).max(48), vehicleId: z.number().int().positive().nullable(), vehiclePlate: z.string().min(2).max(32), driverId: z.number().int().positive().nullable().default(null), driverName: z.string().max(160).default("—"), occurredAt: z.string().min(8).max(40), location: z.string().max(240).default("—"), description: z.string().trim().min(5).max(4000), najmReportNo: z.string().max(120).nullable().default(null), najmReportName: z.string().max(255).nullable().optional(), najmReportUrl: z.string().max(3000000).refine(isSafeFileReference, "مرجع ملف غير صالح").nullable().optional(), faultPercent: z.number().int().min(0).max(100).nullable().optional(), estimatedRepairCost: z.number().int().nonnegative().nullable().optional(), insurerName: z.string().max(180).nullable().optional(), insurerClaimRef: z.string().max(120).nullable().optional(), insurerClaimStatus: z.enum(["غير مرفوعة", "مرفوعة", "مقبولة", "مرفوضة", "مصروفة"]).optional(), settlementAmount: z.number().int().nonnegative().nullable().optional(), resolutionNotes: z.string().max(4000).nullable().optional() });
+const accidentInput = z.object({ ref: z.string().trim().min(3).max(48), vehicleId: z.number().int().positive().nullable(), vehiclePlate: z.string().min(2).max(32), driverId: z.number().int().positive().nullable().default(null), driverName: z.string().max(160).default("—"), occurredAt: z.string().min(8).max(40), location: z.string().max(240).default("—"), description: z.string().trim().min(5).max(4000), najmReportNo: z.string().max(120).nullable().default(null), najmReportName: z.string().max(255).nullable().optional(), najmReportUrl: z.string().max(3000000).refine(isSafeFileReference, "مرجع ملف غير صالح").nullable().optional(), faultPercent: z.number().int().min(0).max(100).nullable().optional(), estimatedRepairCost: moneyInput.nullable().optional(), insurerName: z.string().max(180).nullable().optional(), insurerClaimRef: z.string().max(120).nullable().optional(), insurerClaimStatus: z.enum(["غير مرفوعة", "مرفوعة", "مقبولة", "مرفوضة", "مصروفة"]).optional(), settlementAmount: moneyInput.nullable().optional(), resolutionNotes: z.string().max(4000).nullable().optional() });
+
+const purchaseRequestInput = z.object({
+  ref: z.string().min(3).max(48),
+  department: z.string().min(2).max(100).default("الصيانة"),
+  category: z.string().min(2).max(100).default("قطع غيار"),
+  purpose: z.string().min(3).max(500),
+  priority: z.enum(["عادي", "متوسط", "عاجل", "طارئ"]).default("عادي"),
+  estimatedBudget: moneyInput.default(0),
+});
+
+const purchaseQuoteInput = z.object({
+  requestId: z.number().int().positive(),
+  supplierName: z.string().min(2).max(200),
+  supplierVat: z.string().max(64).optional(),
+  supplierPhone: z.string().max(64).optional(),
+  itemDescription: z.string().min(2).max(300),
+  quantity: z.number().int().positive().default(1),
+  unitPrice: moneyInput.default(0),
+  taxAmount: moneyInput.default(0),
+  totalAmount: moneyInput.default(0),
+  deliveryDays: z.number().int().positive().default(3),
+  warrantyPeriod: z.string().max(100).default("لا يوجد"),
+  supplierRating: z.number().int().min(1).max(5).default(4),
+  quoteFileUrl: z.string().max(1200000).optional(),
+  quoteFileName: z.string().max(255).optional(),
+  notes: z.string().max(2000).optional(),
+});
+
 
 export const appRouter = router({
   inventory: router({
@@ -243,7 +286,7 @@ export const appRouter = router({
     create: permissionProcedure("inventory").input(inventoryItemInput).mutation(async ({ ctx, input }) => requireRecord(await createInventoryItem(input, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }), "صنف المخزون")),
     update: permissionProcedure("inventory").input(z.object({ id: z.number().int().positive(), data: inventoryItemInput.partial() })).mutation(async ({ ctx, input }) => requireRecord(await updateInventoryItem(input.id, input.data, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }), "صنف المخزون")),
     request: permissionProcedure("inventory").input(inventoryRequestInput).mutation(async ({ ctx, input }) => { try { return requireRecord(await createInventoryRequest(input, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }), "طلب الصرف"); } catch (error) { if (error instanceof Error && error.message.includes("صنف")) throw new TRPCError({ code: "BAD_REQUEST", message: error.message }); throw error; } }),
-    decideRequest: permissionProcedure("finance").input(z.object({ id: z.number().int().positive(), approved: z.boolean(), notes: z.string().max(4000).optional() })).mutation(async ({ ctx, input }) => { try { return requireRecord(await decideInventoryRequest(input.id, input.approved, input.notes, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }), "قرار طلب الصرف"); } catch (error) { if (error instanceof Error && error.message.includes("مسبقًا")) throw new TRPCError({ code: "CONFLICT", message: error.message }); if (error instanceof Error && /(الرصيد|الكمية|رصيد الصنف)/.test(error.message)) throw new TRPCError({ code: "PRECONDITION_FAILED", message: error.message }); throw error; } }),
+    decideRequest: permissionProcedure("finance").input(z.object({ id: z.number().int().positive(), approved: z.boolean(), notes: z.string().max(4000).optional() })).mutation(async ({ ctx, input }) => { try { return requireRecord(await decideInventoryRequest(input.id, input.approved, input.notes, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }), "قرار طلب الصرف"); } catch (error) { if (error instanceof Error && error.message.includes("مسبقًا")) throw new TRPCError({ code: "CONFLICT", message: error.message }); throw error; } }),
     issueRequest: permissionProcedure("inventory").input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => { try { return requireRecord(await issueInventoryRequest(input.id, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }), "صرف الطلب"); } catch (error) { if (error instanceof Error && /رصيد|صرف|صنف/.test(error.message)) throw new TRPCError({ code: "PRECONDITION_FAILED", message: error.message }); throw error; } }),
     move: permissionProcedure("inventory").input(inventoryMovementInput).mutation(async ({ ctx, input }) => { try { return requireRecord(await recordInventoryMovement(input, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }), "حركة المخزون"); } catch (error) { if (error instanceof Error && /رصيد|كمية|الحد المدعوم/.test(error.message)) throw new TRPCError({ code: "BAD_REQUEST", message: error.message }); throw error; } }),
     archive: permissionProcedure("inventory").input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => { try { return { success: await archiveInventoryItem(input.id, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }) }; } catch (error) { if (error instanceof Error && error.message.includes("رصيد متبقٍ")) throw new TRPCError({ code: "PRECONDITION_FAILED", message: error.message }); throw error; } }),
@@ -268,14 +311,34 @@ export const appRouter = router({
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user ? { ...opts.ctx.user, passwordHash: undefined } : undefined),
     login: publicProcedure.input(z.object({ username: z.string().min(3).max(40), password: z.string().min(1).max(200) })).mutation(async ({ ctx, input }) => {
-      const user = await authenticateLocalUser(input.username, input.password);
-      if (!user) throw new TRPCError({ code: "UNAUTHORIZED", message: "اسم المستخدم أو كلمة المرور غير صحيحة" });
-      const token = await sdk.createSessionToken(user.openId, { name: user.name || user.username || "", expiresInMs: ONE_YEAR_MS });
+      const username = input.username.trim().toLowerCase();
+      const ip = callerIp(ctx);
+
+      // Throttle before hashing. Password verification is deliberately slow, so
+      // unlimited attempts are both a credential-stuffing vector and a way to
+      // stall the event loop for every other request.
+      const retryAfterMs = loginRateLimit.retryAfterMs(ip, username);
+      if (retryAfterMs > 0) {
+        throw new TRPCError({
+          code: "TOO_MANY_REQUESTS",
+          message: `تم تجاوز عدد محاولات الدخول المسموح. أعد المحاولة بعد ${Math.ceil(retryAfterMs / 60000)} دقيقة.`,
+        });
+      }
+
+      const user = await authenticateLocalUser(username, input.password);
+      if (!user) {
+        await recordLoginAttempt({ username, ip, userAgent: ctx.userAgent ?? null, success: false });
+        throw new TRPCError({ code: "UNAUTHORIZED", message: "اسم المستخدم أو كلمة المرور غير صحيحة" });
+      }
+
+      loginRateLimit.reset(ip, username);
+      await recordLoginAttempt({ username, ip, userAgent: ctx.userAgent ?? null, success: true, userId: user.id });
+      const token = await sdk.createSessionToken(user.openId, { name: user.name || user.username || "", expiresInMs: ONE_YEAR_MS, sessionVersion: user.sessionVersion });
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.cookie(COOKIE_NAME, token, { ...cookieOptions, maxAge: ONE_YEAR_MS, sameSite: "lax" });
       return { ...user, passwordHash: undefined };
     }),
-    logout: publicProcedure.mutation(({ ctx }) => {
+    logout: publicProcedure.mutation(async ({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       // Match the cookie attributes used by local login and production OAuth
       // so the browser removes the actual session instead of retaining it.
@@ -284,6 +347,15 @@ export const appRouter = router({
         maxAge: -1,
         sameSite: cookieOptions.secure ? "none" : "lax",
       });
+      if (ctx.user) {
+        await recordLoginAttempt({
+          username: ctx.user.username ?? ctx.user.name ?? "—",
+          ip: callerIp(ctx),
+          userAgent: ctx.userAgent ?? null,
+          success: true,
+          userId: ctx.user.id,
+        });
+      }
       return { success: true } as const;
     }),
   }),
@@ -339,6 +411,13 @@ export const appRouter = router({
   }),
   maintenance: router({
     list: permissionProcedure("maintenance").query(async ({ ctx }) => (await listMaintenanceRequests() ?? []).map(row => maintenanceRecordForViewer(row, hasModulePermission(ctx.user, "finance"), hasModulePermission(ctx.user, "vehicles")))),
+    costForPeriod: permissionProcedure("maintenance").input(z.object({ from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) })).query(async ({ ctx, input }) => {
+      requireReferencePermission(ctx.user, "finance");
+      if (!isValidReportPeriod(input.from, input.to)) throw new TRPCError({ code: "BAD_REQUEST", message: "أدخل نطاقًا صحيحًا للتكلفة" });
+      const cost = await getMaintenanceCostForPeriod(input.from, input.to);
+      if (cost === null) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "تعذر تحميل تكلفة الصيانة" });
+      return cost;
+    }),
     create: permissionProcedure("maintenance").input(maintenanceInput).mutation(async ({ ctx, input }) => { if (input.vehicleId !== null) requireReferencePermission(ctx.user, "vehicles"); if (input.cost !== undefined || input.laborCost !== undefined || input.partsCost !== undefined || input.receiptName !== undefined || input.receiptUrl !== undefined) requireReferencePermission(ctx.user, "finance"); if (!input.quoteName || !input.quoteUrl || input.estimatedCost + input.quotedPartsCost <= 0) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "أرفق عرض سعر الورشة وأدخل قيمة عرض الورشة أو قطع الغيار" }); if (input.cost !== undefined || input.laborCost !== undefined || input.partsCost !== undefined || input.receiptName !== undefined || input.receiptUrl !== undefined) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "المصروف الفعلي يسجل بعد اعتماد المالية" }); const record = requireRecord(await createMaintenanceRequest({ ...input, reportedBy: ctx.user.name || ctx.user.username || "—", workflowStage: "اعتماد", approvalStatus: "بانتظار الاعتماد" }, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }), "طلب الصيانة"); return maintenanceRecordForViewer(record, hasModulePermission(ctx.user, "finance"), hasModulePermission(ctx.user, "vehicles")); }),
     update: permissionProcedure("maintenance").input(z.object({ id: z.number().int().positive(), data: maintenanceInput.omit({ status: true, reportedBy: true }).partial() })).mutation(async ({ ctx, input }) => {
       if (input.data.cost !== undefined || input.data.laborCost !== undefined || input.data.partsCost !== undefined || input.data.receiptName !== undefined || input.data.receiptUrl !== undefined) requireReferencePermission(ctx.user, "finance");
@@ -356,7 +435,7 @@ export const appRouter = router({
       return maintenanceRecordForViewer(record, hasModulePermission(ctx.user, "finance"), hasModulePermission(ctx.user, "vehicles"));
     }),
     advance: permissionProcedure("maintenance").input(z.object({ id: z.number().int().positive(), toStage: z.enum(maintenanceStages) })).mutation(async ({ ctx, input }) => maintenanceRecordForViewer(requireRecord(await advanceMaintenanceRequest(input.id, input.toStage as MaintenanceStage, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }), "طلب الصيانة"), hasModulePermission(ctx.user, "finance"), hasModulePermission(ctx.user, "vehicles"))),
-    decideApproval: permissionProcedure("finance").input(z.object({ id: z.number().int().positive(), approved: z.boolean(), fundingType: z.enum(["عهدة", "تحويل مباشر"]).optional(), fundingReference: z.string().max(120).optional(), fundingAmount: z.number().int().positive().optional(), fundingRecipient: z.string().max(160).optional(), notes: z.string().max(4000).optional() })).mutation(async ({ ctx, input }) => { if (input.approved && (!input.fundingType || !input.fundingReference || !input.fundingAmount || !input.fundingRecipient)) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "حدد طريقة الصرف وأدخل رقم العملية والمبلغ والجهة المستلمة" }); const record = requireRecord(await decideMaintenanceApproval(input.id, input.approved, input, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }), "قرار اعتماد الصيانة"); return hasModulePermission(ctx.user, "maintenance") ? maintenanceRecordForViewer(record, true, hasModulePermission(ctx.user, "vehicles")) : { success: true }; }),
+    decideApproval: permissionProcedure("finance").input(z.object({ id: z.number().int().positive(), approved: z.boolean(), fundingType: z.enum(["عهدة", "تحويل مباشر"]).optional(), fundingReference: z.string().max(120).optional(), fundingAmount: positiveMoneyInput.optional(), fundingRecipient: z.string().max(160).optional(), notes: z.string().max(4000).optional() })).mutation(async ({ ctx, input }) => { if (input.approved && (!input.fundingType || !input.fundingReference || !input.fundingAmount || !input.fundingRecipient)) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "حدد طريقة الصرف وأدخل رقم العملية والمبلغ والجهة المستلمة" }); const record = requireRecord(await decideMaintenanceApproval(input.id, input.approved, input, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }), "قرار اعتماد الصيانة"); return hasModulePermission(ctx.user, "maintenance") ? maintenanceRecordForViewer(record, true, hasModulePermission(ctx.user, "vehicles")) : { success: true }; }),
     settleAdvance: permissionProcedure("finance").input(z.object({ id: z.number().int().positive(), reference: z.string().min(1).max(120) })).mutation(async ({ ctx, input }) => { const record = requireRecord(await settleMaintenanceAdvance(input.id, input.reference, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }), "تسوية العهدة"); return hasModulePermission(ctx.user, "maintenance") ? maintenanceRecordForViewer(record, true, hasModulePermission(ctx.user, "vehicles")) : { success: true }; }),
     history: permissionProcedure("maintenance").input(z.object({ id: z.number().int().positive() })).query(async ({ ctx, input }) => (await listMaintenanceEvents(input.id) ?? []).map(event => maintenanceEventForViewer(event, hasModulePermission(ctx.user, "finance")))),
     archive: permissionProcedure("maintenance").input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => { requireReferencePermission(ctx.user, "vehicles"); return { success: await archiveMaintenanceRequest(input.id, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }) }; }),
@@ -485,10 +564,303 @@ export const appRouter = router({
     create: adminProcedure.input(userCreateInput).mutation(async ({ input }) => requireRecord(await createLocalUser(input), "المستخدم")),
     updateRole: adminProcedure.input(z.object({ id: z.number().int().positive(), role: z.enum(["user", "admin"]) })).mutation(async ({ input }) => { try { return requireRecord(await updateUserRole(input.id, input.role), "المستخدم"); } catch (error) { if (error instanceof LastActiveAdminDemotionError) throw new TRPCError({ code: "FORBIDDEN", message: error.message }); throw error; } }),
     updateAccess: adminProcedure.input(z.object({ id: z.number().int().positive(), permissions: z.array(z.string().max(80)).max(30).optional(), password: z.string().min(8).max(200).optional() })).mutation(async ({ input }) => requireRecord(await updateUserAccess(input.id, input), "بيانات المستخدم")),
+    // Invalidate every token a user holds. Password, role and permission
+    // changes already do this implicitly; this covers a lost device or a token
+    // that may have leaked.
+    revokeSessions: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await revokeUserSessions(input.id) })),
   }),
   settingsCatalog: router({ list: protectedProcedure.input(z.object({ category: z.string().optional() }).optional()).query(({ input }) => listSettings(input?.category)), create: permissionProcedure("settings").input(settingInput).mutation(async ({ input }) => requireRecord(await upsertSetting(input), "القيمة المرجعية")), update: permissionProcedure("settings").input(z.object({ id: z.number().int().positive(), data: settingInput.partial() })).mutation(async ({ input }) => requireRecord(await updateSetting(input.id, input.data), "القيمة المرجعية")), archive: permissionProcedure("settings").input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archiveSetting(input.id) })),
     delete: permissionProcedure("settings").input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await deleteSetting(input.id) })) }),
   audit: router({ list: adminProcedure.query(() => listAuditLogs()), record: adminProcedure.input(z.object({ action: z.string().max(80), entityType: z.string().max(80), entityId: z.number().int().positive().optional(), details: z.string().max(4000).optional() })).mutation(({ ctx, input }) => createAuditLog({ ...input, userId: ctx.user?.id ?? null })) }),
+  procurement: router({
+    listRequests: permissionProcedure("inventory").query(async () => listPurchaseRequests() ?? []),
+    getRequest: permissionProcedure("inventory").input(z.object({ id: z.number().int().positive() })).query(async ({ input }) => getPurchaseRequest(input.id)),
+    createRequest: permissionProcedure("inventory").input(purchaseRequestInput).mutation(async ({ ctx, input }) => {
+      return requireRecord(await createPurchaseRequest({
+        ...input,
+        requestedByUserId: ctx.user.id,
+        requestedByName: ctx.user.name || ctx.user.username || "—",
+      }), "طلب الشراء");
+    }),
+    updateRequest: permissionProcedure("inventory").input(z.object({ id: z.number().int().positive(), data: purchaseRequestInput.partial() })).mutation(async ({ input }) => {
+      return requireRecord(await updatePurchaseRequest(input.id, input.data), "طلب الشراء");
+    }),
+    archiveRequest: permissionProcedure("inventory").input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => {
+      return { success: await archivePurchaseRequest(input.id) };
+    }),
+    listQuotes: permissionProcedure("inventory").input(z.object({ requestId: z.number().int().positive() })).query(async ({ input }) => {
+      return listPurchaseQuotes(input.requestId) ?? [];
+    }),
+    createQuote: permissionProcedure("inventory").input(purchaseQuoteInput).mutation(async ({ input }) => {
+      return requireRecord(await createPurchaseQuote(input), "عرض السعر");
+    }),
+    updateQuote: permissionProcedure("inventory").input(z.object({ id: z.number().int().positive(), data: purchaseQuoteInput.partial() })).mutation(async ({ input }) => {
+      return requireRecord(await updatePurchaseQuote(input.id, input.data), "عرض السعر");
+    }),
+    selectQuote: permissionProcedure("finance").input(z.object({
+      requestId: z.number().int().positive(),
+      quoteId: z.number().int().positive(),
+      selectionReason: z.string().min(3).max(300),
+    })).mutation(async ({ ctx, input }) => {
+      return requireRecord(await selectPurchaseQuote(
+        input.requestId,
+        input.quoteId,
+        input.selectionReason,
+        { userId: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }
+      ), "اعتماد عرض السعر");
+    }),
+    deleteQuote: permissionProcedure("inventory").input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => {
+      return { success: await deletePurchaseQuote(input.id) };
+    }),
+    issuePoAndPayable: permissionProcedure("finance").input(z.object({
+      requestId: z.number().int().positive(),
+      dueDate: z.string().optional(),
+      notes: z.string().optional(),
+    })).mutation(async ({ ctx, input }) => {
+      return requireRecord(await issuePurchaseOrder(
+        input.requestId,
+        { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" },
+        { dueDate: input.dueDate, notes: input.notes }
+      ), "أمر الشراء والمستحق");
+    }),
+  }),
+
+  accounting: router({
+    seedStandardAccounts: permissionProcedure("finance").input(z.object({
+      branchId: z.number().int().positive().optional(),
+    }).optional()).mutation(async ({ input }) => {
+      return seedAccountsIfEmpty(input?.branchId);
+    }),
+
+    listAccounts: permissionProcedure("finance").input(z.object({
+      branchId: z.number().int().positive().optional(),
+      type: z.enum(["asset", "liability", "equity", "revenue", "expense"]).optional(),
+      isActive: z.number().int().min(0).max(1).optional(),
+    }).optional()).query(async ({ input }) => {
+      return listAccounts(input);
+    }),
+
+    createAccount: permissionProcedure("finance").input(z.object({
+      code: z.string().min(1).max(32),
+      name: z.string().min(1).max(200),
+      type: z.enum(["asset", "liability", "equity", "revenue", "expense"]),
+      normalBalance: z.enum(["debit", "credit"]),
+      parentId: z.number().int().positive().nullable().optional(),
+      level: z.number().int().min(1).max(10).default(1),
+      isActive: z.number().int().min(0).max(1).default(1),
+      branchId: z.number().int().positive().nullable().optional(),
+      description: z.string().max(500).nullable().optional(),
+    })).mutation(async ({ input }) => {
+      return requireRecord(await createAccount({
+        code: input.code,
+        name: input.name,
+        type: input.type,
+        normalBalance: input.normalBalance,
+        parentId: input.parentId ?? null,
+        level: input.level,
+        isActive: input.isActive,
+        branchId: input.branchId ?? null,
+        description: input.description ?? null,
+      }), "الحساب");
+    }),
+
+    updateAccount: permissionProcedure("finance").input(z.object({
+      id: z.number().int().positive(),
+      data: z.object({
+        name: z.string().min(1).max(200).optional(),
+        isActive: z.number().int().min(0).max(1).optional(),
+        description: z.string().max(500).nullable().optional(),
+      }),
+    })).mutation(async ({ input }) => {
+      return requireRecord(await updateAccount(input.id, input.data), "الحساب");
+    }),
+
+    archiveAccount: permissionProcedure("finance").input(z.object({
+      id: z.number().int().positive(),
+    })).mutation(async ({ input }) => {
+      return { success: await archiveAccount(input.id) };
+    }),
+
+    listPeriods: permissionProcedure("finance").query(async () => {
+      return listFiscalPeriods();
+    }),
+
+    createPeriod: permissionProcedure("finance").input(z.object({
+      name: z.string().min(1).max(120),
+      startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "تاريخ البداية YYYY-MM-DD"),
+      endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "تاريخ النهاية YYYY-MM-DD"),
+    })).mutation(async ({ input }) => {
+      return requireRecord(await createFiscalPeriod(input), "الفترة المالية");
+    }),
+
+    closePeriod: permissionProcedure("finance").input(z.object({
+      id: z.number().int().positive(),
+    })).mutation(async ({ ctx, input }) => {
+      return requireRecord(await closeFiscalPeriod(input.id, ctx.user.id), "إقفال الفترة المالية");
+    }),
+
+    reopenPeriod: adminProcedure.input(z.object({
+      id: z.number().int().positive(),
+    })).mutation(async ({ input }) => {
+      return requireRecord(await reopenFiscalPeriod(input.id), "إعادة فتح الفترة المالية");
+    }),
+
+    listEntries: permissionProcedure("finance").input(z.object({
+      branchId: z.number().int().positive().optional(),
+      status: z.enum(["draft", "posted", "reversed"]).optional(),
+      startDate: z.string().optional(),
+      endDate: z.string().optional(),
+      sourceType: z.string().optional(),
+    }).optional()).query(async ({ input }) => {
+      return listJournalEntries(input);
+    }),
+
+    getEntry: permissionProcedure("finance").input(z.object({
+      id: z.number().int().positive(),
+    })).query(async ({ input }) => {
+      const result = await getJournalEntry(input.id);
+      if (!result) throw new TRPCError({ code: "NOT_FOUND", message: "القيد غير موجود" });
+      return result;
+    }),
+
+    createEntry: permissionProcedure("finance").input(z.object({
+      entryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "تاريخ القيد YYYY-MM-DD"),
+      description: z.string().min(3).max(1000),
+      reference: z.string().max(120).optional(),
+      sourceType: z.string().max(40).optional(),
+      sourceId: z.number().int().positive().optional(),
+      branchId: z.number().int().positive().optional(),
+      fiscalPeriodId: z.number().int().positive().nullable().optional(),
+      lines: z.array(z.object({
+        accountId: z.number().int().positive(),
+        debit: moneyInput.default(0),
+        credit: moneyInput.default(0),
+        description: z.string().max(300).optional(),
+        branchId: z.number().int().positive().optional(),
+        vehicleId: z.number().int().positive().nullable().optional(),
+        projectId: z.number().int().positive().nullable().optional(),
+        contractId: z.number().int().positive().nullable().optional(),
+        driverId: z.number().int().positive().nullable().optional(),
+        clientId: z.number().int().positive().nullable().optional(),
+      })).min(2),
+    })).mutation(async ({ ctx, input }) => {
+      return requireRecord(await createJournalEntry({
+        ...input,
+        createdBy: ctx.user.id,
+      }), "قيد اليومية");
+    }),
+
+    reverseEntry: permissionProcedure("finance").input(z.object({
+      id: z.number().int().positive(),
+      reason: z.string().max(300).optional(),
+    })).mutation(async ({ ctx, input }) => {
+      return requireRecord(await reverseJournalEntryRecord(input.id, ctx.user.id, input.reason), "عكس القيد");
+    }),
+
+    accountLedger: permissionProcedure("finance").input(z.object({
+      accountId: z.number().int().positive(),
+      startDate: z.string().optional(),
+      endDate: z.string().optional(),
+      branchId: z.number().int().positive().optional(),
+    })).query(async ({ input }) => {
+      const report = await getAccountLedger(input.accountId, {
+        startDate: input.startDate,
+        endDate: input.endDate,
+        branchId: input.branchId,
+      });
+      if (!report) throw new TRPCError({ code: "NOT_FOUND", message: "تعذر توليد كشف حساب الأستاذ" });
+      return report;
+    }),
+
+    trialBalance: permissionProcedure("finance").input(z.object({
+      asOfDate: z.string().optional(),
+      branchId: z.number().int().positive().optional(),
+    }).optional()).query(async ({ input }) => {
+      return requireRecord(await getTrialBalance(input), "ميزان المراجعة");
+    }),
+
+    incomeStatement: permissionProcedure("finance").input(z.object({
+      startDate: z.string(),
+      endDate: z.string(),
+      branchId: z.number().int().positive().optional(),
+    })).query(async ({ input }) => {
+      return requireRecord(await getIncomeStatement(input), "قائمة الدخل");
+    }),
+
+    balanceSheet: permissionProcedure("finance").input(z.object({
+      asOfDate: z.string().optional(),
+      branchId: z.number().int().positive().optional(),
+    }).optional()).query(async ({ input }) => {
+      return requireRecord(await getBalanceSheet(input), "الميزانية العمومية");
+    }),
+  }),
+
+  invoices: router({
+    list: permissionProcedure("finance").input(z.object({
+      branchId: z.number().int().positive().optional(),
+      invoiceType: z.enum(["standard", "simplified"]).optional(),
+      documentType: z.enum(["invoice", "credit_note", "debit_note"]).optional(),
+      zatcaStatus: z.enum(["pending", "reported", "cleared", "rejected"]).optional(),
+      startDate: z.string().optional(),
+      endDate: z.string().optional(),
+      clientId: z.number().int().positive().optional(),
+      contractId: z.number().int().positive().optional(),
+    }).optional()).query(async ({ input }) => {
+      return listTaxInvoices(input);
+    }),
+
+    get: permissionProcedure("finance").input(z.object({
+      id: z.number().int().positive(),
+    })).query(async ({ input }) => {
+      const inv = await getTaxInvoice(input.id);
+      if (!inv) throw new TRPCError({ code: "NOT_FOUND", message: "الفاتورة غير موجودة" });
+      return inv;
+    }),
+
+    create: permissionProcedure("finance").input(z.object({
+      invoiceType: z.enum(["standard", "simplified"]).default("simplified"),
+      documentType: z.enum(["invoice", "credit_note", "debit_note"]).default("invoice"),
+      issueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "تاريخ الإصدار بصيغة YYYY-MM-DD"),
+      issueTime: z.string().optional(),
+      sellerName: z.string().min(1, "اسم المورّد إلزامي"),
+      sellerVatNumber: z.string().regex(/^\d{15}$/, "الرقم الضريبي للمنشأة يجب أن يتكون من 15 رقم"),
+      sellerAddress: z.string().optional(),
+      sellerBuildingNo: z.string().optional(),
+      sellerPostalCode: z.string().optional(),
+      sellerCity: z.string().optional(),
+      sellerDistrict: z.string().optional(),
+      buyerName: z.string().min(1, "اسم العميل إلزامي"),
+      buyerVatNumber: z.string().optional(),
+      buyerAddress: z.string().optional(),
+      buyerCity: z.string().optional(),
+      branchId: z.number().int().positive().optional(),
+      contractId: z.number().int().positive().nullable().optional(),
+      clientId: z.number().int().positive().nullable().optional(),
+      claimId: z.number().int().positive().nullable().optional(),
+      vehicleId: z.number().int().positive().nullable().optional(),
+      originalInvoiceId: z.number().int().positive().nullable().optional(),
+      notes: z.string().optional(),
+      postToAccounting: z.boolean().default(true),
+      lines: z.array(z.object({
+        itemDescription: z.string().min(1, "وصف البند إلزامي"),
+        quantity: z.number().positive(),
+        unitPrice: moneyInput,
+        discount: moneyInput.optional(),
+        vatRate: z.number().min(0).max(100).optional(),
+        vatCategory: z.enum(["S", "Z", "E"]).optional(),
+      })).min(1, "يجب إضافة بند واحد على الأقل"),
+    })).mutation(async ({ input }) => {
+      return requireRecord(await createTaxInvoice(input), "الفاتورة الضريبية");
+    }),
+
+    vatDeclaration: permissionProcedure("finance").input(z.object({
+      startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      branchId: z.number().int().positive().optional(),
+    })).query(async ({ input }) => {
+      return requireRecord(await getVatDeclaration(input), "إقرار ضريبة القيمة المضافة");
+    }),
+  }),
 });
 
 export type AppRouter = typeof appRouter;

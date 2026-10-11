@@ -18,18 +18,28 @@ function Router() {
       <Route path="/dashboard/vehicles" component={FleetDashboard} />
       <Route path="/dashboard/projects" component={FleetDashboard} />
       <Route path="/dashboard/maintenance" component={FleetDashboard} />
+      <Route path="/dashboard/accidents" component={FleetDashboard} />
+      <Route path="/dashboard/inventory" component={FleetDashboard} />
       <Route path="/dashboard/documents" component={FleetDashboard} />
       <Route path="/dashboard/drivers" component={FleetDashboard} />
       <Route path="/dashboard/employees" component={FleetDashboard} />
       <Route path="/dashboard/clients" component={FleetDashboard} />
       <Route path="/dashboard/financial" component={FleetDashboard} />
       <Route path="/dashboard/financial/:rest*" component={FleetDashboard} />
+      <Route path="/dashboard/accounting" component={FleetDashboard} />
+      <Route path="/dashboard/accounting/:rest*" component={FleetDashboard} />
+      <Route path="/dashboard/invoices" component={FleetDashboard} />
+      <Route path="/dashboard/invoices/:rest*" component={FleetDashboard} />
       <Route path="/dashboard/payables" component={FleetDashboard} />
       <Route path="/dashboard/reports" component={FleetDashboard} />
       <Route path="/dashboard/settings/:rest*" component={FleetDashboard} />
       <Route path="/dashboard/settings" component={FleetDashboard} />
+      <Route path="/dashboard/:rest*" component={FleetDashboard} />
+      <Route path="/accounting" component={FleetDashboard} />
+      <Route path="/accidents" component={FleetDashboard} />
+      <Route path="/inventory" component={FleetDashboard} />
       <Route path="/404" component={NotFound} />
-      <Route component={NotFound} />
+      <Route component={FleetDashboard} />
     </Switch>
   );
 }

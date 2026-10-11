@@ -7,7 +7,7 @@ function zeroRecord<T extends ReportRow>(record: T): T {
   return Object.fromEntries(Object.keys(record).map(key => [key, 0])) as T;
 }
 
-export function scopeCompanyReport<T extends ReportRow>(report: T, permissions: string[]): T {
+export function scopeCompanyReport<T extends ReportRow>(report: T, permissions: string[], options: { canViewTeamTasks?: boolean } = {}): T {
   const allowed = new Set(permissions);
   const finance = allowed.has("finance");
   const clients = allowed.has("clients");
@@ -25,7 +25,7 @@ export function scopeCompanyReport<T extends ReportRow>(report: T, permissions: 
     const module = documentModuleByType[String(row.entityType) as keyof typeof documentModuleByType];
     return module !== undefined && allowed.has(module);
   };
-  const { payableSummaryRows = [], documentSummaryRows = [], operatingExpenses = [], ...publicDetails } = details;
+  const { payableSummaryRows = [], documentSummaryRows = [], operatingExpenses = [] } = details;
   const visiblePayableSummaries = payables ? (payableSummaryRows as ReportRow[]).filter(canViewPayable) : [];
   const visibleDocumentSummaries = allowed.has("documents")
     ? (documentSummaryRows as ReportRow[]).filter(canViewDocumentSummary)
@@ -51,7 +51,6 @@ export function scopeCompanyReport<T extends ReportRow>(report: T, permissions: 
     : [];
 
   const scopedDetails = {
-    ...publicDetails,
     receivablesAging: finance ? ((details.receivablesAging as ReportRow[] | undefined) ?? []).map(redactClient) : [],
     payments: finance ? ((details.payments as ReportRow[] | undefined) ?? []).map(redactClient) : [],
     claims: finance ? (details.claims as ReportRow[]).map(redactClient) : [],
@@ -64,6 +63,14 @@ export function scopeCompanyReport<T extends ReportRow>(report: T, permissions: 
     clientProfitability: finance && clients ? details.clientProfitability : [],
     employees: allowed.has("employees") ? (details.employees as ReportRow[]) : [],
     drivers: allowed.has("drivers") ? (details.drivers as ReportRow[]) : [],
+    inventoryMovements: allowed.has("inventory") ? (details.inventoryMovements as ReportRow[] ?? []) : [],
+    accidents: allowed.has("accidents") ? (details.accidents as ReportRow[] ?? []).map(row => {
+      if (finance) return row;
+      const { estimatedRepairCost: _estimatedRepairCost, settlementAmount: _settlementAmount, ...operationalRow } = row;
+      return operationalRow;
+    }) : [],
+    documents: allowed.has("documents") ? (details.documents as ReportRow[] ?? []).filter(canViewDocumentSummary).map(({ entityId: _entityId, fileUrl: _fileUrl, ...row }) => row) : [],
+    tasks: options.canViewTeamTasks ? (details.tasks as ReportRow[] ?? []) : [],
     maintenance: !maintenance ? [] : (details.maintenance as ReportRow[]).map(row => {
       const visible = { ...row };
       if (!finance) {
@@ -126,6 +133,12 @@ export function scopeCompanyReport<T extends ReportRow>(report: T, permissions: 
       drivers: allowed.has("drivers") ? (report.people as ReportRow).drivers : 0,
       availableDrivers: allowed.has("drivers") ? (report.people as ReportRow).availableDrivers : 0,
     },
+    inventory: allowed.has("inventory") ? report.inventory : report.inventory ? zeroRecord(report.inventory as ReportRow) : { itemCount: 0, lowStockCount: 0, emptyStockCount: 0, receivedMovements: 0, issuedMovements: 0 },
+    accidents: allowed.has("accidents") && report.accidents ? {
+      ...report.accidents as ReportRow,
+      ...(!finance ? { estimatedRepairCostInPeriod: 0, settlementAmountInPeriod: 0 } : {}),
+    } : report.accidents ? zeroRecord(report.accidents as ReportRow) : { reportedInPeriod: 0, openNow: 0, estimatedRepairCostInPeriod: 0, settlementAmountInPeriod: 0 },
+    taskSummary: options.canViewTeamTasks && report.taskSummary ? report.taskSummary : report.taskSummary ? zeroRecord(report.taskSummary as ReportRow) : { dueInPeriod: 0, completedInPeriod: 0, openInPeriod: 0, overdueNow: 0 },
     details: scopedDetails,
   };
   return scoped as T;

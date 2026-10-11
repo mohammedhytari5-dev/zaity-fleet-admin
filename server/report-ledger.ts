@@ -2,7 +2,9 @@ export type IncomingReportPayment = { id: number; amount: number; contractId: nu
 export type IncomingReportClaim = { id: number; contractId: number | null };
 
 export function incomingPaymentRowsForReport(
-  payments: Array<{ id: number; amount: number; paidAt: string; method: string; reference: string; contractId: number | null; claimId: number | null; clientId: number | null }>,
+  // `paidAt` is a nullable DATE column now; NULL means "not set" and is rendered
+  // as the '—' placeholder used elsewhere in the UI.
+  payments: Array<{ id: number; amount: number; paidAt: string | null; method: string; reference: string; contractId: number | null; claimId: number | null; clientId: number | null }>,
   claims: Array<{ id: number; ref: string; client: string; clientId: number | null; contract: string; contractId: number | null }>,
   contracts: Array<{ id: number; ref: string; client: string; clientId: number | null }>,
   clients: Array<{ id: number; name: string }>,
@@ -17,7 +19,7 @@ export function incomingPaymentRowsForReport(
     const clientId = payment.clientId ?? claim?.clientId ?? contract?.clientId ?? null;
     return {
       id: payment.id,
-      paidAt: payment.paidAt,
+      paidAt: payment.paidAt ?? "—",
       clientId,
       client: clientId === null ? claim?.client ?? contract?.client ?? "—" : clientById.get(clientId) ?? claim?.client ?? contract?.client ?? "—",
       contract: contract?.ref ?? claim?.contract ?? "—",

@@ -1,5 +1,24 @@
 import { describe, expect, it } from "vitest";
-import { nextAccidentStage } from "./accident-domain";
+import { nextAccidentStage, normalizeNajmReportNo } from "./accident-domain";
+
+describe("Najm report number normalisation", () => {
+  it("treats a missing report number as SQL NULL instead of a sentinel", () => {
+    // Two unreported accidents must coexist under the UNIQUE index, which is
+    // only possible when both store NULL (MySQL treats NULLs as distinct).
+    expect(normalizeNajmReportNo(null)).toBeNull();
+    expect(normalizeNajmReportNo(undefined)).toBeNull();
+    expect(normalizeNajmReportNo("")).toBeNull();
+    expect(normalizeNajmReportNo("   ")).toBeNull();
+    expect(normalizeNajmReportNo("—")).toBeNull();
+    expect(normalizeNajmReportNo(" — ")).toBeNull();
+  });
+
+  it("keeps a real report number and trims surrounding whitespace", () => {
+    expect(normalizeNajmReportNo("NJ-123")).toBe("NJ-123");
+    expect(normalizeNajmReportNo("  NJ-123  ")).toBe("NJ-123");
+    expect(normalizeNajmReportNo("1234567890")).toBe("1234567890");
+  });
+});
 
 describe("accident workflow", () => {
   it("requires a Najm reference and fault percentage before estimating repairs", () => {

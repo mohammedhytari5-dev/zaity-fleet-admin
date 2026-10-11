@@ -10,10 +10,12 @@ describe("maintenance finance visibility", () => {
       receiptUrl: "private invoice",
       fundingReference: "BANK-123",
       advanceSettlementReference: "SETTLE-456",
+      advanceInvoiceTotal: 400,
+      advanceVariance: 100,
     };
 
     expect(maintenanceRecordForViewer(record, false)).toEqual({ workflowStage: "تنفيذ", estimatedCost: 300 });
-    expect(maintenanceRecordForViewer(record, true)).toMatchObject({ cost: "250 SAR", fundingReference: "BANK-123" });
+    expect(maintenanceRecordForViewer(record, true)).toMatchObject({ cost: "250 SAR", fundingReference: "BANK-123", advanceInvoiceTotal: 400, advanceVariance: 100 });
     expect(record.cost).toBe("250 SAR");
   });
 

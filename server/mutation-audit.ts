@@ -18,7 +18,19 @@ const fieldLabels: Record<string, string> = {
 function mutationDetails(procedure: string, input: Record<string, unknown>) {
   if (["archive", "delete"].includes(procedure)) return "تمت أرشفة السجل أو حذفه";
   if (procedure === "create") return "تم إنشاء سجل جديد";
-  if (["updateStatus", "status", "updateRole"].includes(procedure)) return "تم تغيير الحالة أو الدور";
+  // Security-relevant account changes record what actually changed. Recording
+  // only field names made it impossible to tell who was promoted, or to what.
+  if (procedure === "updateRole") return `تم تغيير الدور إلى: ${String(input.role ?? "—")}`;
+  if (procedure === "updateAccess") {
+    const changes: string[] = [];
+    if ("password" in input) changes.push("تصفير كلمة المرور");
+    if ("permissions" in input) changes.push(`تعديل الصلاحيات إلى: ${Array.isArray(input.permissions) ? input.permissions.join("، ") || "(بلا صلاحيات)" : "—"}`);
+    return changes.length
+      ? `تم ${changes.join(" و")} — وأُلغيت كل الجلسات السابقة`
+      : "تم تحديث بيانات المستخدم";
+  }
+  if (procedure === "revokeSessions") return "تم إلغاء كل جلسات المستخدم";
+  if (["updateStatus", "status"].includes(procedure)) return `تم تغيير الحالة إلى: ${String(input.status ?? "—")}`;
   const payload = input.data && typeof input.data === "object" && !Array.isArray(input.data)
     ? input.data as Record<string, unknown>
     : input;

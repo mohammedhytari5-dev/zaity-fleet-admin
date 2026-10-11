@@ -1,18 +1,37 @@
 import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
-import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { randomBytes, scrypt, timingSafeEqual } from "node:crypto";
+import { promisify } from "node:util";
 import { drizzle } from "drizzle-orm/mysql2";
 import { createPool } from "mysql2";
 import { getMysqlConnectionOptions } from "./db-connection";
-import { AuditLog, Claim, Client, Contract, ContractItem, Document, Driver, Employee, InsertEmployee, InsertClaim, InsertClient, InsertContract, InsertContractItem, InsertDocument, InsertDriver, InsertMaintenanceRequest, InsertUser, InsertVehicle, InsertVehicleExpense, VehicleExpense, InsertVehicleRevenue, VehicleRevenue, MaintenanceRequest, User, Vehicle, auditLogs, claims, clientRepresentatives, clients, contractItems, contracts, documents, drivers, employees, maintenanceEvents, maintenanceRequests, notifications, notificationReads, payments, vehicleExpenses, vehicleRevenues, settingCatalog, tasks, users, vehicles, InventoryItem, InsertInventoryItem, InventoryMovement, InsertInventoryMovement, inventoryItems, inventoryMovements, InventoryRequest, inventoryRequests, inventoryRequestItems, Accident, InsertAccident, accidents, AccidentEvent, accidentEvents } from "../drizzle/schema";
+import { AuditLog, Claim, Client, Contract, ContractItem, Document, Driver, Employee, InsertEmployee, InsertClaim, InsertClient, InsertContract, InsertContractItem, InsertDocument, InsertDriver, InsertMaintenanceRequest, InsertUser, InsertVehicle, InsertVehicleExpense, VehicleExpense, InsertVehicleRevenue, VehicleRevenue, MaintenanceRequest, User, Vehicle, auditLogs, claims, clientRepresentatives, clients, contractItems, contracts, documents, drivers, employees, maintenanceEvents, maintenanceRequests, notifications, notificationReads, payments, vehicleExpenses, vehicleRevenues, settingCatalog, tasks, users, vehicles, InventoryItem, InsertInventoryItem, InventoryMovement, InsertInventoryMovement, inventoryItems, inventoryMovements, InventoryRequest, inventoryRequests, inventoryRequestItems, Accident, InsertAccident, accidents, AccidentEvent, accidentEvents, PurchaseRequest, InsertPurchaseRequest, PurchaseQuote, InsertPurchaseQuote, purchaseRequests, purchaseQuotes, Account, InsertAccount, FiscalPeriod, InsertFiscalPeriod, JournalEntry, InsertJournalEntry, JournalLine, InsertJournalLine, accounts, fiscalPeriods, journalEntries, journalLines } from "../drizzle/schema";
 import { canAdvanceMaintenance, canCloseMaintenance, canEditMaintenanceQuote, hasMaintenanceQuote, statusForMaintenanceStage, type MaintenanceStage } from "../shared/maintenance-domain";
 import { InsertProject, Project, projects } from "../drizzle/schema";
 import { InsertPayable, Payable, PayablePayment, InsertPayablePayment, payables, payablePayments } from "../drizzle/schema";
+import {
+  createJournalEntryWithLines,
+  getAccountLedgerReport,
+  getBalanceSheetReport,
+  getIncomeStatementReport,
+  getTrialBalanceReport,
+  reverseJournalEntry,
+  seedStandardAccountsIfEmpty,
+} from "./accounting-domain";
+import type { JournalLineInput, AccountType } from "../shared/accounting-domain";
+import {
+  createTaxInvoiceRecord,
+  getTaxInvoiceRecord,
+  getVatDeclarationReport,
+  listTaxInvoicesRecord,
+  type CreateTaxInvoiceInput,
+} from "./zatca-domain";
+import type { InvoiceType, DocumentType, ZatcaStatus } from "../shared/zatca-domain";
 import { ENV } from './_core/env';
 import { summarizeMaintenanceItems } from "./vehicle-maintenance-summary";
 import { canAcceptContractPayment, canArchiveClaim, canChangeClaimReferences, canSetContractCollection, canUpdateClaim, ClaimPaymentHistoryError, ClaimReferenceConflictError, validateClaimContractLink, validatePaymentLinkConsistency } from "./finance-domain";
 import { isPayableExpensePosted } from "./payable-expense-policy";
 import { hasPostedMaintenanceInvoices, maintenanceInvoiceTotal, shouldClearMaintenanceActualCost } from "./maintenance-invoice-total";
-import { maintenanceExpenseTotalInPeriod } from "./maintenance-report";
+import { maintenanceExpenseTotalInPeriod, postedMaintenanceExpenseTotalInPeriod } from "./maintenance-report";
 import { isProtectedLastAdminDemotion } from "./user-role-domain";
 import { notificationReadAtForUser } from "./notification-access";
 import { isReceivableClaimStatus, outstandingClaimAmount, receivableAging, totalOutstandingClaims, countOutstandingClaims } from "../shared/receivables";
@@ -26,46 +45,37 @@ import { canAssignVehicleToContract, vehicleStatusAfterContractAssignment, vehic
 import { canUpdateTask } from "../shared/task-access";
 import { formatCompanyDate, isCompanyDateBeforeToday, isWithinUpcomingDays, resolveDocumentStatus, resolveRenewalStatus } from "../shared/date-utils";
 import { summarizePayableBalances } from "../shared/payable-report-summary";
-import { nextInventoryBalance, nextInventoryRequestStatus, validateInventoryRequestAvailability, type InventoryDirection } from "./inventory-domain";
-import { nextAccidentStage, type AccidentStage } from "./accident-domain";
+import { nextInventoryBalance, nextInventoryRequestStatus, type InventoryDirection } from "./inventory-domain";
+import { multiplyMoney, parseMoneyText, roundMoney, sumMoney } from "../shared/money";
+import { purchaseQuoteTotal as procurementQuoteTotal } from "./procurement-domain";
+import { nextAccidentStage, normalizeNajmReportNo, type AccidentStage } from "./accident-domain";
 
 let _db: ReturnType<typeof drizzle> | null = null;
-let _authSchemaReady: Promise<void> | null = null;
 
-async function ensureAuthSchema(db: ReturnType<typeof drizzle>) {
-  const statements = [
-    "ALTER TABLE `users` ADD COLUMN `passwordHash` TEXT NULL",
-    "ALTER TABLE `users` ADD COLUMN `isActive` INT NOT NULL DEFAULT 1",
-    "ALTER TABLE `users` ADD COLUMN `permissions` TEXT NULL",
-    "ALTER TABLE `users` ADD COLUMN `username` VARCHAR(80) NULL",
-    "CREATE UNIQUE INDEX `users_username_unique` ON `users` (`username`)",
-  ];
-  for (const statement of statements) {
-    try {
-      await db.execute(sql.raw(statement));
-    } catch (error: any) {
-      const message = String(error?.cause?.message || error?.message || error);
-      if (!/Duplicate column|Duplicate key name|already exists|already has/i.test(message)) {
-        console.warn(`[Database] Schema check skipped: ${message}`);
-      }
-    }
-  }
+/**
+ * Whether a real database connection may be opened.
+ *
+ * Tests are deliberately kept hermetic: the suite must never read or write a
+ * real database. Without this guard, a `DATABASE_URL` in the developer's shell
+ * (or exported by a wrapper script) let test files query production data
+ * silently - which made the suite non-hermetic and intermittently slow and
+ * failing depending on ambient environment. Set ALLOW_TEST_DATABASE=true only
+ * for an explicit integration run against a throwaway database.
+ */
+export function databaseAccessAllowed(): boolean {
+  if (process.env.VITEST && process.env.ALLOW_TEST_DATABASE !== "true") return false;
+  return Boolean(process.env.DATABASE_URL);
 }
 
 export async function getDb() {
-  if (!_db && process.env.DATABASE_URL) {
+  if (!_db && databaseAccessAllowed()) {
     try {
-      const database = drizzle(createPool(getMysqlConnectionOptions(process.env.DATABASE_URL)));
-      _db = database;
-      _authSchemaReady = ensureAuthSchema(database).catch(error => {
-        console.warn("[Database] Could not prepare authentication fields:", error);
-      });
+      _db = drizzle(createPool(getMysqlConnectionOptions(process.env.DATABASE_URL!)));
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
       _db = null;
     }
   }
-  if (_db && _authSchemaReady) await _authSchemaReady;
   return _db;
 }
 
@@ -94,17 +104,31 @@ export async function getUserByOpenId(openId: string): Promise<User | undefined>
   return result[0];
 }
 
-function hashPassword(password: string) {
+// Async scrypt: the synchronous variant blocks the event loop for the whole
+// derivation, so a burst of login attempts stalled every other request. The
+// parameters are the Node defaults and match the previous scryptSync output, so
+// existing `salt:hash` records keep verifying.
+const scryptAsync = promisify(scrypt) as (
+  password: string,
+  salt: string,
+  keylen: number
+) => Promise<Buffer>;
+
+const PASSWORD_KEY_LENGTH = 64;
+
+export async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(16).toString("hex");
-  const hash = scryptSync(password, salt, 64).toString("hex");
-  return `${salt}:${hash}`;
+  const derived = await scryptAsync(password, salt, PASSWORD_KEY_LENGTH);
+  return `${salt}:${derived.toString("hex")}`;
 }
 
-function verifyPassword(password: string, stored: string) {
+export async function verifyPassword(password: string, stored: string): Promise<boolean> {
   const [salt, expected] = stored.split(":");
   if (!salt || !expected) return false;
-  const actual = scryptSync(password, salt, 64);
   const expectedBuffer = Buffer.from(expected, "hex");
+  // timingSafeEqual throws on length mismatch, so validate before comparing.
+  if (expectedBuffer.length !== PASSWORD_KEY_LENGTH) return false;
+  const actual = await scryptAsync(password, salt, PASSWORD_KEY_LENGTH);
   return actual.length === expectedBuffer.length && timingSafeEqual(actual, expectedBuffer);
 }
 
@@ -117,11 +141,51 @@ export async function getUserByUsername(username: string): Promise<User | undefi
 
 export async function authenticateLocalUser(username: string, password: string): Promise<User | null> {
   const user = await getUserByUsername(username);
-  if (!user?.passwordHash || !verifyPassword(password, user.passwordHash)) return null;
+  if (!user?.passwordHash || !(await verifyPassword(password, user.passwordHash))) return null;
   const db = await getDb();
   if (!db) return null;
   await db.update(users).set({ lastSignedIn: new Date() }).where(eq(users.id, user.id));
   return { ...user, lastSignedIn: new Date() };
+}
+
+/**
+ * Records an authentication event.
+ *
+ * Sign-ins, sign-outs and failed attempts previously left no trace at all, so
+ * credential stuffing was invisible and there was no way to answer "who signed
+ * in, from where, and when". `audit_logs` has no dedicated address/user-agent
+ * columns yet, so both are captured in `details`; dedicated columns arrive with
+ * the audit-log migration.
+ *
+ * Auditing must never break authentication, so failures are reported and
+ * swallowed.
+ */
+export async function recordLoginAttempt(input: {
+  username: string;
+  ip: string;
+  userAgent: string | null;
+  success: boolean;
+  userId?: number | null;
+}): Promise<void> {
+  const action = input.success ? "auth.login.success" : "auth.login.failure";
+  const details = [
+    `المستخدم: ${input.username || "—"}`,
+    `IP: ${input.ip}`,
+    input.userAgent ? `UA: ${input.userAgent}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ")
+    .slice(0, 4000);
+  try {
+    await createAuditLog({
+      userId: input.userId ?? null,
+      action,
+      entityType: "auth",
+      details,
+    });
+  } catch (error) {
+    console.error("[Audit] Could not record login attempt:", error);
+  }
 }
 
 export async function createLocalUser(input: { name: string; username: string; password: string; role: "user" | "admin"; permissions?: string[] }) {
@@ -130,7 +194,7 @@ export async function createLocalUser(input: { name: string; username: string; p
   const username = input.username.trim().toLowerCase();
   const existing = await db.select({ id: users.id }).from(users).where(eq(users.username, username)).limit(1);
   if (existing[0]) throw new Error("اسم المستخدم مستخدم بالفعل");
-  const result = await db.insert(users).values({ openId: `local-${randomBytes(18).toString("hex")}`, name: input.name.trim(), username, loginMethod: "local", passwordHash: hashPassword(input.password), role: input.role, permissions: JSON.stringify(input.permissions ?? []), isActive: 1 });
+  const result = await db.insert(users).values({ openId: `local-${randomBytes(18).toString("hex")}`, name: input.name.trim(), username, loginMethod: "local", passwordHash: await hashPassword(input.password), role: input.role, permissions: JSON.stringify(input.permissions ?? []), isActive: 1 });
   return (await db.select({ id: users.id, name: users.name, username: users.username, role: users.role, permissions: users.permissions, isActive: users.isActive, createdAt: users.createdAt, lastSignedIn: users.lastSignedIn }).from(users).where(eq(users.id, Number(result[0].insertId))).limit(1))[0] ?? null;
 }
 
@@ -735,26 +799,39 @@ async function recordAuditInTransaction(
     details,
   });
 }
-function parseRiyalAmount(value: unknown) {
-  const arabicDigits: Record<string, string> = { "٠": "0", "١": "1", "٢": "2", "٣": "3", "٤": "4", "٥": "5", "٦": "6", "٧": "7", "٨": "8", "٩": "9" };
-  const normalized = String(value ?? "").replace(/[٠-٩]/g, digit => arabicDigits[digit]).replace(/[٬,]/g, "").replace(/[^0-9.\-]/g, "");
-  return Math.max(0, Math.round(Number(normalized) || 0));
+/**
+ * Reads the actual maintenance cost as a number.
+ *
+ * `costAmount` is the numeric source of truth. The legacy `cost` text column is
+ * only consulted for rows written before it existed; `parseMoneyText` tolerates
+ * Arabic-Indic digits, thousands separators and a trailing currency word, and
+ * returns null (not 0) when the text holds no amount so bad data is visible
+ * rather than silently counted as zero.
+ */
+function maintenanceActualCost(request: { costAmount?: number | null; cost?: string | null }): number {
+  if (typeof request.costAmount === "number" && Number.isFinite(request.costAmount)) {
+    return request.costAmount;
+  }
+  return parseMoneyText(request.cost) ?? 0;
 }
+
 async function syncMaintenanceExpense(tx: DbExecutor, request: MaintenanceRequest, actor: LedgerActor = {}, clearPostedCostWhenNoInvoicesRemain = false) {
   if (!request.vehicleId) return;
   const linkedPayables = await tx.select({ amount: payables.amount, status: payables.status }).from(payables).where(and(eq(payables.maintenanceRequestId, request.id), isNull(payables.archivedAt)));
   const linkedInvoiceTotal = maintenanceInvoiceTotal(linkedPayables);
-  const amount = linkedPayables.length ? linkedInvoiceTotal : parseRiyalAmount(request.cost);
+  const amount = linkedPayables.length ? linkedInvoiceTotal : maintenanceActualCost(request);
   const existing = (await tx.select().from(vehicleExpenses).where(eq(vehicleExpenses.maintenanceRequestId, request.id)).limit(1))[0];
   const vehicle = (await tx.select().from(vehicles).where(eq(vehicles.id, request.vehicleId)).limit(1))[0];
   if (!vehicle) return;
   if (hasPostedMaintenanceInvoices(linkedPayables)) {
-    await tx.update(maintenanceRequests).set({ cost: `${amount} SAR` }).where(eq(maintenanceRequests.id, request.id));
+    // Write both representations: the numeric column is authoritative and the
+    // text column keeps existing screens rendering unchanged.
+    await tx.update(maintenanceRequests).set({ costAmount: amount, cost: `${amount} SAR` }).where(eq(maintenanceRequests.id, request.id));
     if (existing && !existing.archivedAt) await tx.update(vehicleExpenses).set({ archivedAt: new Date(), archivedByUserId: actor.id ?? null, archivedByName: actor.name || "—" }).where(eq(vehicleExpenses.id, existing.id));
     return;
   }
   if (shouldClearMaintenanceActualCost({ cancelledInvoiceWasPosted: clearPostedCostWhenNoInvoicesRemain, hasOtherPostedInvoices: false })) {
-    await tx.update(maintenanceRequests).set({ cost: "0 SAR" }).where(eq(maintenanceRequests.id, request.id));
+    await tx.update(maintenanceRequests).set({ costAmount: 0, cost: "0 SAR" }).where(eq(maintenanceRequests.id, request.id));
     if (existing && !existing.archivedAt) await tx.update(vehicleExpenses).set({ archivedAt: new Date(), archivedByUserId: actor.id ?? null, archivedByName: actor.name || "—" }).where(eq(vehicleExpenses.id, existing.id));
     return;
   }
@@ -820,7 +897,7 @@ export async function advanceMaintenanceRequest(id: number, toStage: Maintenance
     if (toStage === "اعتماد" && !hasMaintenanceQuote(current)) throw new Error("أرفق عرض سعر الورشة وأدخل قيمة عرض الورشة أو قطع الغيار قبل إرسال الطلب للمالية");
     if (toStage === "مغلق") {
       const linkedInvoices = await tx.select({ status: payables.status }).from(payables).where(and(eq(payables.maintenanceRequestId, id), isNull(payables.archivedAt)));
-      if (!canCloseMaintenance({ approvalStatus: current.approvalStatus as "غير مطلوب" | "بانتظار الاعتماد" | "معتمد" | "مرفوض", actualCost: parseRiyalAmount(current.cost), linkedInvoices })) {
+      if (!canCloseMaintenance({ approvalStatus: current.approvalStatus as "غير مطلوب" | "بانتظار الاعتماد" | "معتمد" | "مرفوض", actualCost: maintenanceActualCost(current), linkedInvoices })) {
         if (current.approvalStatus === "معتمد" && linkedInvoices.some(invoice => !isPayableExpensePosted(invoice.status))) throw new Error("اعتمد جميع فواتير الورشة وقطع الغيار المرتبطة قبل إغلاق طلب الصيانة");
         if (current.approvalStatus === "معتمد") throw new Error("سجّل فاتورة معتمدة بقيمتها الفعلية قبل إغلاق طلب الصيانة");
         throw new Error("لا يمكن إغلاق الطلب قبل إكمال الفحص بعد الإصلاح");
@@ -1128,7 +1205,14 @@ export async function getContractRelatedModuleAccess(contractId?: number, candid
   };
 }
 
-async function ensureCollectedPayment(tx: DbExecutor, contractId: number, targetCollected: number, clientId: number | null | undefined, ref: string, paidAt: string) {
+/**
+ * Records the automatic "collected" payment for a contract.
+ *
+ * `paidAt` accepts null: the contract start date is now a nullable DATE column,
+ * and a payment whose date is unknown falls back to the company's current date
+ * rather than inventing a value.
+ */
+async function ensureCollectedPayment(tx: DbExecutor, contractId: number, targetCollected: number, clientId: number | null | undefined, ref: string, paidAt: string | null | undefined) {
   const current = (await tx.select({ total: sql<number>`COALESCE(SUM(${payments.amount}), 0)` }).from(payments).where(and(eq(payments.contractId, contractId), isNull(payments.archivedAt))).limit(1))[0];
   const gap = Math.max(0, Math.round(targetCollected) - Number(current?.total || 0));
   if (!gap) return;
@@ -1569,6 +1653,20 @@ export async function registerPayablePayment(input: InsertPayablePayment, actor:
   });
 }
 
+export async function getMaintenanceCostForPeriod(from: string, to: string): Promise<number | null> {
+  const exclusiveEnd = reportPeriodExclusiveEnd(to);
+  if (!exclusiveEnd || !isValidReportPeriod(from, to)) return null;
+  const db = await getDb();
+  if (!db) return null;
+  const [expenses, payableRows] = await Promise.all([
+    db.select({ category: vehicleExpenses.category, amount: vehicleExpenses.amount, payableId: vehicleExpenses.payableId })
+      .from(vehicleExpenses)
+      .where(and(isNull(vehicleExpenses.archivedAt), gte(vehicleExpenses.spentAt, from), lt(vehicleExpenses.spentAt, exclusiveEnd))),
+    db.select({ id: payables.id, status: payables.status }).from(payables).where(isNull(payables.archivedAt)),
+  ]);
+  return postedMaintenanceExpenseTotalInPeriod(expenses, payableRows);
+}
+
 export async function getCompanyReport(from: string, to: string) {
   const exclusiveEnd = reportPeriodExclusiveEnd(to);
   if (!exclusiveEnd || !isValidReportPeriod(from, to)) return null;
@@ -1996,16 +2094,7 @@ export async function decideInventoryRequest(id: number, approved: boolean, note
     if (!request) return null;
     const nextStatus = nextInventoryRequestStatus(request.status, approved ? "اعتماد" : "رفض");
     const lines = await tx.select().from(inventoryRequestItems).where(eq(inventoryRequestItems.requestId, id));
-    if (approved) {
-      const balances = new Map<number, number>();
-      for (const itemId of Array.from(new Set(lines.map(line => line.itemId))).sort((a, b) => a - b)) {
-        await tx.execute(sql`SELECT id FROM inventory_items WHERE id = ${itemId} AND archivedAt IS NULL FOR UPDATE`);
-        const item = (await tx.select().from(inventoryItems).where(and(eq(inventoryItems.id, itemId), isNull(inventoryItems.archivedAt))).limit(1))[0];
-        if (item) balances.set(itemId, item.onHand);
-      }
-      validateInventoryRequestAvailability(lines.map(line => ({ itemId: line.itemId, itemName: line.itemName, requestedQuantity: line.requestedQuantity })), balances);
-      for (const line of lines) await tx.update(inventoryRequestItems).set({ approvedQuantity: line.requestedQuantity }).where(eq(inventoryRequestItems.id, line.id));
-    }
+    if (approved) for (const line of lines) await tx.update(inventoryRequestItems).set({ approvedQuantity: line.requestedQuantity }).where(eq(inventoryRequestItems.id, line.id));
     await tx.update(inventoryRequests).set({ status: nextStatus, approvalNotes: notes ?? null, approvedByUserId: actor.id ?? null, approvedByName: actor.name, approvedAt: new Date() }).where(eq(inventoryRequests.id, id));
     await recordAuditInTransaction(tx, actor, approved ? "inventory.request.approve" : "inventory.request.reject", "inventory_request", id, `${approved ? "اعتماد" : "رفض"} طلب الصرف ${request.ref}${notes ? ` · ${notes}` : ""}`);
     const updated = (await tx.select().from(inventoryRequests).where(eq(inventoryRequests.id, id)).limit(1))[0]!;
@@ -2062,7 +2151,16 @@ export async function createAccident(input: Omit<InsertAccident, "id" | "workflo
   const db = await getDb();
   if (!db) return null;
   return db.transaction(async tx => {
-    const [inserted] = await tx.insert(accidents).values({ ...input, workflowStage: "بلاغ", reportedByUserId: actor.id ?? null, reportedByName: actor.name });
+    // Never forward a bare `null` for a report number that has not been issued
+    // yet: normalise to SQL NULL so the UNIQUE index does not collide.
+    const values: InsertAccident = {
+      ...input,
+      najmReportNo: normalizeNajmReportNo(input.najmReportNo),
+      workflowStage: "بلاغ",
+      reportedByUserId: actor.id ?? null,
+      reportedByName: actor.name,
+    };
+    const [inserted] = await tx.insert(accidents).values(values);
     const id = Number(inserted.insertId);
     await tx.insert(accidentEvents).values({ accidentId: id, fromStage: null, toStage: "بلاغ", details: "إنشاء بلاغ حادث", actorUserId: actor.id ?? null, actorName: actor.name });
     await recordAuditInTransaction(tx, actor, "accident.create", "accident", id, `إنشاء بلاغ حادث ${input.ref} للمركبة ${input.vehiclePlate}`);
@@ -2077,8 +2175,10 @@ export async function updateAccident(id: number, input: Partial<Pick<InsertAccid
     const current = (await tx.select().from(accidents).where(and(eq(accidents.id, id), isNull(accidents.archivedAt))).limit(1))[0];
     if (!current) return null;
     if (["مغلق", "ملغي"].includes(current.workflowStage)) throw new Error("لا يمكن تعديل حادث مغلق أو ملغي");
-    await tx.update(accidents).set(input).where(eq(accidents.id, id));
-    if (Object.keys(input).length) await recordAuditInTransaction(tx, actor, "accident.update", "accident", id, `تعديل بلاغ الحادث ${current.ref}`);
+    const data = { ...input };
+    if ("najmReportNo" in data) data.najmReportNo = normalizeNajmReportNo(data.najmReportNo);
+    await tx.update(accidents).set(data).where(eq(accidents.id, id));
+    if (Object.keys(data).length) await recordAuditInTransaction(tx, actor, "accident.update", "accident", id, `تعديل بلاغ الحادث ${current.ref}`);
     return (await tx.select().from(accidents).where(eq(accidents.id, id)).limit(1))[0] ?? null;
   });
 }
@@ -2102,6 +2202,22 @@ export async function archiveSetting(id: number) { const db = await getDb(); if 
 export async function listRepresentatives(clientId: number) { const db = await getDb(); return db ? db.select().from(clientRepresentatives).where(and(eq(clientRepresentatives.clientId, clientId), isNull(clientRepresentatives.archivedAt))) : null; }
 export async function createRepresentative(input: typeof clientRepresentatives.$inferInsert) { const db = await getDb(); if (!db) return null; const result = await db.insert(clientRepresentatives).values(input); const rows = await db.select().from(clientRepresentatives).where(eq(clientRepresentatives.id, Number(result[0].insertId))).limit(1); return rows[0] ?? null; }
 export async function listUsers() { const db = await getDb(); return db ? db.select({ id: users.id, name: users.name, username: users.username, email: users.email, role: users.role, permissions: users.permissions, isActive: users.isActive, createdAt: users.createdAt, lastSignedIn: users.lastSignedIn }).from(users).orderBy(desc(users.createdAt)) : null; }
+
+/**
+ * Invalidates every outstanding session token for a user by bumping their
+ * session version ("sign out everywhere"). Useful when a device is lost or a
+ * token may have leaked, and it is the only way to end a session before its
+ * natural expiry.
+ */
+export async function revokeUserSessions(id: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  const [result] = await db
+    .update(users)
+    .set({ sessionVersion: sql`${users.sessionVersion} + 1` })
+    .where(eq(users.id, id));
+  return Number((result as { affectedRows?: number }).affectedRows ?? 0) > 0;
+}
 export class LastActiveAdminDemotionError extends Error {
   constructor() { super("لا يمكن تخفيض صلاحية آخر مدير نشط في النظام"); this.name = "LastActiveAdminDemotionError"; }
 }
@@ -2116,7 +2232,9 @@ export async function updateUserRole(id: number, role: "user" | "admin") {
     if (!current) return null;
     const activeAdminCount = lockedUsers.filter(user => user.role === "admin" && user.isActive === 1).length;
     if (isProtectedLastAdminDemotion({ targetRole: current.role, targetActive: current.isActive, nextRole: role, activeAdminCount })) throw new LastActiveAdminDemotionError();
-    await tx.update(users).set({ role }).where(eq(users.id, id));
+    // Changing a role changes what the holder may do, so outstanding tokens are
+    // revoked rather than allowed to keep the old privileges until expiry.
+    await tx.update(users).set({ role, sessionVersion: sql`${users.sessionVersion} + 1` }).where(eq(users.id, id));
     return (await tx.select({ id: users.id, name: users.name, username: users.username, email: users.email, role: users.role, permissions: users.permissions, isActive: users.isActive, createdAt: users.createdAt, lastSignedIn: users.lastSignedIn }).from(users).where(eq(users.id, id)).limit(1))[0] ?? null;
   });
 }
@@ -2125,8 +2243,16 @@ export async function updateUserAccess(id: number, input: { permissions?: string
   if (!db) return null;
   const data: Partial<typeof users.$inferInsert> = {};
   if (input.permissions) data.permissions = JSON.stringify(input.permissions);
-  if (input.password) data.passwordHash = hashPassword(input.password);
-  if (Object.keys(data).length) await db.update(users).set(data).where(eq(users.id, id));
+  if (input.password) data.passwordHash = await hashPassword(input.password);
+  if (Object.keys(data).length) {
+    // A password reset or permission edit must also invalidate sessions that
+    // were issued under the previous credentials - otherwise a leaked token
+    // survives the very action taken to contain it.
+    await db
+      .update(users)
+      .set({ ...data, sessionVersion: sql`${users.sessionVersion} + 1` })
+      .where(eq(users.id, id));
+  }
   return (await db.select({ id: users.id, name: users.name, username: users.username, email: users.email, role: users.role, permissions: users.permissions, isActive: users.isActive, createdAt: users.createdAt, lastSignedIn: users.lastSignedIn }).from(users).where(eq(users.id, id)).limit(1))[0] ?? null;
 }
 export async function listSettings(category?: string) { const db = await getDb(); if (!db) return null; return category ? db.select().from(settingCatalog).where(eq(settingCatalog.category, category)) : db.select().from(settingCatalog); }
@@ -2138,3 +2264,418 @@ export async function listAuditLogs() {
     .from(auditLogs).leftJoin(users, eq(auditLogs.userId, users.id)).orderBy(desc(auditLogs.createdAt)).limit(200) : null;
 }
 export async function createAuditLog(input: typeof auditLogs.$inferInsert): Promise<AuditLog | null> { const db = await getDb(); if (!db) return null; const result = await db.insert(auditLogs).values(input); const rows = await db.select().from(auditLogs).where(eq(auditLogs.id, Number(result[0].insertId))).limit(1); return rows[0] ?? null; }
+
+// --- حوكمة المشتريات وعروض الأسعار ---
+
+export async function listPurchaseRequests(): Promise<PurchaseRequest[] | null> {
+  const db = await getDb();
+  if (!db) return null;
+  return db.select().from(purchaseRequests).where(isNull(purchaseRequests.archivedAt)).orderBy(desc(purchaseRequests.createdAt));
+}
+
+export async function getPurchaseRequest(id: number): Promise<PurchaseRequest | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db.select().from(purchaseRequests).where(eq(purchaseRequests.id, id)).limit(1);
+  return rows[0] ?? null;
+}
+
+export async function createPurchaseRequest(input: InsertPurchaseRequest): Promise<PurchaseRequest | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.insert(purchaseRequests).values(input);
+  const rows = await db.select().from(purchaseRequests).where(eq(purchaseRequests.id, Number(result[0].insertId))).limit(1);
+  return rows[0] ?? null;
+}
+
+export async function updatePurchaseRequest(id: number, data: Partial<InsertPurchaseRequest>): Promise<PurchaseRequest | null> {
+  const db = await getDb();
+  if (!db) return null;
+  await db.update(purchaseRequests).set(data).where(eq(purchaseRequests.id, id));
+  const rows = await db.select().from(purchaseRequests).where(eq(purchaseRequests.id, id)).limit(1);
+  return rows[0] ?? null;
+}
+
+export async function archivePurchaseRequest(id: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  await db.update(purchaseRequests).set({ archivedAt: new Date() }).where(eq(purchaseRequests.id, id));
+  return true;
+}
+
+export async function listPurchaseQuotes(requestId: number): Promise<PurchaseQuote[] | null> {
+  const db = await getDb();
+  if (!db) return null;
+  return db.select().from(purchaseQuotes).where(eq(purchaseQuotes.requestId, requestId)).orderBy(purchaseQuotes.totalAmount);
+}
+
+/**
+ * Derives a quote's total from its own parts.
+ * See `purchaseQuoteTotal` in ./procurement-domain for the rationale.
+ */
+function purchaseQuoteTotal(quote: {
+  quantity?: number | null;
+  unitPrice?: number | null;
+  taxAmount?: number | null;
+}): number {
+  return procurementQuoteTotal(quote);
+}
+
+export async function createPurchaseQuote(input: InsertPurchaseQuote): Promise<PurchaseQuote | null> {
+  const db = await getDb();
+  if (!db) return null;
+  return db.transaction(async tx => {
+    const [result] = await tx
+      .insert(purchaseQuotes)
+      .values({ ...input, totalAmount: purchaseQuoteTotal(input) });
+    const rows = await tx.select().from(purchaseQuotes).where(eq(purchaseQuotes.id, Number(result.insertId))).limit(1);
+
+    // تحديث حالة طلب الشراء إذا كان أول عرض
+    const req = (await tx.select().from(purchaseRequests).where(eq(purchaseRequests.id, input.requestId)).limit(1))[0];
+    if (req && req.status === "جديد") {
+      await tx.update(purchaseRequests).set({ status: "قيد المقارنة" }).where(eq(purchaseRequests.id, input.requestId));
+    }
+
+    return rows[0] ?? null;
+  });
+}
+
+export async function updatePurchaseQuote(id: number, data: Partial<InsertPurchaseQuote>): Promise<PurchaseQuote | null> {
+  const db = await getDb();
+  if (!db) return null;
+  return db.transaction(async tx => {
+    const current = (await tx.select().from(purchaseQuotes).where(eq(purchaseQuotes.id, id)).limit(1))[0];
+    if (!current) return null;
+    // Recompute from the merged row so a partial edit (only the price, only the
+    // quantity) cannot leave a stale or client-supplied total behind.
+    const totalAmount = purchaseQuoteTotal({ ...current, ...data });
+    await tx.update(purchaseQuotes).set({ ...data, totalAmount }).where(eq(purchaseQuotes.id, id));
+    return (await tx.select().from(purchaseQuotes).where(eq(purchaseQuotes.id, id)).limit(1))[0] ?? null;
+  });
+}
+
+export async function selectPurchaseQuote(requestId: number, quoteId: number, selectionReason: string, actor: { userId?: number; name: string }): Promise<PurchaseRequest | null> {
+  const db = await getDb();
+  if (!db) return null;
+  // One transaction, and the chosen quote must belong to this request: without
+  // that check a finance user could approve request A using a quote raised for
+  // request B, and a partial failure left the three updates inconsistent.
+  return db.transaction(async tx => {
+    await tx.execute(sql`SELECT id FROM purchase_requests WHERE id = ${requestId} FOR UPDATE`);
+    const quote = (await tx.select().from(purchaseQuotes).where(and(eq(purchaseQuotes.id, quoteId), eq(purchaseQuotes.requestId, requestId))).limit(1))[0];
+    if (!quote) throw new Error("عرض السعر المحدد لا يتبع هذا الطلب");
+    // إعادة تعيين كل العروض السابقة لهذا الطلب إلى غير معتمد
+    await tx.update(purchaseQuotes).set({ isSelected: 0, selectionReason: null }).where(eq(purchaseQuotes.requestId, requestId));
+    // تحديد العرض الفائز
+    await tx.update(purchaseQuotes).set({ isSelected: 1, selectionReason }).where(and(eq(purchaseQuotes.id, quoteId), eq(purchaseQuotes.requestId, requestId)));
+    // اعتماد طلب الشراء
+    await tx.update(purchaseRequests).set({
+      status: "معتمد",
+      selectedQuoteId: quoteId,
+      approvedByUserId: actor.userId ?? null,
+      approvedByName: actor.name,
+      approvedAt: new Date(),
+      approvalNotes: selectionReason,
+    }).where(eq(purchaseRequests.id, requestId));
+
+    return (await tx.select().from(purchaseRequests).where(eq(purchaseRequests.id, requestId)).limit(1))[0] ?? null;
+  });
+}
+
+export async function deletePurchaseQuote(id: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  await db.delete(purchaseQuotes).where(eq(purchaseQuotes.id, id));
+  return true;
+}
+
+export async function issuePurchaseOrder(
+  requestId: number,
+  actor: LedgerActor = {},
+  options?: { dueDate?: string; notes?: string }
+): Promise<{ request: PurchaseRequest; payable: Payable } | null> {
+  const db = await getDb();
+  if (!db) return null;
+  return db.transaction(async tx => {
+    await tx.execute(sql`SELECT id FROM purchase_requests WHERE id = ${requestId} FOR UPDATE`);
+    const req = (await tx.select().from(purchaseRequests).where(and(eq(purchaseRequests.id, requestId), isNull(purchaseRequests.archivedAt))).limit(1))[0];
+    if (!req) throw new Error("طلب الشراء غير موجود");
+    if (!req.selectedQuoteId) throw new Error("يجب اختيار واعتماد عرض السعر الفائز أولاً قبل إصدار أمر الشراء");
+
+    const quote = (await tx.select().from(purchaseQuotes).where(eq(purchaseQuotes.id, req.selectedQuoteId)).limit(1))[0];
+    if (!quote) throw new Error("عرض السعر المعتمد غير موجود");
+
+    // تحديث حالة الطلب إلى أمر شراء صادر
+    await tx.update(purchaseRequests).set({
+      status: "أمر شراء صادر",
+    }).where(eq(purchaseRequests.id, requestId));
+
+    // إنشاء فاتورة مورد في جدول المستحقات علينا (payables)
+    const today = new Date().toISOString().slice(0, 10);
+    const deliveryDays = quote.deliveryDays || 30;
+    const dueDate = options?.dueDate || new Date(Date.now() + deliveryDays * 86400000).toISOString().slice(0, 10);
+    const payableRef = `PO-${req.ref}`;
+
+    const existing = (await tx.select().from(payables).where(and(eq(payables.ref, payableRef), isNull(payables.archivedAt))).limit(1))[0];
+    let payable: Payable;
+    if (existing) {
+      payable = existing;
+    } else {
+      const [insertRes] = await tx.insert(payables).values({
+        ref: payableRef,
+        supplier: quote.supplierName,
+        description: `أمر شراء ${req.ref} - ${req.purpose}`,
+        amount: quote.totalAmount,
+        paid: 0,
+        issueDate: today,
+        dueDate,
+        status: "معتمدة",
+        notes: `مُحال آلياً من طلب الشراء ${req.ref} وعرض السعر المعتمد للمورد: ${quote.supplierName}. ${options?.notes || ""}`.trim(),
+        branchId: req.branchId || 1,
+      });
+      const insertedId = Number(insertRes.insertId);
+      payable = (await tx.select().from(payables).where(eq(payables.id, insertedId)).limit(1))[0];
+
+      await recordAuditInTransaction(
+        tx,
+        actor,
+        "payables.createFromProcurement",
+        "payables",
+        insertedId,
+        `تم إصدار أمر الشراء وتحويل طلب ${req.ref} إلى فاتورة مورد بمبلغ ${quote.totalAmount} ر.س`
+      );
+    }
+
+    const updatedReq = (await tx.select().from(purchaseRequests).where(eq(purchaseRequests.id, requestId)).limit(1))[0];
+    return { request: updatedReq, payable };
+  });
+}
+
+
+// ==================== المحاسبة ودفتر الأستاذ (ACCOUNTING & GENERAL LEDGER) ====================
+
+export async function seedAccountsIfEmpty(branchId?: number | null) {
+  const db = await getDb();
+  if (!db) return { seeded: 0, message: "قاعدة البيانات غير متصلة" };
+  return seedStandardAccountsIfEmpty(db, branchId);
+}
+
+export async function listAccounts(filters?: {
+  branchId?: number;
+  type?: AccountType;
+  isActive?: number;
+}): Promise<Account[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const conditions: any[] = [isNull(accounts.archivedAt)];
+  if (filters?.type) conditions.push(eq(accounts.type, filters.type as any));
+  if (filters?.isActive !== undefined) conditions.push(eq(accounts.isActive, filters.isActive));
+  if (filters?.branchId) {
+    conditions.push(or(isNull(accounts.branchId), eq(accounts.branchId, filters.branchId)));
+  }
+  return db.select().from(accounts).where(and(...conditions)).orderBy(accounts.code);
+}
+
+export async function createAccount(data: InsertAccount): Promise<Account | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const [res] = await db.insert(accounts).values(data);
+  const id = Number((res as any).insertId || (res as any)[0]?.insertId);
+  const rows = await db.select().from(accounts).where(eq(accounts.id, id)).limit(1);
+  return rows[0] ?? null;
+}
+
+export async function updateAccount(id: number, data: Partial<InsertAccount>): Promise<Account | null> {
+  const db = await getDb();
+  if (!db) return null;
+  await db.update(accounts).set(data).where(eq(accounts.id, id));
+  const rows = await db.select().from(accounts).where(eq(accounts.id, id)).limit(1);
+  return rows[0] ?? null;
+}
+
+export async function archiveAccount(id: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  await db.update(accounts).set({ archivedAt: new Date(), isActive: 0 }).where(eq(accounts.id, id));
+  return true;
+}
+
+export async function listFiscalPeriods(): Promise<FiscalPeriod[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(fiscalPeriods).where(isNull(fiscalPeriods.archivedAt)).orderBy(desc(fiscalPeriods.startDate));
+}
+
+export async function createFiscalPeriod(data: InsertFiscalPeriod): Promise<FiscalPeriod | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const [res] = await db.insert(fiscalPeriods).values(data);
+  const id = Number((res as any).insertId || (res as any)[0]?.insertId);
+  const rows = await db.select().from(fiscalPeriods).where(eq(fiscalPeriods.id, id)).limit(1);
+  return rows[0] ?? null;
+}
+
+export async function closeFiscalPeriod(id: number, userId?: number | null): Promise<FiscalPeriod | null> {
+  const db = await getDb();
+  if (!db) return null;
+  await db.update(fiscalPeriods).set({
+    status: "closed",
+    closedAt: new Date(),
+    closedBy: userId ?? null,
+  }).where(eq(fiscalPeriods.id, id));
+  const rows = await db.select().from(fiscalPeriods).where(eq(fiscalPeriods.id, id)).limit(1);
+  return rows[0] ?? null;
+}
+
+export async function reopenFiscalPeriod(id: number): Promise<FiscalPeriod | null> {
+  const db = await getDb();
+  if (!db) return null;
+  await db.update(fiscalPeriods).set({
+    status: "open",
+    closedAt: null,
+    closedBy: null,
+  }).where(eq(fiscalPeriods.id, id));
+  const rows = await db.select().from(fiscalPeriods).where(eq(fiscalPeriods.id, id)).limit(1);
+  return rows[0] ?? null;
+}
+
+export async function listJournalEntries(filters?: {
+  branchId?: number;
+  status?: "draft" | "posted" | "reversed";
+  startDate?: string;
+  endDate?: string;
+  sourceType?: string;
+}): Promise<JournalEntry[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const conditions: any[] = [];
+  if (filters?.branchId) conditions.push(eq(journalEntries.branchId, filters.branchId));
+  if (filters?.status) conditions.push(eq(journalEntries.status, filters.status));
+  if (filters?.sourceType) conditions.push(eq(journalEntries.sourceType, filters.sourceType));
+  if (filters?.startDate) conditions.push(sql`${journalEntries.entryDate} >= ${filters.startDate}`);
+  if (filters?.endDate) conditions.push(sql`${journalEntries.entryDate} <= ${filters.endDate}`);
+
+  return db.select().from(journalEntries)
+    .where(conditions.length ? and(...conditions) : undefined)
+    .orderBy(desc(journalEntries.entryDate), desc(journalEntries.id));
+}
+
+export async function getJournalEntry(id: number): Promise<{ entry: JournalEntry; lines: Array<JournalLine & { accountCode: string; accountName: string }> } | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const [entry] = await db.select().from(journalEntries).where(eq(journalEntries.id, id)).limit(1);
+  if (!entry) return null;
+
+  const rawLines = await db.select({
+    id: journalLines.id,
+    entryId: journalLines.entryId,
+    accountId: journalLines.accountId,
+    debit: journalLines.debit,
+    credit: journalLines.credit,
+    description: journalLines.description,
+    branchId: journalLines.branchId,
+    vehicleId: journalLines.vehicleId,
+    projectId: journalLines.projectId,
+    contractId: journalLines.contractId,
+    driverId: journalLines.driverId,
+    clientId: journalLines.clientId,
+    lineOrder: journalLines.lineOrder,
+    createdAt: journalLines.createdAt,
+    accountCode: accounts.code,
+    accountName: accounts.name,
+  })
+  .from(journalLines)
+  .innerJoin(accounts, eq(journalLines.accountId, accounts.id))
+  .where(eq(journalLines.entryId, id))
+  .orderBy(journalLines.lineOrder);
+
+  return { entry, lines: rawLines };
+}
+
+export async function createJournalEntry(data: {
+  entryDate: string;
+  description: string;
+  reference?: string;
+  sourceType?: string;
+  sourceId?: number;
+  branchId?: number;
+  fiscalPeriodId?: number | null;
+  createdBy?: number | null;
+  lines: JournalLineInput[];
+}) {
+  const db = await getDb();
+  if (!db) return null;
+  return createJournalEntryWithLines(db, data);
+}
+
+export async function reverseJournalEntryRecord(id: number, userId?: number | null, reason?: string) {
+  const db = await getDb();
+  if (!db) return null;
+  return reverseJournalEntry(db, id, userId, reason);
+}
+
+export async function getAccountLedger(
+  accountId: number,
+  options?: { startDate?: string; endDate?: string; branchId?: number }
+) {
+  const db = await getDb();
+  if (!db) return null;
+  return getAccountLedgerReport(db, accountId, options);
+}
+
+export async function getTrialBalance(options?: { asOfDate?: string; branchId?: number }) {
+  const db = await getDb();
+  if (!db) return null;
+  return getTrialBalanceReport(db, options);
+}
+
+export async function getIncomeStatement(options: { startDate: string; endDate: string; branchId?: number }) {
+  const db = await getDb();
+  if (!db) return null;
+  return getIncomeStatementReport(db, options);
+}
+
+export async function getBalanceSheet(options?: { asOfDate?: string; branchId?: number }) {
+  const db = await getDb();
+  if (!db) return null;
+  return getBalanceSheetReport(db, options);
+}
+
+export async function createTaxInvoice(data: CreateTaxInvoiceInput) {
+  const db = await getDb();
+  if (!db) return null;
+  return createTaxInvoiceRecord(db, data);
+}
+
+export async function listTaxInvoices(filters?: {
+  branchId?: number;
+  invoiceType?: InvoiceType;
+  documentType?: DocumentType;
+  zatcaStatus?: ZatcaStatus;
+  startDate?: string;
+  endDate?: string;
+  clientId?: number;
+  contractId?: number;
+}) {
+  const db = await getDb();
+  if (!db) return [];
+  return listTaxInvoicesRecord(db, filters);
+}
+
+export async function getTaxInvoice(id: number) {
+  const db = await getDb();
+  if (!db) return null;
+  return getTaxInvoiceRecord(db, id);
+}
+
+export async function getVatDeclaration(options: {
+  startDate: string;
+  endDate: string;
+  branchId?: number;
+}) {
+  const db = await getDb();
+  if (!db) return null;
+  return getVatDeclarationReport(db, options);
+}
+
+

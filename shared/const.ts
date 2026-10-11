@@ -4,6 +4,11 @@ export const AXIOS_TIMEOUT_MS = 30_000;
 export const UNAUTHED_ERR_MSG = 'Please login (10001)';
 export const NOT_ADMIN_ERR_MSG = 'You do not have required permission (10002)';
 
+// Minimum length for JWT_SECRET. Sessions are signed with HS256; a short or
+// empty key makes session tokens forgeable, so signing/verifying refuses to run
+// below this length and production startup fails outright.
+export const MIN_SESSION_SECRET_LENGTH = 32;
+
 // One-time nonce cookie that binds an OAuth login to the browser that started
 // it. The `__Host-` prefix forces the cookie host-only (Secure, Path=/, no
 // Domain), so a sibling *.manus.space site cannot plant a matching value in a
