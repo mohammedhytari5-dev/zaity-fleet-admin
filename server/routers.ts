@@ -18,7 +18,7 @@ import { driverRecordForViewer } from "./driver-access";
 import { projectRecordForViewer } from "./project-access";
 import { notificationModule, notificationsVisibleTo } from "./notification-access";
 import { claimRecordForViewer, contractRecordForViewer, paymentRecordForViewer } from "./contract-access";
-import { archiveClaim, archiveClient, archiveContract, archiveDocument, archiveDriver, archiveMaintenanceRequest, advanceMaintenanceRequest, decideMaintenanceApproval, settleMaintenanceAdvance, listMaintenanceEvents, archivePayment, archiveVehicleExpense, archiveVehicleRevenue, archiveProject, archiveSetting, deleteSetting, archiveVehicle, assignVehicleDriver, authenticateLocalUser, LastActiveAdminDemotionError, createLocalUser, createAuditLog, recordLoginAttempt, revokeUserSessions, createClaim, createClient, createContract, createDocument, createDriver, createEmployee, updateEmployee, archiveEmployee, listEmployees, linkEmployeeUser, createMaintenanceRequest, createNotification, createPayment, createProject, createPayable, registerPayablePayment, updatePayable, updatePayableStatus, listPayables, getPayableReceipt, createRepresentative, createTask, createVehicle, createVehicleExpense, createVehicleRevenue, getVehicleFinancialProfile, getVehicleReceipt, listVehicleFinancialSummaries, updateVehicleExpense, listAuditLogs, listClaims, listClients, listContracts, listDocuments, listDrivers, listMaintenanceRequests, listNotifications, getNotification, listPayments, listProjects, listRepresentatives, listSettings, listTasks, listTaskAssignees, listUsers, listVehicles, getCompanyReport, getMaintenanceCostForPeriod, getContractRelatedModuleAccess, markNotificationRead, updateClaim, updatePayment, updateSetting, updateClient, updateContract, updateContractStatus, updateProject, updateUserRole, updateUserAccess, updateDocument, updateDriver, updateMaintenanceRequest, updateTask, updateVehicle, upsertSetting, getDocument, listInventoryItems, listInventoryMovements, createInventoryItem, updateInventoryItem, recordInventoryMovement, archiveInventoryItem, listInventoryRequests, createInventoryRequest, decideInventoryRequest, issueInventoryRequest, listAccidents, getAccident, listAccidentEvents, createAccident, updateAccident, advanceAccident, listPurchaseRequests, getPurchaseRequest, createPurchaseRequest, updatePurchaseRequest, archivePurchaseRequest, listPurchaseQuotes, createPurchaseQuote, updatePurchaseQuote, selectPurchaseQuote, deletePurchaseQuote, issuePurchaseOrder, seedAccountsIfEmpty, listAccounts, createAccount, updateAccount, archiveAccount, listFiscalPeriods, createFiscalPeriod, closeFiscalPeriod, reopenFiscalPeriod, listJournalEntries, getJournalEntry, createJournalEntry, reverseJournalEntryRecord, getAccountLedger, getTrialBalance, getIncomeStatement, getBalanceSheet, createTaxInvoice, listTaxInvoices, getTaxInvoice, getVatDeclaration } from "./db";
+import { archiveClaim, archiveClient, archiveContract, archiveDocument, archiveDriver, archiveMaintenanceRequest, advanceMaintenanceRequest, decideMaintenanceApproval, settleMaintenanceAdvance, listMaintenanceEvents, archivePayment, archiveVehicleExpense, archiveVehicleRevenue, archiveProject, archiveSetting, deleteSetting, archiveVehicle, assignVehicleDriver, authenticateLocalUser, LastActiveAdminDemotionError, createLocalUser, createAuditLog, recordLoginAttempt, revokeUserSessions, createClaim, createClient, createContract, createDocument, createDriver, createEmployee, updateEmployee, archiveEmployee, listEmployees, linkEmployeeUser, createMaintenanceRequest, createNotification, createPayment, createProject, createPayable, registerPayablePayment, updatePayable, updatePayableStatus, listPayables, getPayableReceipt, createRepresentative, createTask, createVehicle, createVehicleExpense, createVehicleRevenue, getVehicleFinancialProfile, getVehicleReceipt, listVehicleFinancialSummaries, updateVehicleExpense, listAuditLogs, listClaims, listClients, listContracts, listDocuments, listDrivers, listMaintenanceRequests, listNotifications, getNotification, listPayments, listProjects, listRepresentatives, listSettings, listTasks, listTaskAssignees, listUsers, listVehicles, getCompanyReport, getMaintenanceCostForPeriod, getContractRelatedModuleAccess, markNotificationRead, updateClaim, updatePayment, updateSetting, updateClient, updateContract, updateContractStatus, updateProject, updateUserRole, updateUserAccess, updateDocument, updateDriver, updateMaintenanceRequest, updateTask, updateVehicle, upsertSetting, getDocument, listInventoryItems, listInventoryMovements, createInventoryItem, updateInventoryItem, recordInventoryMovement, archiveInventoryItem, listInventoryRequests, createInventoryRequest, decideInventoryRequest, issueInventoryRequest, listAccidents, getAccident, listAccidentEvents, createAccident, updateAccident, advanceAccident, listPurchaseRequests, getPurchaseRequest, createPurchaseRequest, updatePurchaseRequest, archivePurchaseRequest, listPurchaseQuotes, createPurchaseQuote, updatePurchaseQuote, selectPurchaseQuote, deletePurchaseQuote, issuePurchaseOrder, seedAccountsIfEmpty, listAccounts, createAccount, updateAccount, archiveAccount, listFiscalPeriods, createFiscalPeriod, closeFiscalPeriod, reopenFiscalPeriod, listJournalEntries, getJournalEntry, createJournalEntry, reverseJournalEntryRecord, getAccountLedger, getTrialBalance, getIncomeStatement, getBalanceSheet, createTaxInvoice, listTaxInvoices, getTaxInvoice, getVatDeclaration, listPayroll, createPayroll, updatePayroll, deletePayroll, generateMonthlyPayroll, listLeaves, createLeave, updateLeave, archiveLeave } from "./db";
 import { canEditMaintenanceQuote, maintenanceStages, type MaintenanceStage } from "../shared/maintenance-domain";
 import { maintenanceEventForViewer, maintenanceRecordForViewer } from "./maintenance-access";
 import { scopeCompanyReport } from "./report-access";
@@ -155,10 +155,42 @@ const employeeFields = {
   employeeNo: z.string().min(2).max(40), name: z.string().min(2).max(160), nationalId: z.string().max(64).default("—"),
   phone: z.string().max(40).default("—"), email: z.string().email().max(320).or(z.literal("—")).default("—"),
   department: z.string().min(2).max(120).default("الإدارة"), jobTitle: z.string().min(2).max(120).default("موظف"),
+  basicSalary: z.number().int().nonnegative().default(0),
+  housingAllowance: z.number().int().nonnegative().default(0),
+  transportAllowance: z.number().int().nonnegative().default(0),
+  otherAllowance: z.number().int().nonnegative().default(0),
+  contractType: z.string().max(80).default("دوام كامل"),
+  residencyExpiry: z.string().max(32).default("—"),
+  insuranceExpiry: z.string().max(32).default("—"),
   hireDate: z.string().max(32).default("—"), status: z.enum(["نشط", "إجازة", "موقوف", "منتهي الخدمة"]).default("نشط"), notes: z.string().max(4000).optional(),
+  driverId: z.number().int().positive().nullable().optional(),
 };
 const employeeInput = z.object({ ...employeeFields, nationalId: identityInput(10, "رقم هوية الموظف أو إقامته يجب أن يتكون من 10 أرقام") });
 const employeeUpdateInput = z.object({ id: z.number().int().positive(), data: z.object(employeeFields).partial() });
+const payrollInput = z.object({
+  employeeId: z.number().int().positive(),
+  employeeName: z.string().min(2).max(160),
+  month: z.string().min(1).max(20),
+  basicSalary: z.number().int().nonnegative().default(0),
+  allowances: z.number().int().nonnegative().default(0),
+  deductions: z.number().int().nonnegative().default(0),
+  netSalary: z.number().int().default(0),
+  status: z.enum(["مسودة", "معتمد", "تم الصرف"]).default("مسودة"),
+  paidAt: z.string().max(32).nullable().optional(),
+  notes: z.string().max(4000).nullable().optional(),
+});
+const leaveInput = z.object({
+  employeeId: z.number().int().positive(),
+  employeeName: z.string().min(2).max(160),
+  type: z.enum(["سنوية", "مرضية", "طارئة", "بدون راتب"]).default("سنوية"),
+  startDate: z.string().min(1).max(32),
+  endDate: z.string().min(1).max(32),
+  days: z.number().int().positive().default(1),
+  reason: z.string().max(255).default("—"),
+  status: z.enum(["قيد المراجعة", "معتمدة", "مرفوضة"]).default("قيد المراجعة"),
+  approvedBy: z.string().max(160).nullable().optional(),
+  notes: z.string().max(4000).nullable().optional(),
+});
 const maintenanceInput = z.object({
   ref: z.string().min(2).max(40),
   vehicle: z.string().min(2).max(80),
@@ -408,6 +440,62 @@ export const appRouter = router({
     }),
     archive: permissionProcedure("employees").input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => ({ success: await archiveEmployee(input.id, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }) })),
     linkUser: adminProcedure.input(z.object({ employeeId: z.number().int().positive(), userId: z.number().int().positive().nullable() })).mutation(async ({ ctx, input }) => requireRecord(await linkEmployeeUser(input.employeeId, input.userId, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }), "ربط حساب الموظف")),
+  }),
+  payroll: router({
+    list: permissionProcedure("employees")
+      .input(z.object({ month: z.string().optional() }).optional())
+      .query(async ({ input }) => (await listPayroll(input?.month)) ?? []),
+    create: permissionProcedure("employees")
+      .input(payrollInput)
+      .mutation(async ({ input }) =>
+        requireRecord(await createPayroll(input), "مسير الراتب")
+      ),
+    update: permissionProcedure("employees")
+      .input(
+        z.object({
+          id: z.number().int().positive(),
+          data: payrollInput.partial(),
+        })
+      )
+      .mutation(async ({ input }) =>
+        requireRecord(await updatePayroll(input.id, input.data), "مسير الراتب")
+      ),
+    generateMonth: permissionProcedure("employees")
+      .input(z.object({ month: z.string().min(1) }))
+      .mutation(async ({ input }) =>
+        requireRecord(
+          await generateMonthlyPayroll(input.month),
+          "توليد مسير الرواتب"
+        )
+      ),
+    delete: permissionProcedure("employees")
+      .input(z.object({ id: z.number().int().positive() }))
+      .mutation(async ({ input }) => ({
+        success: await deletePayroll(input.id),
+      })),
+  }),
+  leaves: router({
+    list: permissionProcedure("employees").query(async () => (await listLeaves()) ?? []),
+    create: permissionProcedure("employees")
+      .input(leaveInput)
+      .mutation(async ({ input }) =>
+        requireRecord(await createLeave(input), "طلب الإجازة")
+      ),
+    update: permissionProcedure("employees")
+      .input(
+        z.object({
+          id: z.number().int().positive(),
+          data: leaveInput.partial(),
+        })
+      )
+      .mutation(async ({ input }) =>
+        requireRecord(await updateLeave(input.id, input.data), "طلب الإجازة")
+      ),
+    archive: permissionProcedure("employees")
+      .input(z.object({ id: z.number().int().positive() }))
+      .mutation(async ({ input }) => ({
+        success: await archiveLeave(input.id),
+      })),
   }),
   maintenance: router({
     list: permissionProcedure("maintenance").query(async ({ ctx }) => (await listMaintenanceRequests() ?? []).map(row => maintenanceRecordForViewer(row, hasModulePermission(ctx.user, "finance"), hasModulePermission(ctx.user, "vehicles")))),

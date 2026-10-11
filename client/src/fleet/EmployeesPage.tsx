@@ -1,23 +1,48 @@
-import React, { useLayoutEffect, useState } from "react";
+import React, { useLayoutEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
-import { matchesQuickSearch } from "@/lib/quick-search";
 import { formatCompanyDate } from "@shared/date-utils";
-import { isOptionalFixedLengthIdentity, normalizeIdentityNumber, normalizeNumericInput } from "@shared/identity-number";
-import { isLinkedDocument } from "@/lib/documentRelations";
-import { Archive, Pencil, Upload } from "lucide-react";
-import type { ModuleKey, Row, Vehicle, Document, ProjectRow, EmployeeRow, ImportConfig } from "./types";
 import {
-  Badge,
-  PageHeader,
-  TableShell,
-  Modal,
-  Field,
-  FormActions,
-  ImportModal,
-  DocumentFileActions,
-  exportCsv,
-} from "./common";
+  isOptionalFixedLengthIdentity,
+  normalizeIdentityNumber,
+} from "@shared/identity-number";
+import {
+  Users,
+  DollarSign,
+  Calendar,
+  Clock,
+  Truck,
+} from "lucide-react";
+import type {
+  ModuleKey,
+  Row,
+  Vehicle,
+  Document,
+  ProjectRow,
+  EmployeeRow,
+  PayrollRow,
+  LeaveRow,
+  Driver,
+} from "./types";
+import { PageHeader, ImportModal } from "./common";
+import {
+  WorkforceFactory,
+  WorkforceMember,
+  DriverWorkforceMember,
+  WorkforceComplianceInspector,
+} from "@shared/workforce-domain";
+
+// Modular Clean Workforce Subcomponents
+import { WorkforceStatsCards } from "./workforce/WorkforceStatsCards";
+import { WorkforceTable } from "./workforce/WorkforceTable";
+import { PayrollSection } from "./workforce/PayrollSection";
+import { PayrollModal } from "./workforce/PayrollModal";
+import { LeavesSection } from "./workforce/LeavesSection";
+import { LeaveModal } from "./workforce/LeaveModal";
+import { ResidenciesComplianceSection } from "./workforce/ResidenciesComplianceSection";
+import { FleetLicensesSection } from "./workforce/FleetLicensesSection";
+import { EmployeeProfileModal } from "./workforce/EmployeeProfileModal";
+import { EmployeeFormModal } from "./workforce/EmployeeFormModal";
 
 export function EmployeesPage({
   canAccess,
@@ -27,20 +52,90 @@ export function EmployeesPage({
   canManageAccounts: boolean;
 }) {
   const utils = trpc.useUtils();
-  const { data: employees = [] } = trpc.employees.list.useQuery(undefined, { staleTime: 20000 });
-  const { data: userAccounts = [] } = trpc.users.list.useQuery(undefined, { enabled: canManageAccounts, staleTime: 20000 });
-  const { data: employeeDocuments = [] } = trpc.documents.list.useQuery(undefined, { enabled: canAccess("documents") });
-  const { data: employeeVehicles = [] } = trpc.vehicles.list.useQuery(undefined, { enabled: canAccess("vehicles") });
-  const { data: employeeProjects = [] } = trpc.projects.list.useQuery(undefined, { enabled: canAccess("projects") });
+
+  // Navigation Subtabs
+  const [mainTab, setMainTab] = useState<
+    "employees" | "payroll" | "leaves" | "residencies" | "drivers"
+  >("employees");
+
+  // Filter tabs for each view
+  const [employeeTab, setEmployeeTab] = useState("الكل");
+  const [payrollTab, setPayrollTab] = useState("الكل");
+  const [leaveTab, setLeaveTab] = useState("الكل");
+  const [residencyTab, setResidencyTab] = useState("الكل");
+  const [driverTab, setDriverTab] = useState("الكل");
+
+  // Queries
+  const { data: employees = [] } = trpc.employees.list.useQuery(undefined, {
+    staleTime: 20000,
+  });
+
+  const [payrollMonth, setPayrollMonth] = useState(() => {
+    const now = new Date();
+    return `${now.getMonth() + 1}-${now.getFullYear()}`;
+  });
+
+  const { data: payrollList = [] } = trpc.payroll.list.useQuery(
+    { month: payrollMonth },
+    { staleTime: 20000 }
+  );
+
+  const { data: leavesList = [] } = trpc.leaves.list.useQuery(undefined, {
+    staleTime: 20000,
+  });
+
+  const { data: driversList = [] } = trpc.drivers.list.useQuery(undefined, {
+    enabled: canAccess("drivers"),
+    staleTime: 20000,
+  });
+
+  const { data: userAccounts = [] } = trpc.users.list.useQuery(undefined, {
+    enabled: canManageAccounts,
+    staleTime: 20000,
+  });
+
+  const { data: employeeDocuments = [] } = trpc.documents.list.useQuery(
+    undefined,
+    { enabled: canAccess("documents") }
+  );
+
+  const { data: employeeVehicles = [] } = trpc.vehicles.list.useQuery(
+    undefined,
+    { enabled: canAccess("vehicles") }
+  );
+
+  const { data: employeeProjects = [] } = trpc.projects.list.useQuery(
+    undefined,
+    { enabled: canAccess("projects") }
+  );
+
+  // Mutations
   const createEmployee = trpc.employees.create.useMutation();
   const updateEmployee = trpc.employees.update.useMutation();
   const archiveEmployee = trpc.employees.archive.useMutation();
   const linkEmployeeUser = trpc.employees.linkUser.useMutation();
+
+  const createDriver = trpc.drivers.create.useMutation();
+  const updateDriver = trpc.drivers.update.useMutation();
+  const archiveDriver = trpc.drivers.archive.useMutation();
+  const assignDriverVehicle = trpc.vehicles.assignDriver.useMutation();
+
+  const createPayroll = trpc.payroll.create.useMutation();
+  const updatePayroll = trpc.payroll.update.useMutation();
+  const deletePayroll = trpc.payroll.delete.useMutation();
+  const generateMonthPayroll = trpc.payroll.generateMonth.useMutation();
+
+  const createLeave = trpc.leaves.create.useMutation();
+  const updateLeave = trpc.leaves.update.useMutation();
+  const archiveLeave = trpc.leaves.archive.useMutation();
+
+  // Local state
   const [form, setForm] = useState<Row | null>(null);
   const [search, setSearch] = useState("");
-  const [tab, setTab] = useState("الكل");
   const [profile, setProfile] = useState<EmployeeRow | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [payrollModal, setPayrollModal] = useState<PayrollRow | "new" | null>(null);
+  const [leaveModal, setLeaveModal] = useState<LeaveRow | "new" | null>(null);
 
   useLayoutEffect(() => {
     setForm(null);
@@ -55,25 +150,111 @@ export function EmployeesPage({
   ]);
 
   const list = employees as EmployeeRow[];
+
+  const driversById = useMemo(() => {
+    const map = new Map<number, Driver>();
+    (driversList as Driver[]).forEach((d) => map.set(d.id, d));
+    return map;
+  }, [driversList]);
+
+  const vehiclesByDriverId = useMemo(() => {
+    const map = new Map<number, Vehicle>();
+    (employeeVehicles as Vehicle[]).forEach((v) => {
+      if (v.driverId) map.set(v.driverId, v);
+    });
+    return map;
+  }, [employeeVehicles]);
+
+  // Unified OOP Domain Models instantiation
+  const mergedWorkforceDomain = useMemo<(WorkforceMember | DriverWorkforceMember)[]>(() => {
+    const empList = list.map((emp) => {
+      const matchedDrv = emp.driverId ? driversById.get(emp.driverId) : null;
+      const matchedVeh = emp.driverId ? vehiclesByDriverId.get(emp.driverId) : null;
+      return WorkforceFactory.create(emp, matchedDrv, matchedVeh);
+    });
+
+    const linkedDriverIds = new Set(list.map((e) => e.driverId).filter(Boolean));
+    const unlinkedDrivers = (driversList as Driver[]).filter(
+      (d) => !linkedDriverIds.has(d.id)
+    );
+
+    const syntheticDrivers = unlinkedDrivers.map((d) => {
+      const matchedVeh = vehiclesByDriverId.get(d.id);
+      return WorkforceFactory.createSyntheticDriver(d, matchedVeh);
+    });
+
+    return [...empList, ...syntheticDrivers];
+  }, [list, driversList, driversById, vehiclesByDriverId]);
+
+  // Inspection service for compliance
+  const complianceInspection = useMemo(() => {
+    return WorkforceComplianceInspector.inspect(mergedWorkforceDomain);
+  }, [mergedWorkforceDomain]);
+
+  const totalMonthlyPayroll = useMemo(() => {
+    return list.reduce((sum, e) => {
+      return (
+        sum +
+        Number(e.basicSalary || 0) +
+        Number(e.housingAllowance || 0) +
+        Number(e.transportAllowance || 0) +
+        Number(e.otherAllowance || 0)
+      );
+    }, 0);
+  }, [list]);
+
   const blank = (): Row => ({
     id: Date.now(),
-    employeeNo: `EMP-${formatCompanyDate().slice(0, 4)}-${Math.floor(1000 + Math.random() * 9000)}`,
+    employeeNo: `EMP-${formatCompanyDate().slice(0, 4)}-${Math.floor(
+      1000 + Math.random() * 9000
+    )}`,
     name: "",
     nationalId: "—",
     phone: "—",
     email: "—",
     department: "الإدارة",
     jobTitle: "موظف",
+    basicSalary: 0,
+    housingAllowance: 0,
+    transportAllowance: 0,
+    otherAllowance: 0,
+    contractType: "دوام كامل",
+    residencyExpiry: "—",
+    insuranceExpiry: "—",
     hireDate: formatCompanyDate(),
     status: "نشط",
     notes: "",
+    isDriver: false,
+    driverLicense: "خصوصي",
+    driverRenewal: "—",
+    driverVehicleId: null,
   });
 
-  const filtered = list.filter(
-    (employee) => matchesQuickSearch(employee, search) && (tab === "الكل" || employee.status === tab)
-  );
+  const openEditForm = (employee: any) => {
+    const isDrv = Boolean(employee.driverId || employee.jobTitle?.includes("سائق"));
+    const matchedDrv = employee.driverId ? driversById.get(employee.driverId) : null;
+    const matchedVeh = employee.driverId ? vehiclesByDriverId.get(employee.driverId) : null;
 
-  const save = (event: React.FormEvent) => {
+    setForm({
+      ...employee,
+      isDriver: isDrv,
+      driverLicense: matchedDrv?.license || "خصوصي",
+      driverRenewal: matchedDrv?.renewal || "—",
+      driverVehicleId: matchedVeh?.id ?? matchedDrv?.vehicleId ?? null,
+    });
+  };
+
+  const openAddForm = () => {
+    setForm({
+      ...blank(),
+      isDriver: false,
+      driverLicense: "خصوصي",
+      driverRenewal: "—",
+      driverVehicleId: null,
+    });
+  };
+
+  const saveEmployee = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!form?.name || !form?.employeeNo || !form?.department || !form?.jobTitle) {
       toast.error("أكمل الاسم والرقم والقسم والمسمى الوظيفي");
@@ -81,491 +262,694 @@ export function EmployeesPage({
     }
     const original = list.find((item) => item.id === form.id);
     const isExisting = Boolean(original);
-    if ((!isExisting || form.nationalId !== original?.nationalId) && !isOptionalFixedLengthIdentity(form.nationalId, 10)) {
+    if (
+      (!isExisting || form.nationalId !== original?.nationalId) &&
+      !isOptionalFixedLengthIdentity(form.nationalId, 10)
+    ) {
       toast.error("رقم هوية الموظف أو إقامته يجب أن يتكون من 10 أرقام");
       return;
     }
-    const { id, ...data } = form;
+    const {
+      id,
+      isDriver,
+      driverLicense,
+      driverRenewal,
+      driverVehicleId,
+      isSyntheticDriver,
+      rawDriver,
+      ...data
+    } = form;
+
     if (!isExisting || form.nationalId !== original?.nationalId) {
       data.nationalId = normalizeIdentityNumber(form.nationalId);
     }
-    const done = () => {
+    data.basicSalary = Number(data.basicSalary || 0);
+    data.housingAllowance = Number(data.housingAllowance || 0);
+    data.transportAllowance = Number(data.transportAllowance || 0);
+    data.otherAllowance = Number(data.otherAllowance || 0);
+
+    try {
+      let linkedDriverId = data.driverId ?? null;
+
+      if (isDriver) {
+        if (linkedDriverId) {
+          await updateDriver.mutateAsync({
+            id: linkedDriverId,
+            data: {
+              name: data.name,
+              phone: data.phone || "—",
+              idNo: data.nationalId || "—",
+              license: driverLicense || "خصوصي",
+              renewal: driverRenewal || "—",
+            },
+          });
+        } else {
+          const createdDriver = await createDriver.mutateAsync({
+            name: data.name,
+            phone: data.phone || "—",
+            idNo: data.nationalId || "—",
+            license: driverLicense || "خصوصي",
+            renewal: driverRenewal || "—",
+            vehicleId: driverVehicleId ?? null,
+            status: driverVehicleId ? "مشغول" : "متاح",
+          });
+          linkedDriverId = createdDriver.id;
+        }
+
+        if (driverVehicleId && linkedDriverId) {
+          await assignDriverVehicle.mutateAsync({
+            vehicleId: driverVehicleId,
+            driverId: linkedDriverId,
+          });
+        }
+      } else if (linkedDriverId) {
+        linkedDriverId = null;
+      }
+
+      data.driverId = linkedDriverId;
+
+      if (isExisting && !isSyntheticDriver) {
+        await updateEmployee.mutateAsync({ id, data });
+      } else {
+        await createEmployee.mutateAsync(data as any);
+      }
+
       setForm(null);
-      utils.employees.list.invalidate();
-      toast.success("تم حفظ ملف الموظف");
-    };
-    if (list.some((item) => item.id === id)) {
-      updateEmployee.mutate({ id, data }, { onSuccess: done, onError: (error) => toast.error(error.message) });
-    } else {
-      createEmployee.mutate(data as any, { onSuccess: done, onError: (error) => toast.error(error.message) });
+      await Promise.all([
+        utils.employees.list.invalidate(),
+        utils.drivers.list.invalidate(),
+        utils.vehicles.list.invalidate(),
+      ]);
+      toast.success("تم حفظ ملف الموظف وتحديث بيانات السائق والأسطول بنجاح");
+    } catch (err: any) {
+      toast.error(`تعذر الحفظ: ${err.message}`);
     }
   };
 
-  const archive = (employee: EmployeeRow) =>
+  const archive = (employee: any) =>
     toast(
-      `إنهاء ملف الموظف ${employee.name}؟ سيُزال إسناده للمشاريع والمركبات، وسيُعطّل حساب دخوله المرتبط إن وجد، مع إبقاء السجلات التاريخية.`,
+      `إنهاء ملف ${employee.name}؟ سيُزال إسناده للمشاريع والمركبات، وسيُعطّل حساب دخوله المرتبط إن وجد، مع إبقاء السجلات التاريخية.`,
       {
         action: {
           label: "تأكيد الإنهاء",
-          onClick: () =>
-            archiveEmployee.mutate(
-              { id: employee.id },
-              {
-                onSuccess: () => {
-                  utils.employees.list.invalidate();
-                  utils.vehicles.list.invalidate();
-                  utils.projects.list.invalidate();
-                  if (canManageAccounts) utils.users.list.invalidate();
-                  toast.success("تم إنهاء ملف الموظف وفك إسناداته وتعطيل حسابه المرتبط");
-                },
-                onError: (error) => toast.error(error.message),
-              }
-            ),
+          onClick: () => {
+            if (employee.isSyntheticDriver) {
+              archiveDriver.mutate(
+                { id: employee.driverId },
+                {
+                  onSuccess: () => {
+                    utils.drivers.list.invalidate();
+                    utils.vehicles.list.invalidate();
+                    toast.success("تم إنهاء وأرشفة ملف السائق");
+                  },
+                  onError: (error) => toast.error(error.message),
+                }
+              );
+            } else {
+              archiveEmployee.mutate(
+                { id: employee.id },
+                {
+                  onSuccess: () => {
+                    utils.employees.list.invalidate();
+                    utils.vehicles.list.invalidate();
+                    utils.projects.list.invalidate();
+                    if (employee.driverId) utils.drivers.list.invalidate();
+                    if (canManageAccounts) utils.users.list.invalidate();
+                    toast.success(
+                      "تم إنهاء ملف الموظف وفك إسناداته وتعطيل حسابه المرتبط"
+                    );
+                  },
+                  onError: (error) => toast.error(error.message),
+                }
+              );
+            }
+          },
         },
         cancel: { label: "إلغاء", onClick: () => {} },
       }
     );
 
+  const handleGeneratePayroll = () => {
+    if (!payrollMonth) return;
+    toast(`توليد مسير الرواتب لشهر ${payrollMonth} لجميع الموظفين النشطين؟`, {
+      action: {
+        label: "توليد الآن",
+        onClick: () => {
+          generateMonthPayroll.mutate(
+            { month: payrollMonth },
+            {
+              onSuccess: () => {
+                utils.payroll.list.invalidate();
+                toast.success(`تم توليد مسير الرواتب لشهر ${payrollMonth} بنجاح`);
+              },
+              onError: (error) => toast.error(error.message),
+            }
+          );
+        },
+      },
+      cancel: { label: "إلغاء", onClick: () => {} },
+    });
+  };
+
+  const handleDeletePayroll = (item: PayrollRow) => {
+    toast(`تأكيد حذف مسير راتب ${item.employeeName} لشهر ${item.month}؟`, {
+      action: {
+        label: "تأكيد الحذف",
+        onClick: () => {
+          deletePayroll.mutate(
+            { id: item.id },
+            {
+              onSuccess: () => {
+                utils.payroll.list.invalidate();
+                toast.success("تم حذف مسير الراتب بنجاح");
+              },
+              onError: (err) => toast.error(`تعذر حذف المسير: ${err.message}`),
+            }
+          );
+        },
+      },
+      cancel: { label: "إلغاء", onClick: () => {} },
+    });
+  };
+
   return (
     <>
       <PageHeader
-        eyebrow="الموارد البشرية / الملفات"
-        title="الموظفون"
-        description="ملفات العاملين غير السائقين، مع حالة العمل وبيانات الاتصال والإسناد التشغيلي."
-        action="إضافة موظف"
-        onAction={() => setForm(blank())}
+        eyebrow="الهتاري بلس / الموارد البشرية والأسطول"
+        title="إدارة الموارد البشرية والأسطول"
+        description="سجل القوى العاملة الموحد (موظفو الإدارة وسائقو الأسطول)، إسناد المركبات، مسيرات الرواتب الشهرية، ومتابعة الرخص والإقامات."
+        action={
+          mainTab === "employees"
+            ? "إضافة كادر جديد"
+            : mainTab === "payroll"
+            ? "توليد مسير الشهر"
+            : mainTab === "leaves"
+            ? "طلب إجازة جديدة"
+            : undefined
+        }
+        onAction={
+          mainTab === "employees"
+            ? openAddForm
+            : mainTab === "payroll"
+            ? handleGeneratePayroll
+            : mainTab === "leaves"
+            ? () => setLeaveModal("new")
+            : undefined
+        }
       />
 
-      <div className="quick-metrics">
-        <div>
-          <span>إجمالي الملفات</span>
-          <strong>{list.length.toLocaleString("en-US")}</strong>
-        </div>
-        <div>
-          <span>على رأس العمل</span>
-          <strong className="green-text">
-            {list.filter((item) => item.status === "نشط").length.toLocaleString("en-US")}
-          </strong>
-        </div>
-        <div>
-          <span>إجازة</span>
-          <strong className="amber-text">
-            {list.filter((item) => item.status === "إجازة").length.toLocaleString("en-US")}
-          </strong>
-        </div>
-        <div>
-          <span>غير نشط / منتهي</span>
-          <strong className="red-text">
-            {list.filter((item) => ["موقوف", "منتهي الخدمة"].includes(item.status)).length.toLocaleString("en-US")}
-          </strong>
-        </div>
-        {canManageAccounts && (
-          <>
-            <div>
-              <span>مرتبط بحساب دخول</span>
-              <strong className="green-text">
-                {list.filter((item) => item.userId != null).length.toLocaleString("en-US")}
-              </strong>
-            </div>
-            <div>
-              <span>بلا حساب دخول</span>
-              <strong className="amber-text">
-                {list.filter((item) => item.userId == null && item.status === "نشط").length.toLocaleString("en-US")}
-              </strong>
-            </div>
-          </>
+      {/* Main Subtabs Navigation */}
+      <div
+        className="table-tabs"
+        style={{
+          marginBottom: "1.25rem",
+          background: "white",
+          padding: "0.35rem 0.75rem",
+          borderRadius: "10px",
+          border: "1px solid var(--border-color, #e5e7eb)",
+          display: "flex",
+          gap: "0.75rem",
+        }}
+      >
+        <button
+          className={mainTab === "employees" ? "active" : ""}
+          onClick={() => setMainTab("employees")}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "0.4rem",
+            padding: "0.5rem 0.75rem",
+          }}
+        >
+          <Users size={16} /> سجل الموظفين والسائقين ({mergedWorkforceDomain.length})
+        </button>
+        <button
+          className={mainTab === "payroll" ? "active" : ""}
+          onClick={() => setMainTab("payroll")}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "0.4rem",
+            padding: "0.5rem 0.75rem",
+          }}
+        >
+          <DollarSign size={16} /> مسيرات الرواتب ({payrollList.length})
+        </button>
+        <button
+          className={mainTab === "leaves" ? "active" : ""}
+          onClick={() => setMainTab("leaves")}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "0.4rem",
+            padding: "0.5rem 0.75rem",
+          }}
+        >
+          <Calendar size={16} /> الإجازات ({leavesList.length})
+        </button>
+        <button
+          className={mainTab === "residencies" ? "active" : ""}
+          onClick={() => setMainTab("residencies")}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "0.4rem",
+            padding: "0.5rem 0.75rem",
+          }}
+        >
+          <Clock size={16} /> الإقامات والرخص والتأمين{" "}
+          {complianceInspection.totalIssuesCount > 0
+            ? `(${complianceInspection.totalIssuesCount} ⚠️)`
+            : `(0)`}
+        </button>
+        {canAccess("drivers") && (
+          <button
+            className={mainTab === "drivers" ? "active" : ""}
+            onClick={() => setMainTab("drivers")}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "0.4rem",
+              padding: "0.5rem 0.75rem",
+            }}
+          >
+            <Truck size={16} /> رخص الأسطول ({driversList.length})
+          </button>
         )}
       </div>
 
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: ".5rem" }}>
-        <button className="btn outline" onClick={() => setImportOpen(true)}>
-          <Upload size={15} /> استيراد من CSV
-        </button>
-      </div>
-
-      <TableShell
-        columns={[
-          "رقم الموظف",
-          "الموظف",
-          "القسم",
-          "المسمى الوظيفي",
-          "الهاتف",
-          "الهوية",
-          "الحالة",
-          ...(canManageAccounts ? ["حساب الدخول"] : []),
-          "تاريخ المباشرة",
-        ]}
-        onExport={() =>
-          exportCsv(
-            filtered,
-            ["employeeNo", "name", "department", "jobTitle", "phone", "nationalId", "email", "status", "hireDate"],
-            "employees"
-          )
-        }
-        search={search}
-        setSearch={setSearch}
-        tabs={["الكل", "نشط", "إجازة", "موقوف", "منتهي الخدمة"]}
-        activeTab={tab}
-        setActiveTab={setTab}
-        addLabel="إضافة موظف"
-        onAdd={() => setForm(blank())}
-      >
-        {filtered.map((employee) => (
-          <tr key={employee.id}>
-            <td>
-              <strong className="table-primary">{employee.employeeNo}</strong>
-            </td>
-            <td>
-              <button className="driver-name-button" onClick={() => setProfile(employee)}>
-                <span className="avatar">{employee.name.slice(0, 1)}</span>
-                <span>
-                  <strong>{employee.name}</strong>
-                  <small>{employee.email || "اضغط لعرض الملف والمستندات"}</small>
-                </span>
-              </button>
-            </td>
-            <td>{employee.department}</td>
-            <td>{employee.jobTitle}</td>
-            <td>{employee.phone}</td>
-            <td>{employee.nationalId}</td>
-            <td>
-              <Badge>{employee.status}</Badge>
-            </td>
-            {canManageAccounts && (
-              <td>
-                <Badge>{employee.userId ? "مرتبط" : "غير مرتبط"}</Badge>
-              </td>
-            )}
-            <td>{employee.hireDate}</td>
-            <td className="actions-cell">
-              <button className="row-menu-btn" title="تعديل" onClick={() => setForm({ ...employee })}>
-                <Pencil size={15} />
-              </button>
-              <button className="row-menu-btn danger" title="إنهاء/أرشفة" onClick={() => archive(employee)}>
-                <Archive size={15} />
-              </button>
-            </td>
-          </tr>
-        ))}
-      </TableShell>
-
-      {profile && (
-        <Modal title={`ملف الموظف · ${profile.name}`} onClose={() => setProfile(null)} wide>
-          <div className="driver-summary">
-            <span className="avatar">{profile.name.slice(0, 1)}</span>
-            <div>
-              <strong>{profile.name}</strong>
-              <span>
-                {profile.employeeNo} · {profile.jobTitle} · {profile.department}
-              </span>
-              <Badge>{profile.status}</Badge>
-            </div>
-          </div>
-
-          <div className="quick-metrics">
-            <div>
-              <span>الهاتف</span>
-              <strong>{profile.phone}</strong>
-            </div>
-            <div>
-              <span>الهوية</span>
-              <strong>{profile.nationalId}</strong>
-            </div>
-            <div>
-              <span>البريد</span>
-              <strong>{profile.email}</strong>
-            </div>
-            <div>
-              <span>تاريخ المباشرة</span>
-              <strong>{profile.hireDate}</strong>
-            </div>
-          </div>
-
-          {canManageAccounts && (
-            <section className="surface employee-account-link">
-              <div>
-                <h3>حساب النظام</h3>
-                <span>اربط ملف الموظف بحساب الدخول والمهام الخاص به. الحساب الواحد يرتبط بملف موظف واحد.</span>
-              </div>
-              <label className="field">
-                <span>حساب المستخدم</span>
-                <select
-                  value={profile.userId ?? ""}
-                  onChange={(event) => {
-                    const userId = event.target.value ? Number(event.target.value) : null;
-                    linkEmployeeUser.mutate(
-                      { employeeId: profile.id, userId },
-                      {
-                        onSuccess: (saved) => {
-                          setProfile((current) => (current ? { ...current, userId: saved.userId ?? null } : current));
-                          utils.employees.list.invalidate();
-                          toast.success(userId ? "تم ربط حساب الدخول بملف الموظف" : "تم فصل حساب الدخول عن ملف الموظف");
-                        },
-                        onError: (error) => toast.error(`تعذر ربط الحساب: ${error.message}`),
-                      }
-                    );
-                  }}
-                  disabled={linkEmployeeUser.isPending}
-                >
-                  <option value="">بدون حساب مرتبط</option>
-                  {(
-                    userAccounts as Array<{
-                      id: number;
-                      name: string | null;
-                      username: string | null;
-                      role: string;
-                      isActive: number;
-                    }>
-                  )
-                    .filter((account) => account.isActive === 1 || account.id === profile.userId)
-                    .map((account) => (
-                      <option key={account.id} value={account.id}>
-                        {account.name || account.username} · {account.username} ·{" "}
-                        {account.isActive === 1 ? "نشط" : "موقوف"}
-                      </option>
-                    ))}
-                </select>
-              </label>
-              {profile.userId ? (
-                (() => {
-                  const account = (
-                    userAccounts as Array<{
-                      id: number;
-                      name: string | null;
-                      username: string | null;
-                      role: string;
-                      isActive: number;
-                    }>
-                  ).find((item) => item.id === profile.userId);
-                  return (
-                    <div className="employee-account-status">
-                      {account ? (
-                        <>
-                          <Badge>{account.isActive === 1 ? "نشط" : "موقوف"}</Badge>
-                          <span>
-                            {account.username} · {account.role === "admin" ? "مدير النظام" : "مستخدم"}
-                          </span>
-                        </>
-                      ) : (
-                        <span>الحساب المرتبط #{profile.userId}</span>
-                      )}
-                    </div>
-                  );
-                })()
-              ) : null}
-            </section>
-          )}
-
-          {(canAccess("vehicles") || canAccess("projects")) && (
-            <section className="surface" style={{ padding: "1rem", marginTop: "1rem" }}>
-              <div className="section-head">
-                <div>
-                  <h3>الإسنادات التشغيلية</h3>
-                  <span>المركبات والمشاريع المرتبطة حاليًا بهذا الموظف</span>
-                </div>
-              </div>
-              <div className="quick-metrics">
-                {canAccess("vehicles") && (
-                  <div>
-                    <span>المركبات المسؤول عنها</span>
-                    <strong>
-                      {(employeeVehicles as Vehicle[]).filter((vehicle) => vehicle.employeeId === profile.id).length}
-                    </strong>
-                  </div>
-                )}
-                {canAccess("projects") && (
-                  <div>
-                    <span>المشاريع التي يديرها</span>
-                    <strong>
-                      {(employeeProjects as ProjectRow[]).filter((project) => project.managerEmployeeId === profile.id)
-                        .length}
-                    </strong>
-                  </div>
-                )}
-              </div>
-              <div className="compact-list">
-                {canAccess("vehicles") &&
-                  (employeeVehicles as Vehicle[])
-                    .filter((vehicle) => vehicle.employeeId === profile.id)
-                    .map((vehicle) => (
-                      <div className="compact-row" key={`vehicle-${vehicle.id}`}>
-                        <div className="compact-main">
-                          <strong>مركبة · {vehicle.plate}</strong>
-                          <small>
-                            {vehicle.brand} {vehicle.model} · السائق {canAccess("drivers") ? vehicle.driver : "—"}
-                          </small>
-                        </div>
-                        <Badge>{vehicle.status}</Badge>
-                      </div>
-                    ))}
-                {canAccess("projects") &&
-                  (employeeProjects as ProjectRow[])
-                    .filter((project) => project.managerEmployeeId === profile.id)
-                    .map((project) => (
-                      <div className="compact-row" key={`project-${project.id}`}>
-                        <div className="compact-main">
-                          <strong>مشروع · {project.name}</strong>
-                          <small>
-                            {project.ref} · العميل {canAccess("clients") ? project.client : "—"}
-                          </small>
-                        </div>
-                        <Badge>{project.status}</Badge>
-                      </div>
-                    ))}
-              </div>
-            </section>
-          )}
-
-          <section className="surface" style={{ padding: "1rem", marginTop: "1rem" }}>
-            <div className="section-head">
-              <div>
-                <h3>المستندات المرتبطة</h3>
-                <span>
-                  {canAccess("documents")
-                    ? "المستندات المحفوظة باسم هذا الموظف"
-                    : "يلزم إذن المستندات لعرض المرفقات"}
-                </span>
-              </div>
-            </div>
-            {canAccess("documents") ? (
-              (employeeDocuments as Document[]).filter((doc) => isLinkedDocument(doc, "موظف", profile.id)).length ? (
-                <div className="compact-list">
-                  {(employeeDocuments as Document[])
-                    .filter((doc) => isLinkedDocument(doc, "موظف", profile.id))
-                    .map((doc) => (
-                      <div className="compact-row" key={doc.id}>
-                        <div className="compact-main">
-                          <strong>{doc.name}</strong>
-                          <small>
-                            {doc.type} · ينتهي {doc.expiry}
-                          </small>
-                        </div>
-                        <Badge>{doc.status}</Badge>
-                        <DocumentFileActions file={doc} />
-                      </div>
-                    ))}
-                </div>
-              ) : (
-                <div className="empty-state" style={{ padding: "1.5rem" }}>
-                  لا توجد مستندات مرتبطة بهذا الموظف.
-                </div>
-              )
-            ) : null}
-          </section>
-
-          <div className="detail-footer">
-            <button
-              className="btn outline"
-              onClick={() => {
-                setForm({ ...profile });
-                setProfile(null);
-              }}
-            >
-              تعديل الملف
-            </button>
-            <button className="btn primary" onClick={() => setProfile(null)}>
-              إغلاق
-            </button>
-          </div>
-        </Modal>
+      {/* TAB 1: EMPLOYEES & DRIVERS WORKFORCE */}
+      {mainTab === "employees" && (
+        <>
+          <WorkforceStatsCards
+            members={mergedWorkforceDomain}
+            totalMonthlyPayroll={totalMonthlyPayroll}
+            expiringDocsCount={complianceInspection.totalIssuesCount}
+          />
+          <WorkforceTable
+            members={mergedWorkforceDomain}
+            search={search}
+            setSearch={setSearch}
+            activeTab={employeeTab}
+            setActiveTab={setEmployeeTab}
+            canManageAccounts={canManageAccounts}
+            onViewProfile={(m) => {
+              const fullEmp = list.find((e) => e.id === m.id) || m;
+              setProfile(fullEmp as EmployeeRow);
+            }}
+            onEdit={openEditForm}
+            onArchive={archive}
+            onAdd={openAddForm}
+          />
+        </>
       )}
 
-      {form && (
-        <Modal
-          title={list.some((item) => item.id === form.id) ? "تعديل ملف الموظف" : "إضافة موظف"}
-          onClose={() => setForm(null)}
-          wide
-        >
-          <form onSubmit={save}>
-            <div className="form-grid">
-              <Field
-                label="رقم الموظف *"
-                value={form.employeeNo}
-                onChange={(value) => setForm((prev) => (prev ? { ...prev, employeeNo: value } : prev))}
-              />
-              <Field
-                label="الاسم الكامل *"
-                value={form.name}
-                onChange={(value) => setForm((prev) => (prev ? { ...prev, name: value } : prev))}
-              />
-              <Field
-                label="رقم الهوية / الإقامة"
-                value={form.nationalId}
-                maxLength={10}
-                inputMode="numeric"
-                onChange={(value) =>
-                  setForm((prev) => (prev ? { ...prev, nationalId: normalizeNumericInput(value, 10) } : prev))
-                }
-              />
-              <Field
-                label="رقم الهاتف"
-                value={form.phone}
-                onChange={(value) => setForm((prev) => (prev ? { ...prev, phone: value } : prev))}
-              />
-              <Field
-                label="البريد الإلكتروني"
-                value={form.email === "—" ? "" : form.email}
-                onChange={(value) => setForm((prev) => (prev ? { ...prev, email: value || "—" } : prev))}
-              />
-              <Field
-                label="القسم"
-                value={form.department}
-                onChange={(value) => setForm((prev) => (prev ? { ...prev, department: value } : prev))}
-              />
-              <Field
-                label="المسمى الوظيفي"
-                value={form.jobTitle}
-                onChange={(value) => setForm((prev) => (prev ? { ...prev, jobTitle: value } : prev))}
-              />
-              <Field
-                label="تاريخ المباشرة"
-                type="date"
-                value={form.hireDate === "—" ? "" : form.hireDate}
-                onChange={(value) => setForm((prev) => (prev ? { ...prev, hireDate: value } : prev))}
-              />
-              <label className="field">
-                <span>الحالة</span>
-                <select
-                  value={form.status}
-                  onChange={(event) => setForm((prev) => (prev ? { ...prev, status: event.target.value } : prev))}
-                >
-                  <option>نشط</option>
-                  <option>إجازة</option>
-                  <option>موقوف</option>
-                  <option>منتهي الخدمة</option>
-                </select>
-              </label>
-              <Field
-                label="ملاحظات"
-                value={form.notes}
-                onChange={(value) => setForm((prev) => (prev ? { ...prev, notes: value } : prev))}
-              />
-            </div>
-            <FormActions onCancel={() => setForm(null)} label="حفظ ملف الموظف" />
-          </form>
-        </Modal>
+      {/* TAB 2: PAYROLL */}
+      {mainTab === "payroll" && (
+        <PayrollSection
+          payrollList={payrollList as PayrollRow[]}
+          payrollMonth={payrollMonth}
+          setPayrollMonth={setPayrollMonth}
+          search={search}
+          setSearch={setSearch}
+          payrollTab={payrollTab}
+          setPayrollTab={setPayrollTab}
+          onRefresh={() => utils.payroll.list.invalidate()}
+          onGenerate={handleGeneratePayroll}
+          isGenerating={generateMonthPayroll.isPending}
+          onOpenNewModal={() => setPayrollModal("new")}
+          onOpenEditModal={(item) => setPayrollModal(item)}
+          onDelete={handleDeletePayroll}
+          onApprove={(id) =>
+            updatePayroll.mutate(
+              { id, data: { status: "معتمد" } },
+              {
+                onSuccess: () => {
+                  utils.payroll.list.invalidate();
+                  toast.success("تم اعتماد المسير");
+                },
+              }
+            )
+          }
+          onDisburse={(id) =>
+            updatePayroll.mutate(
+              {
+                id,
+                data: {
+                  status: "تم الصرف",
+                  paidAt: formatCompanyDate(),
+                },
+              },
+              {
+                onSuccess: () => {
+                  utils.payroll.list.invalidate();
+                  toast.success("تم تأكيد صرف الراتب");
+                },
+              }
+            )
+          }
+        />
       )}
 
+      {/* TAB 3: LEAVES */}
+      {mainTab === "leaves" && (
+        <LeavesSection
+          leavesList={leavesList as LeaveRow[]}
+          employeesList={list}
+          search={search}
+          setSearch={setSearch}
+          leaveTab={leaveTab}
+          setLeaveTab={setLeaveTab}
+          onOpenNewLeave={() => setLeaveModal("new")}
+          onApproveLeave={(id) =>
+            updateLeave.mutate(
+              {
+                id,
+                data: {
+                  status: "معتمدة",
+                  approvedBy: "مدير الموارد البشرية",
+                },
+              },
+              {
+                onSuccess: () => {
+                  utils.leaves.list.invalidate();
+                  toast.success("تمت الموافقة على الإجازة");
+                },
+              }
+            )
+          }
+          onRejectLeave={(id) =>
+            updateLeave.mutate(
+              {
+                id,
+                data: {
+                  status: "مرفوضة",
+                  approvedBy: "مدير الموارد البشرية",
+                },
+              },
+              {
+                onSuccess: () => {
+                  utils.leaves.list.invalidate();
+                  toast.success("تم رفض طلب الإجازة");
+                },
+              }
+            )
+          }
+          onDeleteLeave={(id) =>
+            archiveLeave.mutate(
+              { id },
+              {
+                onSuccess: () => {
+                  utils.leaves.list.invalidate();
+                  toast.success("تم حذف الطلب");
+                },
+              }
+            )
+          }
+        />
+      )}
+
+      {/* TAB 4: RESIDENCIES */}
+      {mainTab === "residencies" && (
+        <ResidenciesComplianceSection
+          employees={list}
+          search={search}
+          setSearch={setSearch}
+          residencyTab={residencyTab}
+          setResidencyTab={setResidencyTab}
+          onRefresh={() => utils.employees.list.invalidate()}
+          onEdit={(emp) => setForm({ ...emp })}
+          onViewProfile={(emp) => setProfile(emp)}
+        />
+      )}
+
+      {/* TAB 5: DRIVERS */}
+      {mainTab === "drivers" && canAccess("drivers") && (
+        <FleetLicensesSection
+          driversList={driversList as Driver[]}
+          search={search}
+          setSearch={setSearch}
+          driverTab={driverTab}
+          setDriverTab={setDriverTab}
+          onRefresh={() => utils.drivers.list.invalidate()}
+        />
+      )}
+
+      {/* MODAL: Employee Profile */}
+      <EmployeeProfileModal
+        profile={profile}
+        onClose={() => setProfile(null)}
+        onEdit={openEditForm}
+        canAccess={canAccess}
+        canManageAccounts={canManageAccounts}
+        driversById={driversById}
+        driversList={driversList as Driver[]}
+        vehiclesByDriverId={vehiclesByDriverId}
+        employeeVehicles={employeeVehicles as Vehicle[]}
+        employeeProjects={employeeProjects as ProjectRow[]}
+        employeeDocuments={employeeDocuments as Document[]}
+        userAccounts={userAccounts as any}
+        onAssignVehicle={(vehicleId, driverId) => {
+          assignDriverVehicle.mutate(
+            { vehicleId, driverId },
+            {
+              onSuccess: () => {
+                utils.vehicles.list.invalidate();
+                utils.drivers.list.invalidate();
+                toast.success("تم إسناد المركبة بنجاح");
+              },
+              onError: (err) => toast.error(err.message),
+            }
+          );
+        }}
+        onUnassignVehicle={(vehicleId) => {
+          assignDriverVehicle.mutate(
+            { vehicleId, driverId: null },
+            {
+              onSuccess: () => {
+                utils.vehicles.list.invalidate();
+                utils.drivers.list.invalidate();
+                toast.success("تم فك إسناد المركبة بنجاح");
+              },
+              onError: (err) => toast.error(err.message),
+            }
+          );
+        }}
+        onLinkUser={(employeeId, userId) => {
+          linkEmployeeUser.mutate(
+            { employeeId, userId },
+            {
+              onSuccess: (saved) => {
+                setProfile((current) =>
+                  current
+                    ? { ...current, userId: saved.userId ?? null }
+                    : current
+                );
+                utils.employees.list.invalidate();
+                toast.success(
+                  userId
+                    ? "تم ربط حساب الدخول بملف الموظف"
+                    : "تم فصل حساب الدخول عن ملف الموظف"
+                );
+              },
+              onError: (error) =>
+                toast.error(`تعذر ربط الحساب: ${error.message}`),
+            }
+          );
+        }}
+        isLinkingUser={linkEmployeeUser.isPending}
+      />
+
+      {/* MODAL: Add/Edit Employee Form */}
+      <EmployeeFormModal
+        form={form}
+        setForm={setForm}
+        onSave={saveEmployee}
+        onClose={() => setForm(null)}
+        isExisting={Boolean(list.some((item) => item.id === form?.id))}
+        employeeVehicles={employeeVehicles as Vehicle[]}
+      />
+
+      {/* MODAL: Payroll Edit / Add */}
+      <PayrollModal
+        payrollModal={payrollModal}
+        onClose={() => setPayrollModal(null)}
+        employeesList={list}
+        onDelete={handleDeletePayroll}
+        onSubmit={(e) => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          const basicSalary = Number(fd.get("basicSalary") || 0);
+          const allowances = Number(fd.get("allowances") || 0);
+          const deductions = Number(fd.get("deductions") || 0);
+          const netSalary = basicSalary + allowances - deductions;
+          const status = fd.get("status") as "مسودة" | "معتمد" | "تم الصرف";
+          const notes = (fd.get("notes") as string) || "";
+
+          if (payrollModal === "new") {
+            const empId = Number(fd.get("employeeId"));
+            const emp = list.find((item) => item.id === empId);
+            if (!emp) {
+              toast.error("اختر الموظف");
+              return;
+            }
+            createPayroll.mutate(
+              {
+                employeeId: emp.id,
+                employeeName: emp.name,
+                month: payrollMonth,
+                basicSalary,
+                allowances,
+                deductions,
+                netSalary,
+                status,
+                notes,
+              },
+              {
+                onSuccess: () => {
+                  utils.payroll.list.invalidate();
+                  setPayrollModal(null);
+                  toast.success("تمت إضافة مسير الراتب");
+                },
+                onError: (err) => toast.error(err.message),
+              }
+            );
+          } else if (payrollModal) {
+            updatePayroll.mutate(
+              {
+                id: payrollModal.id,
+                data: {
+                  basicSalary,
+                  allowances,
+                  deductions,
+                  netSalary,
+                  status,
+                  notes,
+                },
+              },
+              {
+                onSuccess: () => {
+                  utils.payroll.list.invalidate();
+                  setPayrollModal(null);
+                  toast.success("تم تحديث مسير الراتب");
+                },
+                onError: (err) => toast.error(err.message),
+              }
+            );
+          }
+        }}
+      />
+
+      {/* MODAL: Leave Request */}
+      <LeaveModal
+        isOpen={Boolean(leaveModal)}
+        onClose={() => setLeaveModal(null)}
+        employeesList={list}
+        onSubmit={(e) => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          const employeeId = Number(fd.get("employeeId"));
+          const emp = list.find((item) => item.id === employeeId);
+          if (!emp) {
+            toast.error("اختر الموظف");
+            return;
+          }
+          const type = fd.get("type") as
+            | "سنوية"
+            | "مرضية"
+            | "طارئة"
+            | "بدون راتب";
+          const startDate = fd.get("startDate") as string;
+          const endDate = fd.get("endDate") as string;
+          const days = Number(fd.get("days") || 1);
+          const reason = (fd.get("reason") as string) || "—";
+
+          createLeave.mutate(
+            {
+              employeeId: emp.id,
+              employeeName: emp.name,
+              type,
+              startDate,
+              endDate,
+              days,
+              reason,
+              status: "قيد المراجعة",
+            },
+            {
+              onSuccess: () => {
+                utils.leaves.list.invalidate();
+                setLeaveModal(null);
+                toast.success("تم تقديم طلب الإجازة بنجاح");
+              },
+              onError: (err) => toast.error(err.message),
+            }
+          );
+        }}
+      />
+
+      {/* MODAL: Import Employees */}
       {importOpen && (
         <ImportModal
           config={{
             label: "الموظفين",
             sampleFilename: "نموذج_استيراد_الموظفين.csv",
             columns: [
-              { key: "name", header: "الاسم الكامل", required: true, hint: "محمد علي السالم" },
-              { key: "employeeNo", header: "رقم الموظف", required: false, hint: "EMP-2024-1001" },
-              { key: "nationalId", header: "رقم الهوية / الإقامة", required: false, hint: "1234567890" },
-              { key: "phone", header: "رقم الهاتف", required: false, hint: "0501234567" },
-              { key: "department", header: "القسم", required: false, hint: "الإدارة" },
-              { key: "jobTitle", header: "المسمى الوظيفي", required: false, hint: "محاسب" },
-              { key: "hireDate", header: "تاريخ المباشرة", required: false, hint: "2024-01-01" },
-              { key: "status", header: "الحالة", required: false, hint: "نشط" },
+              {
+                key: "name",
+                header: "الاسم الكامل",
+                required: true,
+                hint: "محمد علي السالم",
+              },
+              {
+                key: "employeeNo",
+                header: "رقم الموظف",
+                required: false,
+                hint: "EMP-2024-1001",
+              },
+              {
+                key: "nationalId",
+                header: "رقم الهوية / الإقامة",
+                required: false,
+                hint: "1234567890",
+              },
+              {
+                key: "phone",
+                header: "رقم الهاتف",
+                required: false,
+                hint: "0501234567",
+              },
+              {
+                key: "department",
+                header: "القسم",
+                required: false,
+                hint: "الإدارة",
+              },
+              {
+                key: "jobTitle",
+                header: "المسمى الوظيفي",
+                required: false,
+                hint: "محاسب",
+              },
+              {
+                key: "hireDate",
+                header: "تاريخ المباشرة",
+                required: false,
+                hint: "2024-01-01",
+              },
+              {
+                key: "status",
+                header: "الحالة",
+                required: false,
+                hint: "نشط",
+              },
             ],
             mapRow: (raw) => ({
               name: raw["الاسم الكامل"]?.trim() || "",
               employeeNo:
                 raw["رقم الموظف"]?.trim() ||
-                `EMP-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
+                `EMP-${new Date().getFullYear()}-${Math.floor(
+                  1000 + Math.random() * 9000
+                )}`,
               nationalId: raw["رقم الهوية / الإقامة"]?.trim() || "—",
               phone: raw["رقم الهاتف"]?.trim() || "—",
               email: "—",

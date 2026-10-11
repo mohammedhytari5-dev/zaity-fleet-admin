@@ -4,7 +4,7 @@ import { promisify } from "node:util";
 import { drizzle } from "drizzle-orm/mysql2";
 import { createPool } from "mysql2";
 import { getMysqlConnectionOptions } from "./db-connection";
-import { AuditLog, Claim, Client, Contract, ContractItem, Document, Driver, Employee, InsertEmployee, InsertClaim, InsertClient, InsertContract, InsertContractItem, InsertDocument, InsertDriver, InsertMaintenanceRequest, InsertUser, InsertVehicle, InsertVehicleExpense, VehicleExpense, InsertVehicleRevenue, VehicleRevenue, MaintenanceRequest, User, Vehicle, auditLogs, claims, clientRepresentatives, clients, contractItems, contracts, documents, drivers, employees, maintenanceEvents, maintenanceRequests, notifications, notificationReads, payments, vehicleExpenses, vehicleRevenues, settingCatalog, tasks, users, vehicles, InventoryItem, InsertInventoryItem, InventoryMovement, InsertInventoryMovement, inventoryItems, inventoryMovements, InventoryRequest, inventoryRequests, inventoryRequestItems, Accident, InsertAccident, accidents, AccidentEvent, accidentEvents, PurchaseRequest, InsertPurchaseRequest, PurchaseQuote, InsertPurchaseQuote, purchaseRequests, purchaseQuotes, Account, InsertAccount, FiscalPeriod, InsertFiscalPeriod, JournalEntry, InsertJournalEntry, JournalLine, InsertJournalLine, accounts, fiscalPeriods, journalEntries, journalLines } from "../drizzle/schema";
+import { AuditLog, Claim, Client, Contract, ContractItem, Document, Driver, Employee, InsertEmployee, InsertClaim, InsertClient, InsertContract, InsertContractItem, InsertDocument, InsertDriver, InsertMaintenanceRequest, InsertUser, InsertVehicle, InsertVehicleExpense, VehicleExpense, InsertVehicleRevenue, VehicleRevenue, MaintenanceRequest, User, Vehicle, auditLogs, claims, clientRepresentatives, clients, contractItems, contracts, documents, drivers, employees, maintenanceEvents, maintenanceRequests, notifications, notificationReads, payments, vehicleExpenses, vehicleRevenues, settingCatalog, tasks, users, vehicles, InventoryItem, InsertInventoryItem, InventoryMovement, InsertInventoryMovement, inventoryItems, inventoryMovements, InventoryRequest, inventoryRequests, inventoryRequestItems, Accident, InsertAccident, accidents, AccidentEvent, accidentEvents, PurchaseRequest, InsertPurchaseRequest, PurchaseQuote, InsertPurchaseQuote, purchaseRequests, purchaseQuotes, Account, InsertAccount, FiscalPeriod, InsertFiscalPeriod, JournalEntry, InsertJournalEntry, JournalLine, InsertJournalLine, accounts, fiscalPeriods, journalEntries, journalLines, Payroll, InsertPayroll, Leave, InsertLeave, payroll, leaves } from "../drizzle/schema";
 import { canAdvanceMaintenance, canCloseMaintenance, canEditMaintenanceQuote, hasMaintenanceQuote, statusForMaintenanceStage, type MaintenanceStage } from "../shared/maintenance-domain";
 import { InsertProject, Project, projects } from "../drizzle/schema";
 import { InsertPayable, Payable, PayablePayment, InsertPayablePayment, payables, payablePayments } from "../drizzle/schema";
@@ -560,7 +560,11 @@ export async function listEmployees(): Promise<Employee[] | null> {
 export async function createEmployee(input: InsertEmployee): Promise<Employee | null> {
   const db = await getDb();
   if (!db) return null;
-  const result = await db.insert(employees).values(input);
+  const valuesToInsert = {
+    ...input,
+    empNo: input.empNo || input.employeeNo,
+  };
+  const result = await db.insert(employees).values(valuesToInsert);
   const id = Number(result[0].insertId);
   return (await db.select().from(employees).where(eq(employees.id, id)).limit(1))[0] ?? null;
 }
@@ -615,6 +619,96 @@ export async function linkEmployeeUser(employeeId: number, userId: number | null
     if (saved) await recordAuditInTransaction(tx, actor, userId === null ? "employees.account.unlink" : "employees.account.link", "employees", employeeId, userId === null ? "فصل حساب النظام عن ملف الموظف" : `ربط حساب النظام #${userId} بملف الموظف`);
     return saved;
   });
+}
+export async function listPayroll(month?: string): Promise<Payroll[] | null> {
+  const db = await getDb();
+  if (!db) return null;
+  if (month) {
+    return db.select().from(payroll).where(eq(payroll.month, month)).orderBy(desc(payroll.createdAt));
+  }
+  return db.select().from(payroll).orderBy(desc(payroll.createdAt));
+}
+export async function createPayroll(input: InsertPayroll): Promise<Payroll | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.insert(payroll).values(input);
+  const id = Number(result[0].insertId);
+  return (await db.select().from(payroll).where(eq(payroll.id, id)).limit(1))[0] ?? null;
+}
+export async function updatePayroll(id: number, input: Partial<InsertPayroll>): Promise<Payroll | null> {
+  const db = await getDb();
+  if (!db) return null;
+  await db.update(payroll).set(input).where(eq(payroll.id, id));
+  return (await db.select().from(payroll).where(eq(payroll.id, id)).limit(1))[0] ?? null;
+}
+export async function deletePayroll(id: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  await db.delete(payroll).where(eq(payroll.id, id));
+  return true;
+}
+export async function generateMonthlyPayroll(month: string): Promise<Payroll[] | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const activeEmployees = await db
+    .select()
+    .from(employees)
+    .where(and(eq(employees.status, "نشط"), isNull(employees.archivedAt)));
+
+  for (const emp of activeEmployees) {
+    const existing = await db
+      .select({ id: payroll.id })
+      .from(payroll)
+      .where(and(eq(payroll.employeeId, emp.id), eq(payroll.month, month)))
+      .limit(1);
+
+    if (!existing.length) {
+      const basicSalary = Number(emp.basicSalary || 0);
+      const allowances =
+        Number(emp.housingAllowance || 0) +
+        Number(emp.transportAllowance || 0) +
+        Number(emp.otherAllowance || 0);
+      const deductions = 0;
+      const netSalary = basicSalary + allowances - deductions;
+
+      await db.insert(payroll).values({
+        employeeId: emp.id,
+        employeeName: emp.name,
+        month,
+        basicSalary,
+        allowances,
+        deductions,
+        netSalary,
+        status: "مسودة",
+      });
+    }
+  }
+
+  return listPayroll(month);
+}
+export async function listLeaves(): Promise<Leave[] | null> {
+  const db = await getDb();
+  if (!db) return null;
+  return db.select().from(leaves).orderBy(desc(leaves.createdAt));
+}
+export async function createLeave(input: InsertLeave): Promise<Leave | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.insert(leaves).values(input);
+  const id = Number(result[0].insertId);
+  return (await db.select().from(leaves).where(eq(leaves.id, id)).limit(1))[0] ?? null;
+}
+export async function updateLeave(id: number, input: Partial<InsertLeave>): Promise<Leave | null> {
+  const db = await getDb();
+  if (!db) return null;
+  await db.update(leaves).set(input).where(eq(leaves.id, id));
+  return (await db.select().from(leaves).where(eq(leaves.id, id)).limit(1))[0] ?? null;
+}
+export async function archiveLeave(id: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  await db.delete(leaves).where(eq(leaves.id, id));
+  return true;
 }
 export async function listProjects(): Promise<(Project & { actualVehicles: number })[] | null> {
   const db = await getDb();

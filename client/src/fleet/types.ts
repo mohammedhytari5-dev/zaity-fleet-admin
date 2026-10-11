@@ -192,7 +192,43 @@ export type EmployeeRow = Row & {
   hireDate: string;
   status: string;
   userId?: number | null;
+  driverId?: number | null;
   notes?: string;
+  basicSalary?: number;
+  housingAllowance?: number;
+  transportAllowance?: number;
+  otherAllowance?: number;
+  contractType?: string;
+  residencyExpiry?: string;
+  insuranceExpiry?: string;
+};
+
+export type PayrollRow = Row & {
+  employeeId: number;
+  employeeName: string;
+  month: string;
+  basicSalary: number;
+  allowances: number;
+  deductions: number;
+  netSalary: number;
+  status: "مسودة" | "معتمد" | "تم الصرف";
+  paidAt?: string | null;
+  notes?: string | null;
+  createdAt?: string | Date;
+};
+
+export type LeaveRow = Row & {
+  employeeId: number;
+  employeeName: string;
+  type: "سنوية" | "مرضية" | "طارئة" | "بدون راتب";
+  startDate: string;
+  endDate: string;
+  days: number;
+  reason?: string;
+  status: "قيد المراجعة" | "معتمدة" | "مرفوضة";
+  approvedBy?: string | null;
+  notes?: string | null;
+  createdAt?: string | Date;
 };
 
 export type ImportConfig = {

@@ -392,6 +392,17 @@ export const employees = mysqlTable(
       .notNull()
       .default("نشط"),
     userId: int("userId").references(() => users.id, { onDelete: "set null" }),
+    empNo: varchar("empNo", { length: 40 }),
+    driverId: int("driverId").references((): AnyMySqlColumn => drivers.id, {
+      onDelete: "set null",
+    }),
+    basicSalary: int("basicSalary").notNull().default(0),
+    housingAllowance: int("housingAllowance").notNull().default(0),
+    transportAllowance: int("transportAllowance").notNull().default(0),
+    otherAllowance: int("otherAllowance").notNull().default(0),
+    contractType: varchar("contractType", { length: 80 }).notNull().default("دوام كامل"),
+    residencyExpiry: varchar("residencyExpiry", { length: 32 }).notNull().default("—"),
+    insuranceExpiry: varchar("insuranceExpiry", { length: 32 }).notNull().default("—"),
     notes: text("notes"),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
     updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
@@ -405,8 +416,41 @@ export const employees = mysqlTable(
       table.createdAt
     ),
     index("employees_department_idx").on(table.department),
+    index("employees_driver_idx").on(table.driverId),
   ]
 );
+
+export const payroll = mysqlTable("payroll", {
+  id: int("id").autoincrement().primaryKey(),
+  employeeId: int("employeeId").notNull(),
+  employeeName: varchar("employeeName", { length: 160 }).notNull(),
+  month: varchar("month", { length: 20 }).notNull(),
+  basicSalary: int("basicSalary").notNull().default(0),
+  allowances: int("allowances").notNull().default(0),
+  deductions: int("deductions").notNull().default(0),
+  netSalary: int("netSalary").notNull().default(0),
+  status: mysqlEnum("status", ["مسودة", "معتمد", "تم الصرف"]).notNull().default("مسودة"),
+  paidAt: varchar("paidAt", { length: 32 }),
+  notes: text("notes"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const leaves = mysqlTable("leaves", {
+  id: int("id").autoincrement().primaryKey(),
+  employeeId: int("employeeId").notNull(),
+  employeeName: varchar("employeeName", { length: 160 }).notNull(),
+  type: mysqlEnum("type", ["سنوية", "مرضية", "طارئة", "بدون راتب"]).notNull().default("سنوية"),
+  startDate: varchar("startDate", { length: 32 }).notNull(),
+  endDate: varchar("endDate", { length: 32 }).notNull(),
+  days: int("days").notNull().default(1),
+  reason: varchar("reason", { length: 255 }).default("—"),
+  status: mysqlEnum("status", ["قيد المراجعة", "معتمدة", "مرفوضة"]).notNull().default("قيد المراجعة"),
+  approvedBy: varchar("approvedBy", { length: 160 }),
+  notes: text("notes"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
 
 export const maintenanceRequests = mysqlTable(
   "maintenance_requests",
@@ -1806,3 +1850,7 @@ export type TaxInvoice = typeof taxInvoices.$inferSelect;
 export type InsertTaxInvoice = typeof taxInvoices.$inferInsert;
 export type TaxInvoiceLine = typeof taxInvoiceLines.$inferSelect;
 export type InsertTaxInvoiceLine = typeof taxInvoiceLines.$inferInsert;
+export type Payroll = typeof payroll.$inferSelect;
+export type InsertPayroll = typeof payroll.$inferInsert;
+export type Leave = typeof leaves.$inferSelect;
+export type InsertLeave = typeof leaves.$inferInsert;
