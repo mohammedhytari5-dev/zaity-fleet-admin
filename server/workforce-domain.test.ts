@@ -167,3 +167,65 @@ describe("WorkforceComplianceInspector", () => {
     expect(report.warningResidencies).toHaveLength(0);
   });
 });
+
+describe("LeaveRecord (Leave Management Domain)", () => {
+  it("recognizes approved and rejected statuses in both masculine and feminine forms", () => {
+    const leaveApprovedFeminine = new LeaveRecord({
+      id: 1,
+      employeeId: 10,
+      employeeName: "خالد",
+      type: "سنوية",
+      startDate: "2026-10-01",
+      endDate: "2026-10-10",
+      days: 10,
+      status: "معتمدة",
+    });
+    expect(leaveApprovedFeminine.isApproved()).toBe(true);
+    expect(leaveApprovedFeminine.isRejected()).toBe(false);
+    expect(leaveApprovedFeminine.isPending()).toBe(false);
+    expect(leaveApprovedFeminine.getStatusBadge().tone).toBe("success");
+
+    const leaveApprovedMasculine = new LeaveRecord({
+      id: 2,
+      employeeId: 11,
+      employeeName: "سالم",
+      type: "مرضية",
+      startDate: "2026-10-05",
+      endDate: "2026-10-07",
+      days: 3,
+      status: "معتمد",
+    });
+    expect(leaveApprovedMasculine.isApproved()).toBe(true);
+    expect(leaveApprovedMasculine.getStatusBadge().tone).toBe("success");
+
+    const leaveRejectedFeminine = new LeaveRecord({
+      id: 3,
+      employeeId: 12,
+      employeeName: "عمر",
+      type: "طارئة",
+      startDate: "2026-10-08",
+      endDate: "2026-10-09",
+      days: 2,
+      status: "مرفوضة",
+    });
+    expect(leaveRejectedFeminine.isRejected()).toBe(true);
+    expect(leaveRejectedFeminine.isApproved()).toBe(false);
+    expect(leaveRejectedFeminine.getStatusBadge().tone).toBe("critical");
+
+    const leavePending = new LeaveRecord({
+      id: 4,
+      employeeId: 13,
+      employeeName: "ياسر",
+      type: "سنوية",
+      startDate: "2026-11-01",
+      endDate: "2026-11-05",
+      days: 5,
+      status: "قيد المراجعة",
+    });
+    expect(leavePending.isPending()).toBe(true);
+    expect(leavePending.isApproved()).toBe(false);
+    expect(leavePending.isRejected()).toBe(false);
+    expect(leavePending.getStatusBadge().tone).toBe("warning");
+  });
+});
+

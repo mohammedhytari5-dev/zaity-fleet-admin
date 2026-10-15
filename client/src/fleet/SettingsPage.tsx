@@ -252,6 +252,8 @@ export function SettingsPage({
       ["invoices", "الفوترة والضريبة (ZATCA)"],
       ["payables", "المستحقات علينا"],
       ["reports", "التقارير"],
+      ["self_service_hr", "الخدمة الذاتية للموارد البشرية (تقديم الطلبات فقط) 📄"],
+      ["self_service_driver", "الخدمة الذاتية + الفحص اليومي للباصات (للسائقين) 🚌"],
     ] as const;
     const accounts = users ?? [];
     const readPermissions = (value: string | null | undefined) => {

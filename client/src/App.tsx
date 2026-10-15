@@ -8,10 +8,13 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 const FleetDashboard = lazy(() => import("./pages/FleetDashboard"));
 const Login = lazy(() => import("./pages/Login"));
 const NotFound = lazy(() => import("./pages/NotFound"));
+const ClientPortalPage = lazy(() => import("./pages/ClientPortalPage"));
 
 function Router() {
   return (
     <Switch>
+      <Route path="/client-portal" component={ClientPortalPage} />
+      <Route path="/portal" component={ClientPortalPage} />
       <Route path="/login" component={Login} />
       <Route path="/" component={FleetDashboard} />
       <Route path="/dashboard" component={FleetDashboard} />

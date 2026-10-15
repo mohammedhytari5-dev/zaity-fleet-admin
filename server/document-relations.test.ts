@@ -20,5 +20,6 @@ describe("document relation authorization", () => {
     expect(documentModuleByType["مطالبة"]).toBe("finance");
     expect(documentModuleByType["صيانة"]).toBe("maintenance");
     expect(documentModuleByType["حادث"]).toBe("accidents");
+    expect(documentModuleByType["قيد يومية"]).toBe("finance");
   });
 });

@@ -8,6 +8,7 @@ export const documentModuleByType = {
   "مطالبة": "finance",
   "صيانة": "maintenance",
   "حادث": "accidents",
+  "قيد يومية": "finance",
 } as const;
 
 export type DocumentEntityType = keyof typeof documentModuleByType;

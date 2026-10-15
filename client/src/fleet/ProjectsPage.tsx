@@ -294,6 +294,9 @@ export function ProjectsPage({ canAccess }: { canAccess: (key: ModuleKey) => boo
                     }}
                   >
                     <option value="">اختر العميل</option>
+                    {form.clientId && !clients.some((client) => client.id === form.clientId) && (
+                      <option value={form.clientId}>{form.client || `عميل #${form.clientId}`}</option>
+                    )}
                     {clients.map((client) => (
                       <option key={client.id} value={client.id}>
                         {client.name}
@@ -331,6 +334,9 @@ export function ProjectsPage({ canAccess }: { canAccess: (key: ModuleKey) => boo
                     }}
                   >
                     <option value="">بدون عقد</option>
+                    {form.contractId && !projectContracts.some((c) => c.id === form.contractId) && (
+                      <option value={form.contractId}>{form.contract && form.contract !== "—" ? form.contract : `عقد #${form.contractId}`}</option>
+                    )}
                     {projectContracts.map((contract) => (
                       <option key={contract.id} value={contract.id}>
                         {contract.ref} · {contract.client}
@@ -373,8 +379,13 @@ export function ProjectsPage({ canAccess }: { canAccess: (key: ModuleKey) => boo
                     }}
                   >
                     <option value="">بدون مدير موظف</option>
+                    {form.managerEmployeeId && !employees.some((item) => item.id === form.managerEmployeeId) && (
+                      <option value={form.managerEmployeeId}>
+                        {form.manager && form.manager !== "—" ? form.manager : `موظف #${form.managerEmployeeId}`}
+                      </option>
+                    )}
                     {employees
-                      .filter((employee) => employee.status === "نشط")
+                      .filter((employee) => employee.status === "نشط" || employee.id === form.managerEmployeeId)
                       .map((employee) => (
                         <option key={employee.id} value={employee.id}>
                           {employee.name}

@@ -275,6 +275,9 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                   }
                 >
                   <option value="">بدون مركبة مسندة حالياً</option>
+                  {form.driverVehicleId && !employeeVehicles.some((v) => v.id === form.driverVehicleId) && (
+                    <option value={form.driverVehicleId}>مركبة #{form.driverVehicleId}</option>
+                  )}
                   {employeeVehicles.map((v) => (
                     <option key={v.id} value={v.id}>
                       {v.plate} · {v.brand} {v.model}{" "}
@@ -335,6 +338,95 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
             onChange={(value) =>
               setForm((prev) =>
                 prev ? { ...prev, otherAllowance: Number(value) } : prev
+              )
+            }
+          />
+        </div>
+
+        <h4
+          style={{
+            margin: "1.25rem 0 0.5rem 0",
+            color: "var(--brand-primary, #25364c)",
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+          }}
+        >
+          <span>⏰</span> نموذج الدوام ومواعيد العمل
+        </h4>
+        <div className="form-grid">
+          <label className="field">
+            <span>نموذج الدوام / الوردية</span>
+            <select
+              value={form.shiftName || "الدوام الافتراضي (08:00 - 17:00)"}
+              onChange={(e) => {
+                const presets: Record<string, { start: string; end: string; grace: number }> = {
+                  "الدوام الافتراضي (08:00 - 17:00)": { start: "08:00", end: "17:00", grace: 15 },
+                  "وردية صباحية مبكرة (06:00 - 14:00)": { start: "06:00", end: "14:00", grace: 15 },
+                  "دوام إداري (09:00 - 18:00)": { start: "09:00", end: "18:00", grace: 15 },
+                  "وردية مسائية (16:00 - 01:00)": { start: "16:00", end: "01:00", grace: 15 },
+                  "وردية ليلية (00:00 - 08:00)": { start: "00:00", end: "08:00", grace: 15 },
+                  "دوام جزئي (08:00 - 13:00)": { start: "08:00", end: "13:00", grace: 10 },
+                  "دوام مخصص": { start: form.shiftStart || "08:00", end: form.shiftEnd || "17:00", grace: form.gracePeriodMinutes ?? 15 },
+                };
+                const sel = presets[e.target.value];
+                setForm((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        shiftName: e.target.value,
+                        shiftStart: sel?.start ?? prev.shiftStart ?? "08:00",
+                        shiftEnd: sel?.end ?? prev.shiftEnd ?? "17:00",
+                        gracePeriodMinutes: sel?.grace ?? prev.gracePeriodMinutes ?? 15,
+                      }
+                    : prev
+                );
+              }}
+            >
+              {form.shiftName &&
+                ![
+                  "الدوام الافتراضي (08:00 - 17:00)",
+                  "وردية صباحية مبكرة (06:00 - 14:00)",
+                  "دوام إداري (09:00 - 18:00)",
+                  "وردية مسائية (16:00 - 01:00)",
+                  "وردية ليلية (00:00 - 08:00)",
+                  "دوام جزئي (08:00 - 13:00)",
+                  "دوام مخصص",
+                ].includes(form.shiftName) && (
+                  <option value={form.shiftName}>{form.shiftName}</option>
+                )}
+              <option value="الدوام الافتراضي (08:00 - 17:00)">الدوام الافتراضي (08:00 - 17:00)</option>
+              <option value="وردية صباحية مبكرة (06:00 - 14:00)">وردية صباحية مبكرة (06:00 - 14:00)</option>
+              <option value="دوام إداري (09:00 - 18:00)">دوام إداري (09:00 - 18:00)</option>
+              <option value="وردية مسائية (16:00 - 01:00)">وردية مسائية (16:00 - 01:00)</option>
+              <option value="وردية ليلية (00:00 - 08:00)">وردية ليلية (00:00 - 08:00)</option>
+              <option value="دوام جزئي (08:00 - 13:00)">دوام جزئي (08:00 - 13:00)</option>
+              <option value="دوام مخصص">دوام مخصص (تحديد يدوي)</option>
+            </select>
+          </label>
+          <Field
+            label="وقت بداية الدوام"
+            type="time"
+            value={form.shiftStart || "08:00"}
+            onChange={(value) =>
+              setForm((prev) => (prev ? { ...prev, shiftStart: value } : prev))
+            }
+          />
+          <Field
+            label="وقت نهاية الدوام"
+            type="time"
+            value={form.shiftEnd || "17:00"}
+            onChange={(value) =>
+              setForm((prev) => (prev ? { ...prev, shiftEnd: value } : prev))
+            }
+          />
+          <Field
+            label="فترة السماح للتأخير (بالدقائق)"
+            type="number"
+            value={String(form.gracePeriodMinutes ?? 15)}
+            onChange={(value) =>
+              setForm((prev) =>
+                prev ? { ...prev, gracePeriodMinutes: Math.max(0, parseInt(value, 10) || 0) } : prev
               )
             }
           />

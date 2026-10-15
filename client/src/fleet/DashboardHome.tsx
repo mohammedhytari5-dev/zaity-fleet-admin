@@ -28,6 +28,10 @@ import {
   ChevronLeft,
   Plus,
   Search,
+  ArrowDownLeft,
+  ArrowUpRight,
+  FileText,
+  Briefcase,
 } from "lucide-react";
 import type {
   ModuleKey,
@@ -50,6 +54,7 @@ import {
   formatSAR,
   Chart,
 } from "./common";
+import { FleetDonutKpiSection } from "./components/FleetDonutKpiSection";
 
 export type TaskRelatedOption = {
   entityType: TaskRelatedEntityType;
@@ -87,6 +92,7 @@ export function DashboardHome({
   claims,
   payables,
   projects,
+  clients = [],
   canAccess,
   onTaskToggle,
   onTaskCreate,
@@ -120,6 +126,7 @@ export function DashboardHome({
   claims: Claim[];
   payables: PayableRow[];
   projects: ProjectRow[];
+  clients?: any[];
   canAccess: (key: ModuleKey) => boolean;
   onTaskToggle: (task: { id: number; status: string }) => void;
   onTaskCreate: (task: {
@@ -208,6 +215,9 @@ export function DashboardHome({
   const operationRate = totalVehicles
     ? ((workingVehicles / totalVehicles) * 100).toFixed(1).replace(".", "٫")
     : "٠";
+  const operationRatePct = totalVehicles
+    ? Math.min(100, Math.round((workingVehicles / totalVehicles) * 100))
+    : 0;
 
   const receivable = totalOutstandingClaims(claims);
   const payable = payables
@@ -389,133 +399,233 @@ export function DashboardHome({
         action="إضافة مركبة"
         onAction={() => onNavigate("vehicles")}
       />
+
+      <FleetDonutKpiSection
+        vehicles={vehicles}
+        drivers={drivers}
+        clients={clients}
+        claims={claims}
+        contracts={contracts}
+        maintenance={maintenance}
+        onNavigate={onNavigate}
+      />
+
       {canAccess("vehicles") && (
-        <div className="metrics-grid">
+        <div className="dash-fleet-grid">
           <button
-            className="metric-card metric-card-link"
+            type="button"
+            className="dash-kpi-card"
             onClick={() => onNavigate("vehicles")}
           >
-            <span className="metric-icon teal">
-              <CarFront size={19} />
-            </span>
-            <span className="metric-content">
-              <span>إجمالي المركبات</span>
-              <strong>{totalVehicles.toLocaleString("en-US")}</strong>
-              <small>كامل الأسطول المسجل</small>
-            </span>
+            <div className="dash-kpi-header">
+              <span className="dash-kpi-title">إجمالي المركبات</span>
+              <span className="dash-kpi-icon teal">
+                <CarFront size={15} />
+              </span>
+            </div>
+            <div className="dash-kpi-value">{totalVehicles.toLocaleString("en-US")}</div>
+            <div className="dash-kpi-footer">
+              <span>كامل الأسطول المسجل</span>
+            </div>
           </button>
+
           <button
-            className="metric-card metric-card-link"
+            type="button"
+            className="dash-kpi-card"
             onClick={() => onNavigate("vehicles")}
           >
-            <span className="metric-icon blue">
-              <Activity size={19} />
-            </span>
-            <span className="metric-content">
-              <span>تعمل / مؤجرة</span>
-              <strong>{workingVehicles.toLocaleString("en-US")}</strong>
-              <small>معدل تشغيل {operationRate}٪ من الأسطول</small>
-            </span>
+            <div className="dash-kpi-header">
+              <span className="dash-kpi-title">تعمل / مؤجرة</span>
+              <span className="dash-kpi-icon emerald">
+                <Activity size={15} />
+              </span>
+            </div>
+            <div className="dash-kpi-value">{workingVehicles.toLocaleString("en-US")}</div>
+            <div>
+              <div className="dash-kpi-footer">
+                <span>تشغيل {operationRate}٪</span>
+                <span className="dash-kpi-badge emerald">{operationRatePct}٪</span>
+              </div>
+              <div className="dash-progress-track">
+                <div
+                  className="dash-progress-bar"
+                  style={{ width: `${operationRatePct}%` }}
+                />
+              </div>
+            </div>
           </button>
+
           <button
-            className="metric-card metric-card-link"
+            type="button"
+            className="dash-kpi-card"
             onClick={() => onNavigate("vehicles")}
           >
-            <span className="metric-icon violet">
-              <CheckCircle2 size={19} />
-            </span>
-            <span className="metric-content">
-              <span>جاهزة للتشغيل</span>
-              <strong>{readyVehicles.toLocaleString("en-US")}</strong>
-              <small>حالتها متاحة</small>
-            </span>
+            <div className="dash-kpi-header">
+              <span className="dash-kpi-title">جاهزة للتشغيل</span>
+              <span className="dash-kpi-icon indigo">
+                <CheckCircle2 size={15} />
+              </span>
+            </div>
+            <div className="dash-kpi-value">{readyVehicles.toLocaleString("en-US")}</div>
+            <div className="dash-kpi-footer">
+              <span>متاحة للطلب الفوري</span>
+              <span className="dash-kpi-badge blue">جاهزة</span>
+            </div>
           </button>
+
           <button
-            className="metric-card metric-card-link"
+            type="button"
+            className="dash-kpi-card"
             onClick={() => onNavigate("maintenance")}
           >
-            <span className="metric-icon orange">
-              <Wrench size={19} />
-            </span>
-            <span className="metric-content">
-              <span>في الصيانة</span>
-              <strong>{maintenanceVehicles.toLocaleString("en-US")}</strong>
-              <small>طلبات الصيانة المفتوحة</small>
-            </span>
+            <div className="dash-kpi-header">
+              <span className="dash-kpi-title">في الصيانة</span>
+              <span className="dash-kpi-icon amber">
+                <Wrench size={15} />
+              </span>
+            </div>
+            <div className="dash-kpi-value">{maintenanceVehicles.toLocaleString("en-US")}</div>
+            <div className="dash-kpi-footer">
+              <span>طلبات صيانة نشطة</span>
+              {maintenanceVehicles > 0 && (
+                <span className="dash-kpi-badge amber">ورش</span>
+              )}
+            </div>
           </button>
+
           <button
-            className="metric-card metric-card-link"
+            type="button"
+            className="dash-kpi-card"
             onClick={() => onNavigate("vehicles")}
           >
-            <span className="metric-icon orange">
-              <AlertCircle size={19} />
-            </span>
-            <span className="metric-content">
-              <span>متوقفة</span>
-              <strong>{stoppedVehicles.toLocaleString("en-US")}</strong>
-              <small>مركبات تتطلب إجراءً</small>
-            </span>
+            <div className="dash-kpi-header">
+              <span className="dash-kpi-title">متوقفة</span>
+              <span className="dash-kpi-icon rose">
+                <AlertCircle size={15} />
+              </span>
+            </div>
+            <div className="dash-kpi-value">{stoppedVehicles.toLocaleString("en-US")}</div>
+            <div className="dash-kpi-footer">
+              <span>تتطلب إجراءً ومراجعة</span>
+              {stoppedVehicles > 0 && (
+                <span className="dash-kpi-badge rose">تنبيه</span>
+              )}
+            </div>
           </button>
+
           <button
-            className="metric-card metric-card-link"
+            type="button"
+            className="dash-kpi-card"
             onClick={() => onNavigate("vehicles")}
           >
-            <span className="metric-icon blue">
-              <Gauge size={19} />
-            </span>
-            <span className="metric-content">
-              <span>قيد التجهيز</span>
-              <strong>{setupVehicles.toLocaleString("en-US")}</strong>
-              <small>لم تدخل الخدمة بعد</small>
-            </span>
+            <div className="dash-kpi-header">
+              <span className="dash-kpi-title">قيد التجهيز</span>
+              <span className="dash-kpi-icon cyan">
+                <Gauge size={15} />
+              </span>
+            </div>
+            <div className="dash-kpi-value">{setupVehicles.toLocaleString("en-US")}</div>
+            <div className="dash-kpi-footer">
+              <span>تجهيز وتأهيل للخدمة</span>
+            </div>
           </button>
         </div>
       )}
-      <div className="quick-metrics dashboard-shortcuts">
+      <div className="dash-exec-grid">
         {canAccess("finance") && (
-          <button onClick={() => onNavigateFinanceView("claims")}>
-            <span>المستحق لنا · مطالبات مفتوحة</span>
-            <strong className="green-text">{formatSAR(receivable)}</strong>
-            <small>فتح سجل المطالبات</small>
+          <button
+            type="button"
+            className="dash-exec-card"
+            onClick={() => onNavigateFinanceView("claims")}
+          >
+            <div className="dash-exec-header">
+              <span>المستحق لنا · مطالبات العملاء</span>
+              <span className="dash-exec-icon emerald">
+                <ArrowDownLeft size={15} />
+              </span>
+            </div>
+            <div className="dash-exec-value green">{formatSAR(receivable)}</div>
+            <div className="dash-exec-footer">
+              <span>سجل المطالبات المفتوحة للتحصيل</span>
+              <ChevronLeft size={14} />
+            </div>
           </button>
         )}
         {canAccess("payables") && (
-          <button onClick={() => onNavigate("payables")}>
-            <span>المستحق علينا · فواتير معتمدة</span>
-            <strong className="red-text">{formatSAR(payable)}</strong>
-            <small>
-              {pendingPayableAmount > 0
-                ? `${formatSAR(pendingPayableAmount)} بانتظار اعتماد المالية`
-                : "فتح سجل المستحقات"}
-            </small>
-          </button>
-        )}
-        {canAccess("projects") && (
-          <button onClick={() => onNavigate("projects")}>
-            <span>المشاريع النشطة</span>
-            <strong>
-              {projects
-                .filter((project) => project.status === "نشط")
-                .length.toLocaleString("en-US")}
-            </strong>
-            <small>فتح متابعة المشاريع</small>
+          <button
+            type="button"
+            className="dash-exec-card"
+            onClick={() => onNavigate("payables")}
+          >
+            <div className="dash-exec-header">
+              <span>المستحق علينا · فواتير الموردين</span>
+              <span className="dash-exec-icon rose">
+                <ArrowUpRight size={15} />
+              </span>
+            </div>
+            <div className="dash-exec-value red">{formatSAR(payable)}</div>
+            <div className="dash-exec-footer">
+              <span>
+                {pendingPayableAmount > 0
+                  ? `${formatSAR(pendingPayableAmount)} بانتظار الاعتماد`
+                  : "سجل المستحقات والفواتير"}
+              </span>
+              <ChevronLeft size={14} />
+            </div>
           </button>
         )}
         {canAccess("finance") && (
-          <button onClick={() => onNavigateFinanceView("contracts")}>
-            <span>العقود القائمة</span>
-            <strong>
+          <button
+            type="button"
+            className="dash-exec-card"
+            onClick={() => onNavigateFinanceView("contracts")}
+          >
+            <div className="dash-exec-header">
+              <span>العقود التشغيلية القائمة</span>
+              <span className="dash-exec-icon indigo">
+                <FileText size={15} />
+              </span>
+            </div>
+            <div className="dash-exec-value slate">
               {contracts
                 .filter((contract) => contract.status === "قائم")
-                .length.toLocaleString("en-US")}
-            </strong>
-            <small>فتح سجل العقود</small>
+                .length.toLocaleString("en-US")}{" "}
+              <small style={{ fontSize: 13, fontWeight: 500, color: "#64748b" }}>عقد سارٍ</small>
+            </div>
+            <div className="dash-exec-footer">
+              <span>سجل العقود واتفاقيات التأجير</span>
+              <ChevronLeft size={14} />
+            </div>
+          </button>
+        )}
+        {canAccess("projects") && (
+          <button
+            type="button"
+            className="dash-exec-card"
+            onClick={() => onNavigate("projects")}
+          >
+            <div className="dash-exec-header">
+              <span>المشاريع التشغيلية النشطة</span>
+              <span className="dash-exec-icon teal">
+                <Briefcase size={15} />
+              </span>
+            </div>
+            <div className="dash-exec-value slate">
+              {projects
+                .filter((project) => project.status === "نشط")
+                .length.toLocaleString("en-US")}{" "}
+              <small style={{ fontSize: 13, fontWeight: 500, color: "#64748b" }}>مشروع نشط</small>
+            </div>
+            <div className="dash-exec-footer">
+              <span>متابعة إنجاز وحركة المشاريع</span>
+              <ChevronLeft size={14} />
+            </div>
           </button>
         )}
       </div>
       <div className="dashboard-grid">
         {canAccess("maintenance") && (
-          <section className="surface chart-card">
+          <section className="surface chart-card dash-card">
             <div className="section-head">
               <div>
                 <h2>مسار الصيانة</h2>
@@ -539,25 +649,30 @@ export function DashboardHome({
             <Chart maintenance={maintenance} range={maintenanceRange} />
           </section>
         )}
-        <section className="surface alert-card">
+        <section className="surface alert-card dash-card">
           <div className="section-head">
-            <div>
-              <h2>تحتاج إلى انتباه</h2>
-              <span>تنبيهات تتطلب إجراءً منك</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div>
+                <h2>تحتاج إلى انتباه</h2>
+                <span>تنبيهات تتطلب إجراءً منك</span>
+              </div>
+              {visibleAlerts.length > 0 && (
+                <span className="dash-alert-badge">{visibleAlerts.length}</span>
+              )}
             </div>
             <button
               className="icon-btn"
               aria-label="عرض مركز التنبيهات"
               onClick={onOpenNotifications}
             >
-              <Bell size={18} />
+              <Bell size={17} />
             </button>
           </div>
           <div className="alerts-list">
             {visibleAlerts.length ? (
               visibleAlerts.map((item) => (
                 <div
-                  className="alert-row"
+                  className="dash-alert-row"
                   key={item.id}
                   role="button"
                   tabIndex={0}
@@ -578,13 +693,13 @@ export function DashboardHome({
                         : "blue"
                     }`}
                   >
-                    <Bell size={16} />
+                    <Bell size={15} />
                   </span>
                   <div>
                     <strong>{item.title}</strong>
                     <small>{item.message}</small>
                   </div>
-                  <ChevronLeft size={15} />
+                  <ChevronLeft size={14} />
                 </div>
               ))
             ) : (
@@ -601,7 +716,7 @@ export function DashboardHome({
       </div>
       <div className="dashboard-grid lower">
         {canAccess("maintenance") && (
-          <section className="surface mini-table">
+          <section className="surface mini-table dash-card">
             <div className="section-head">
               <div>
                 <h2>طلبات الصيانة المفتوحة</h2>
@@ -647,7 +762,7 @@ export function DashboardHome({
             </div>
           </section>
         )}
-        <section className="surface mini-table">
+        <section className="surface mini-table dash-card">
           <div className="section-head">
             <div>
               <h2>{canManageTasks ? "مهام الفريق" : "مهامي"}</h2>

@@ -17,9 +17,11 @@ export type ModuleKey =
   | "clients"
   | "finance"
   | "payables"
+  | "custody"
   | "inventory"
   | "reports"
-  | "settings";
+  | "settings"
+  | "self_service";
 
 export type Row = Record<string, any> & { id: number };
 
@@ -201,6 +203,10 @@ export type EmployeeRow = Row & {
   contractType?: string;
   residencyExpiry?: string;
   insuranceExpiry?: string;
+  shiftName?: string;
+  shiftStart?: string;
+  shiftEnd?: string;
+  gracePeriodMinutes?: number;
 };
 
 export type PayrollRow = Row & {
@@ -240,11 +246,15 @@ export type AttendanceRow = Row & {
   checkOut?: string | null;
   workHours?: number | null;
   delayMinutes?: number | null;
+  earlyExitMinutes?: number | null;
   overtimeHours?: number | null;
   status: "حاضر" | "تأخير" | "غياب" | "إجازة" | "استئذان" | "عطلة";
   source: "جهاز بصمة" | "يدوي" | "تطبيق" | "ملف";
   deviceIp?: string | null;
   deviceName?: string | null;
+  shiftName?: string | null;
+  shiftStart?: string | null;
+  shiftEnd?: string | null;
   notes?: string | null;
   createdAt?: string | Date;
 };
@@ -267,4 +277,81 @@ export type ImportConfig = {
   columns: { key: string; header: string; required?: boolean; hint?: string }[];
   mapRow: (raw: Record<string, string>) => Record<string, any>;
   sampleFilename: string;
+};
+
+export type VehicleInspectionRow = Row & {
+  driverId?: number | null;
+  driverName: string;
+  vehicleId?: number | null;
+  vehiclePlate: string;
+  odometer: number;
+  oilStatus: "سليم" | "ناقص" | "يحتاج تغيير";
+  waterStatus: "سليم" | "ناقص";
+  tiresStatus: "ممتاز" | "يحتاج هواء" | "متضرر";
+  cleanlinessStatus: "نظيف" | "متوسط" | "يحتاج غسيل";
+  lightsStatus: "سليم" | "عطلان";
+  brakesStatus: "سليم" | "يحتاج فحص";
+  acStatus: "سليم" | "ضعيف" | "عطلان";
+  safetyKitStatus: "متوفر" | "ناقص";
+  oilPhotoUrl?: string | null;
+  waterPhotoUrl?: string | null;
+  odometerPhotoUrl?: string | null;
+  exteriorPhotoUrl?: string | null;
+  hasIssue: number;
+  issueSummary?: string | null;
+  notes?: string | null;
+  status: "جديد" | "تمت المراجعة" | "تم تحويله للصيانة";
+  reviewedBy?: string | null;
+  reviewedAt?: string | null;
+  createdAt?: string | Date;
+};
+
+export type EmployeeRequestRow = Row & {
+  employeeId?: number | null;
+  driverId?: number | null;
+  personName: string;
+  personRole: "سائق" | "موظف";
+  department?: string | null;
+  requestType: "إجازة" | "نقل كفالة" | "خروج نهائي" | "خروج وعودة" | "سلفة راتب" | "تعريف بالراتب" | "أخرى";
+  title: string;
+  startDate?: string | null;
+  endDate?: string | null;
+  days?: number | null;
+  amount?: number | null;
+  reason?: string | null;
+  attachmentUrl?: string | null;
+  attachmentName?: string | null;
+  status: "قيد المراجعة" | "معتمدة" | "مرفوضة" | "ملغاة";
+  approvedBy?: string | null;
+  approvedAt?: string | null;
+  rejectionReason?: string | null;
+  notes?: string | null;
+  createdAt?: string | Date;
+};
+
+export type ClientPortalRequestRow = Row & {
+  requestType: string;
+  clientType: "عميل جديد" | "عميل حالي" | string;
+  companyName: string;
+  contactPerson: string;
+  phone: string;
+  email?: string | null;
+  city: string;
+  busType?: string | null;
+  busesCount: number;
+  duration?: string | null;
+  startDate?: string | null;
+  workNature?: string | null;
+  dailyEstimatedKm?: number | null;
+  withDriver: number;
+  withFuel: number;
+  currentContractNo?: string | null;
+  busPlateNumber?: string | null;
+  driverName?: string | null;
+  details?: string | null;
+  status: "جديد" | "قيد التواصل" | "تم الاتفاق والتنفيذ" | "مرفوض" | "ملغى" | string;
+  assignedTo?: string | null;
+  responseNotes?: string | null;
+  createdAt?: string | Date;
+  updatedAt?: string | Date;
 };

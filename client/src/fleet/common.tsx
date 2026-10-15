@@ -68,6 +68,7 @@ export const statusTone: Record<string, string> = {
   "متاحة": "green", "متاح": "green", "ساري": "green", "مكتمل": "green", "مغلق": "green", "معتمد": "green", "نشط": "green", "قائم": "green", "مدفوعة": "green", "مدفوعة جزئيًا": "amber", "معتمدة": "blue", "بانتظار الاعتماد": "amber", "مخطط": "blue", "تم اعتمادها": "blue", "تم صرفها": "green",
   "مؤجرة": "blue", "مشغولة": "blue", "طارئ": "red", "عاجل": "red", "متوسط": "amber", "عادي": "gray", "جاري العمل": "amber", "قريبًا": "amber", "مستحقة": "amber", "جديد": "amber", "جديدة": "amber", "غير مرفوعة": "gray", "تحت الإجراء": "amber", "قيد التجهيز": "amber", "إجازة": "amber", "منتهي الخدمة": "gray",
   "في الصيانة": "red", "متوقفة": "red", "موقوف": "red", "متأخر": "red", "متأخرة": "red", "مرفوضة": "red", "مرفوض": "red", "متوقف": "red", "متأخر 2 يوم": "red", "ملغاة": "gray",
+  "سليم": "green", "ممتاز": "green", "ناقص": "red", "يحتاج تغيير": "red", "يحتاج هواء": "amber", "متضرر": "red", "تمت المراجعة": "green", "تم تحويله للصيانة": "red", "سائق": "blue", "موظف": "purple",
 };
 
 export const taskRelatedLabels: Record<TaskRelatedEntityType, string> = {
@@ -107,12 +108,33 @@ export const navGroups: { label: string; items: { key: ModuleKey; label: string;
   { label: "النظام", items: [{ key: "settings", label: "الإعدادات", icon: Settings2 }] },
 ];
 
-export function Badge({ children }: { children: string }) {
-  return <span className={`status-badge ${statusTone[children] || "gray"}`}><i />{children}</span>;
+export function Badge({
+  children,
+  variant,
+  tone,
+}: {
+  children: string;
+  variant?: "bad" | "warn" | "neutral" | "ok" | string;
+  tone?: string;
+}) {
+  const resolvedTone =
+    tone ||
+    (variant === "bad"
+      ? "red"
+      : variant === "warn"
+      ? "amber"
+      : variant === "neutral"
+      ? "blue"
+      : variant === "ok"
+      ? "green"
+      : undefined) ||
+    statusTone[children] ||
+    "gray";
+  return <span className={`status-badge ${resolvedTone}`}><i />{children}</span>;
 }
 
 export function Logo({ compact = false }: { compact?: boolean }) {
-  return <div className={`brand-mark ${compact ? "compact" : ""}`}><span className="brand-monogram">هـ</span>{!compact && <span><strong>الهتاري</strong><small>PLUS</small></span>}</div>;
+  return <div className={`brand-mark ${compact ? "compact" : ""}`}><span className="brand-monogram">ث</span>{!compact && <span><strong>شركة ثقة التوصيل</strong><small>FLEET</small></span>}</div>;
 }
 
 export function formatSAR(value: number) {
@@ -129,9 +151,25 @@ export function formatCurrencyText(value: unknown) {
   return String(value ?? "0 SAR").replace(/ر\.س/g, "SAR");
 }
 
+export function createExcelTabBlob(headers: (string | unknown)[], rows: (string | unknown)[][]): Blob {
+  const content = [
+    headers.map(h => String(h ?? "").replace(/[\t\r\n]/g, " ")).join("\t"),
+    ...rows.map(row => row.map(v => String(v ?? "").replace(/[\t\r\n]/g, " ")).join("\t")),
+  ].join("\r\n");
+
+  const buffer = new ArrayBuffer((content.length + 1) * 2);
+  const view = new Uint16Array(buffer);
+  view[0] = 0xFEFF; // UTF-16LE BOM (0xFF, 0xFE in little-endian)
+  for (let i = 0; i < content.length; i++) {
+    view[i + 1] = content.charCodeAt(i);
+  }
+
+  return new Blob([buffer], { type: "text/tab-separated-values;charset=utf-16le;" });
+}
+
 export function exportCsv(rows: Row[], columns: string[], filename: string, headers: string[] = columns) {
-  const csv = serializeCsv(headers, rows.map(row => columns.map(column => row[column])));
-  const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
+  const dataRows = rows.map(row => columns.map(column => row[column]));
+  const blob = createExcelTabBlob(headers, dataRows);
   const downloadUrl = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = downloadUrl;
@@ -144,14 +182,111 @@ export function exportCsv(rows: Row[], columns: string[], filename: string, head
   toast.success("تم تجهيز ملف التصدير بنجاح");
 }
 
+export function decodeFileBuffer(buffer: ArrayBuffer): string {
+  const u8 = new Uint8Array(buffer);
+  if (u8.length >= 2 && u8[0] === 0xFF && u8[1] === 0xFE) {
+    return new TextDecoder("utf-16le").decode(buffer);
+  }
+  if (u8.length >= 2 && u8[0] === 0xFE && u8[1] === 0xFF) {
+    return new TextDecoder("utf-16be").decode(buffer);
+  }
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(buffer);
+  } catch {
+    try {
+      return new TextDecoder("windows-1256").decode(buffer);
+    } catch {
+      return new TextDecoder("utf-8").decode(buffer);
+    }
+  }
+}
+
+export function getFlexibleFieldValue(raw: Record<string, string>, header: string, key?: string): string {
+  if (raw[header] !== undefined && raw[header].trim() !== "") return raw[header].trim();
+
+  // Normalize (ignore spaces, quotes, and punctuation)
+  const cleanHeader = (s: string) => s.replace(/[\s\-_/\\()[\]:;.,،ـ"'`]/g, "").toLowerCase();
+  const normTarget = cleanHeader(header);
+  for (const [k, v] of Object.entries(raw)) {
+    if (cleanHeader(k) === normTarget && v && v.trim() !== "") return v.trim();
+  }
+
+  if (key === "name" || header.includes("الاسم") || header.includes("اسم")) {
+    for (const [k, v] of Object.entries(raw)) {
+      if ((k.includes("الاسم") || k === "name" || k === "اسم" || k.includes("الموظف") || k.includes("الكادر") || k.includes("السائق")) && v && v.trim() !== "") {
+        return v.trim();
+      }
+    }
+  }
+
+  if (key === "nationalId" || header.includes("الهوية") || header.includes("الإقامة")) {
+    for (const [k, v] of Object.entries(raw)) {
+      if ((k.includes("هوية") || k.includes("إقامة") || k.includes("اقامة") || k === "idNo" || k === "iqama" || k === "nationalId") && v && v.trim() !== "") {
+        return v.trim();
+      }
+    }
+  }
+
+  return "";
+}
+
 export function parseCsv(text: string): Record<string, string>[] {
-  const lines = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n").filter(l => l.trim());
+  let cleanText = text.replace(/^\ufeff/, "");
+  let lines = cleanText.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n").filter(l => l.trim());
+  if (lines.length > 0 && lines[0].toLowerCase().startsWith("sep=")) {
+    lines = lines.slice(1);
+  }
   if (lines.length < 2) return [];
-  const sep = lines[0].includes(";") ? ";" : ",";
-  const headers = lines[0].split(sep).map(h => h.replace(/^["']|["']$/g, "").trim());
+
+  const tabCount = (lines[0].match(/\t/g) || []).length;
+  const semiCount = (lines[0].match(/;/g) || []).length;
+  const commaCount = (lines[0].match(/,/g) || []).length;
+
+  let sep = ",";
+  if (tabCount >= semiCount && tabCount >= commaCount && tabCount > 0) {
+    sep = "\t";
+  } else if (semiCount >= commaCount && semiCount > 0) {
+    sep = ";";
+  } else {
+    sep = ",";
+  }
+
+  const splitLine = (line: string): string[] => {
+    if (sep === "\t") {
+      return line.split("\t").map(v => v.replace(/^["']|["']$/g, "").replace(/^=/, "").replace(/^["']|["']$/g, "").trim());
+    }
+    const result: string[] = [];
+    let current = "";
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+      if (char === '"' || char === "'") {
+        if (inQuotes && line[i + 1] === char) {
+          current += char;
+          i++;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (char === sep && !inQuotes) {
+        result.push(current.replace(/^["']|["']$/g, "").replace(/^=/, "").replace(/^["']|["']$/g, "").trim());
+        current = "";
+      } else {
+        current += char;
+      }
+    }
+    result.push(current.replace(/^["']|["']$/g, "").replace(/^=/, "").replace(/^["']|["']$/g, "").trim());
+    return result;
+  };
+
+  const headers = splitLine(lines[0]).map(h => h.replace(/[\r\n\t]/g, " ").replace(/\s+/g, " ").trim());
+
   return lines.slice(1).map(line => {
-    const values = line.split(sep).map(v => v.replace(/^["']|["']$/g, "").trim());
-    return Object.fromEntries(headers.map((h, i) => [h, values[i] ?? ""]));
+    const values = splitLine(line);
+    const row: Record<string, string> = {};
+    headers.forEach((h, i) => {
+      row[h] = values[i] ?? "";
+    });
+    return row;
   });
 }
 
@@ -169,7 +304,25 @@ export function MetricCard({ title, value, helper, icon: Icon, tone, trend }: { 
   );
 }
 
-export function PageHeader({ eyebrow, title, description, action, onAction }: { eyebrow: string; title: string; description: string; action?: string; onAction?: () => void }) {
+export function PageHeader({
+  eyebrow,
+  title,
+  description,
+  action,
+  onAction,
+  secondaryAction,
+  onSecondaryAction,
+  extra,
+}: {
+  eyebrow: string;
+  title: string;
+  description: string;
+  action?: string;
+  onAction?: () => void;
+  secondaryAction?: string;
+  onSecondaryAction?: () => void;
+  extra?: React.ReactNode;
+}) {
   return (
     <div className="page-header">
       <div>
@@ -177,11 +330,33 @@ export function PageHeader({ eyebrow, title, description, action, onAction }: { 
         <h1>{title}</h1>
         <p>{description}</p>
       </div>
-      {action && (
-        <button className="btn primary" onClick={onAction}>
-          <Plus size={17} />{action}
-        </button>
-      )}
+      <div style={{ display: "flex", gap: "0.6rem", alignItems: "center", flexWrap: "wrap" }}>
+        {secondaryAction && onSecondaryAction && (
+          <button
+            type="button"
+            className="btn outline"
+            onClick={onSecondaryAction}
+            style={{
+              background: "white",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "0.4rem",
+              padding: "0.55rem 0.95rem",
+              borderRadius: "8px",
+              fontWeight: 600,
+            }}
+          >
+            <Upload size={16} />
+            <span>{secondaryAction}</span>
+          </button>
+        )}
+        {action && onAction && (
+          <button className="btn primary" type="button" onClick={onAction}>
+            <Plus size={17} />{action}
+          </button>
+        )}
+        {extra}
+      </div>
     </div>
   );
 }
@@ -203,13 +378,40 @@ export function Modal({ title, children, onClose, wide = false }: { title: strin
   );
 }
 
-export function Field({ label, value, onChange, placeholder, type = "text", disabled = false, maxLength, inputMode }: { label: string; value?: string; onChange?: (v: string) => void; placeholder?: string; type?: string; disabled?: boolean; maxLength?: number; inputMode?: "numeric" | "text" }) {
+export function toInputDate(val: any): string {
+  if (val === null || val === undefined) return "";
+  if (val instanceof Date) {
+    if (isNaN(val.getTime())) return "";
+    const y = val.getFullYear();
+    const m = String(val.getMonth() + 1).padStart(2, "0");
+    const d = String(val.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+  const s = String(val).trim();
+  if (!s || s === "—" || s === "-" || s === "null" || s === "undefined") return "";
+  const match = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (match) {
+    return `${match[1]}-${match[2]}-${match[3]}`;
+  }
+  const timestamp = Number(s);
+  const parsed = !isNaN(timestamp) && timestamp > 0 ? new Date(timestamp) : new Date(s);
+  if (!isNaN(parsed.getTime())) {
+    const y = parsed.getFullYear();
+    const m = String(parsed.getMonth() + 1).padStart(2, "0");
+    const d = String(parsed.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+  return "";
+}
+
+export function Field({ label, value, onChange, placeholder, type = "text", disabled = false, maxLength, inputMode }: { label: string; value?: any; onChange?: (v: string) => void; placeholder?: string; type?: string; disabled?: boolean; maxLength?: number; inputMode?: "numeric" | "text" }) {
+  const displayVal = type === "date" ? toInputDate(value) : (value ?? "");
   return (
     <label className="field">
       <span>{label}</span>
       <input
         type={type}
-        value={value ?? ""}
+        value={displayVal}
         onChange={e => onChange?.(e.target.value)}
         placeholder={placeholder}
         disabled={disabled}
@@ -242,6 +444,8 @@ export function TableShell({
   setActiveTab,
   addLabel,
   onAdd,
+  onImport,
+  importLabel = "استيراد من إكسل",
 }: {
   children: React.ReactNode;
   columns: string[];
@@ -255,6 +459,8 @@ export function TableShell({
   setActiveTab: (s: string) => void;
   addLabel: string;
   onAdd: () => void;
+  onImport?: () => void;
+  importLabel?: string;
 }) {
   const [page, setPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(10);
@@ -292,8 +498,13 @@ export function TableShell({
               <Filter size={15} />{filter === "active" ? "تصفية مفعّلة" : "فلاتر"}
             </button>
           )}
-          <button className="btn outline" onClick={onExport}><Download size={15} />تصدير</button>
-          <button className="btn primary" onClick={onAdd}><Plus size={16} />{addLabel}</button>
+          {onImport && (
+            <button className="btn outline" type="button" onClick={onImport}>
+              <Upload size={15} />{importLabel}
+            </button>
+          )}
+          <button className="btn outline" type="button" onClick={onExport}><Download size={15} />تصدير إلى إكسل</button>
+          <button className="btn primary" type="button" onClick={onAdd}><Plus size={16} />{addLabel}</button>
         </div>
       </div>
       <div className="table-scroll">
@@ -673,7 +884,7 @@ export function LinkedDocumentsSection({
         fileName: selectedFile.name,
         fileUrl,
       });
-      await utils.documents.list.invalidate();
+      void utils.documents.list.invalidate();
       toast.success("تم رفع وإرفاق المستند بنجاح");
       setShowUploadModal(false);
       setSelectedFile(null);
@@ -697,6 +908,7 @@ export function LinkedDocumentsSection({
     مشروع: ["وثيقة ترسية", "عقد مشروع", "محضر تسليم موقع", "أخرى"],
     صيانة: ["عرض سعر ورشة", "فاتورة صيانة", "تقرير فحص فني", "أخرى"],
     مطالبة: ["نموذج مطالبة", "فاتورة مطالبة", "تقرير حادث", "إشعار تحويل", "أخرى"],
+    "قيد يومية": ["سند قيد", "فاتورة مؤيدة", "إشعار بنكي", "إيصال سداد", "مستند تسوية", "أخرى"],
   };
   const presets = quickTypePresets[entityType] ?? ["وثيقة رسمية", "فاتورة", "إيصال", "عقد", "أخرى"];
 
@@ -881,7 +1093,7 @@ export function ContextMenu({ row, module, onAction, onClose, canApprove = false
   );
 }
 
-export function ImportModal({ config, onClose, onImport }: { config: ImportConfig; onClose: () => void; onImport: (rows: Record<string, any>[]) => Promise<void> }) {
+export function ImportModal({ config, onClose, onImport }: { config: ImportConfig; onClose: () => void; onImport: (rows: Record<string, any>[]) => Promise<string | void> }) {
   const [rows, setRows] = useState<Record<string, any>[] | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
   const [importing, setImporting] = useState(false);
@@ -892,29 +1104,36 @@ export function ImportModal({ config, onClose, onImport }: { config: ImportConfi
     if (!file) return;
     const reader = new FileReader();
     reader.onload = ev => {
-      const text = ev.target?.result as string;
+      const buffer = ev.target?.result as ArrayBuffer;
+      const text = decodeFileBuffer(buffer);
       const parsed = parseCsv(text);
       const errs: string[] = [];
       const mapped = parsed.map((raw, i) => {
+        const mappedRow = config.mapRow(raw);
         config.columns.filter(c => c.required).forEach(c => {
-          const val = raw[c.header]?.trim();
-          if (!val) errs.push(`سطر ${i + 2}: حقل «${c.header}» مطلوب`);
+          const rawVal = getFlexibleFieldValue(raw, c.header, c.key);
+          const mappedVal = mappedRow[c.key];
+          const val = (mappedVal && String(mappedVal).trim() !== "—" && String(mappedVal).trim() !== "")
+            ? mappedVal
+            : rawVal;
+          if (!val || String(val).trim() === "") {
+            errs.push(`سطر ${i + 2}: حقل «${c.header}» مطلوب`);
+          }
         });
-        return config.mapRow(raw);
+        return mappedRow;
       });
       setErrors(errs);
       setRows(mapped);
       setDone(0);
     };
-    reader.readAsText(file, "utf-8");
+    reader.readAsArrayBuffer(file);
     e.target.value = "";
   };
 
   const downloadSample = () => {
-    const header = config.columns.map(c => c.header).join(",");
-    const example = config.columns.map(c => c.hint ?? "").join(",");
-    const csv = "\ufeff" + header + "\n" + example;
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const headers = config.columns.map(c => c.header);
+    const examples = config.columns.map(c => c.hint ?? "");
+    const blob = createExcelTabBlob(headers, [examples]);
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -927,9 +1146,13 @@ export function ImportModal({ config, onClose, onImport }: { config: ImportConfi
     if (!rows?.length || errors.length) return;
     setImporting(true);
     try {
-      await onImport(rows);
+      const resultMessage = await onImport(rows);
       setDone(rows.length);
-      toast.success(`تم استيراد ${rows.length} سجل بنجاح`);
+      if (typeof resultMessage === "string" && resultMessage) {
+        toast.success(resultMessage);
+      } else {
+        toast.success(`تم استيراد ${rows.length} سجل بنجاح`);
+      }
       onClose();
     } catch (err: any) {
       toast.error(err.message || "تعذر استيراد البيانات");
@@ -939,7 +1162,7 @@ export function ImportModal({ config, onClose, onImport }: { config: ImportConfi
   };
 
   return (
-    <Modal title={`استيراد ${config.label} من ملف CSV`} onClose={onClose} wide>
+    <Modal title={`استيراد ${config.label} من ملف إكسل / CSV`} onClose={onClose} wide>
       <div style={{ display: "grid", gap: "1rem" }}>
         <div className="field-note">
           حمّل ملف CSV أو Excel المُصدَّر كـ CSV (فصل بفاصلة أو فاصلة منقوطة). يجب أن يحتوي الملف على الأعمدة التالية:
@@ -953,10 +1176,10 @@ export function ImportModal({ config, onClose, onImport }: { config: ImportConfi
         </div>
         <div style={{ display: "flex", gap: ".75rem", flexWrap: "wrap" }}>
           <button className="btn outline" onClick={downloadSample}>
-            <Download size={15} /> تحميل نموذج CSV فارغ
+            <Download size={15} /> تحميل نموذج إكسل / CSV فارغ
           </button>
           <label className="btn primary" style={{ cursor: "pointer" }}>
-            <Upload size={15} /> اختر ملف CSV
+            <Upload size={15} /> اختيار ملف إكسل / CSV
             <input type="file" accept=".csv,.txt" style={{ display: "none" }} onChange={handleFile} />
           </label>
         </div>

@@ -43,7 +43,7 @@ export function BiometricDeviceModal({
         model: model.trim() || "ZKTeco Standalone",
         autoSync: 1,
       });
-      await utils.attendance.devices.list.invalidate();
+      void utils.attendance.devices.list.invalidate();
       toast.success("تمت إضافة جهاز البصمة بنجاح");
       setShowAdd(false);
     } catch (err: any) {
@@ -55,7 +55,7 @@ export function BiometricDeviceModal({
     if (!confirm("هل أنت متأكد من حذف إعدادات جهاز البصمة هذا؟")) return;
     try {
       await deleteDevice.mutateAsync({ id });
-      await utils.attendance.devices.list.invalidate();
+      void utils.attendance.devices.list.invalidate();
       toast.success("تم حذف الجهاز بنجاح");
     } catch (err: any) {
       toast.error(`تعذر حذف الجهاز: ${err.message}`);
@@ -69,8 +69,8 @@ export function BiometricDeviceModal({
       const res = await syncMutation.mutateAsync({
         deviceId: device?.id,
       });
-      await utils.attendance.list.invalidate();
-      await utils.attendance.devices.list.invalidate();
+      void utils.attendance.list.invalidate();
+      void utils.attendance.devices.list.invalidate();
       toast.success(`تم الاتصال بنجاح بمحرك البصمة (${res.deviceName}) ومزامنة ${res.synced} حركة`);
       if (onSynced) onSynced();
     } catch (err: any) {

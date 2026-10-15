@@ -22,11 +22,13 @@ import {
   ShoppingCart,
   FileCheck2,
   UserRound,
+  UserCheck,
   UsersRound,
   CircleDollarSign,
   Scale,
   Receipt,
   ArrowUpLeft,
+  Wallet,
   Activity,
   Settings2,
 } from "lucide-react";
@@ -83,6 +85,8 @@ import AccountingPage from "@/pages/AccountingPage";
 import InvoicesPage from "@/pages/InvoicesPage";
 import { ReportsPage } from "@/fleet/ReportsPage";
 import { SettingsPage } from "@/fleet/SettingsPage";
+import { SelfServicePortalPage } from "@/fleet/SelfServicePortalPage";
+import { CustodyPage } from "@/fleet/CustodyPage";
 
 export { AccidentsPage, InventoryPage };
 
@@ -92,6 +96,8 @@ function moduleForLocation(location: string): ModuleKey {
   if (path.startsWith("/dashboard/financial/")) return "finance";
   if (path.startsWith("/dashboard/accounting")) return "accounting";
   if (path.startsWith("/dashboard/invoices")) return "invoices";
+  if (path.startsWith("/dashboard/custody")) return "custody";
+  if (path.startsWith("/dashboard/self-service")) return "self_service";
   const segment = path.slice("/dashboard/".length).split("/")[0];
   return (
     [
@@ -111,6 +117,7 @@ function moduleForLocation(location: string): ModuleKey {
       "payables",
       "reports",
       "settings",
+      "self_service",
     ] as const
   ).includes(segment as any)
     ? (segment as ModuleKey)
@@ -150,6 +157,7 @@ const navGroups: {
       { key: "accounting", label: "المحاسبة ودفتر الأستاذ", icon: Scale },
       { key: "invoices", label: "الفوترة والضريبة (ZATCA)", icon: Receipt },
       { key: "payables", label: "المستحقات علينا", icon: ArrowUpLeft },
+      { key: "custody", label: "إدارة العهد والبطاقات", icon: Wallet },
     ],
   },
   {
@@ -159,6 +167,16 @@ const navGroups: {
   {
     label: "النظام",
     items: [{ key: "settings", label: "الإعدادات", icon: Settings2 }],
+  },
+  {
+    label: "الخدمة الذاتية",
+    items: [
+      {
+        key: "self_service",
+        label: "بوابة الخدمة الذاتية",
+        icon: UserCheck,
+      },
+    ],
   },
 ];
 
@@ -202,11 +220,18 @@ export default function FleetDashboard() {
 
   const canAccess = (key: ModuleKey) => {
     if (user?.role === "admin") return true;
-    if (key === "accounting" || key === "invoices") {
+    if (key === "accounting" || key === "invoices" || key === "custody") {
       return userPermissions.has("finance") || userPermissions.has(key);
     }
     if (key === "procurement") {
       return userPermissions.has("finance") || userPermissions.has("procurement");
+    }
+    if (key === "self_service") {
+      return (
+        userPermissions.has("self_service_hr") ||
+        userPermissions.has("self_service_driver") ||
+        userPermissions.has("self_service")
+      );
     }
     return userPermissions.has(key);
   };
@@ -382,6 +407,8 @@ export default function FleetDashboard() {
     navigate(
       fallback === "dashboard"
         ? "/dashboard"
+        : fallback === "self_service"
+        ? "/dashboard/self-service"
         : `/dashboard/${fallback === "finance" ? "financial/contracts" : fallback}`
     );
   }, [active, user?.id, user?.role, user?.permissions]);
@@ -517,6 +544,8 @@ export default function FleetDashboard() {
     navigate(
       key === "dashboard"
         ? "/dashboard"
+        : key === "self_service"
+        ? "/dashboard/self-service"
         : `/dashboard/${key === "finance" ? "financial/contracts" : key}`
     );
   };
@@ -990,7 +1019,7 @@ export default function FleetDashboard() {
           ["الحقل", "القيمة"],
           entries.map(([key, value]) => [key, value])
         );
-        const blob = new Blob(["\ufeff" + csv], {
+        const blob = new Blob(["\ufeffsep=,\r\n" + csv], {
           type: "text/csv;charset=utf-8",
         });
         const link = document.createElement("a");
@@ -1597,6 +1626,8 @@ export default function FleetDashboard() {
   const maintenanceContent = (
     <MaintenancePage
       maintenance={maintenance}
+      vehicles={vehicles}
+      drivers={drivers}
       canApprove={canAccess("finance")}
       canRecordInvoice={canAccess("payables") && canAccess("vehicles")}
       onRegisterInvoice={registerMaintenanceInvoice}
@@ -1626,6 +1657,7 @@ export default function FleetDashboard() {
         documents={canAccess("documents") ? documents : []}
         contracts={canAccess("finance") ? contracts : []}
         claims={canAccess("finance") ? claims : []}
+        clients={canAccess("clients") ? clients : []}
         payables={canAccess("payables") ? ((payablesQuery.data ?? []) as PayableRow[]) : []}
         projects={canAccess("projects") ? ((projectsQuery.data ?? []) as ProjectRow[]) : []}
         tasks={canAccess("dashboard") ? ((tasksQuery.data ?? []) as WorkTask[]) : []}
@@ -1816,6 +1848,13 @@ export default function FleetDashboard() {
       <ReportsPage canAccess={canAccess} />
     ) : active === "payables" ? (
       payablesContent
+    ) : active === "custody" ? (
+      <CustodyPage
+        canApprove={canAccess("finance")}
+        currentUser={user}
+        drivers={drivers}
+        employees={(employeesSearchQuery.data ?? []) as any}
+      />
     ) : active === "maintenance" ? (
       maintenanceContent
     ) : active === "documents" ? (
@@ -1844,6 +1883,18 @@ export default function FleetDashboard() {
         onAction={onAction}
         onOpenForm={(row) => setModal({ module: "finance", row })}
         onPaymentArchive={handlePaymentArchive}
+      />
+    ) : active === "self_service" ? (
+      <SelfServicePortalPage
+        user={user}
+        canInspection={
+          user?.role === "admin" || userPermissions.has("self_service_driver")
+        }
+        canHr={
+          user?.role === "admin" ||
+          userPermissions.has("self_service_hr") ||
+          userPermissions.has("self_service_driver")
+        }
       />
     ) : (
       <SettingsPage
@@ -1895,20 +1946,23 @@ export default function FleetDashboard() {
           </button>
         </div>
         <div className="workspace-switch">
-          <span className="workspace-avatar">ه</span>
+          <span className="workspace-avatar">ث</span>
           <div>
-            <strong>الهتاري بلس لإدارة الأسطول</strong>
+            <strong>شركة ثقة التوصيل لإدارة الأسطول</strong>
             <small>الحساب الرئيسي</small>
           </div>
           <ChevronDown size={15} />
         </div>
         <nav>
-          {navGroups.map((group) => (
-            <div className="nav-group" key={group.label}>
-              <span className="nav-label">{group.label}</span>
-              {group.items
-                .filter((item) => canAccess(item.key as ModuleKey))
-                .map((item) => (
+          {navGroups.map((group) => {
+            const visibleItems = group.items.filter((item) =>
+              canAccess(item.key as ModuleKey)
+            );
+            if (visibleItems.length === 0) return null;
+            return (
+              <div className="nav-group" key={group.label}>
+                <span className="nav-label">{group.label}</span>
+                {visibleItems.map((item) => (
                   <button
                     key={item.key}
                     className={`nav-item ${active === item.key ? "active" : ""}`}
@@ -1921,8 +1975,9 @@ export default function FleetDashboard() {
                     )}
                   </button>
                 ))}
-            </div>
-          ))}
+              </div>
+            );
+          })}
         </nav>
         <div className="sidebar-bottom">
           <button
@@ -2028,7 +2083,7 @@ export default function FleetDashboard() {
           {content}
         </div>
         <footer className="app-footer">
-          <span>© {new Date().getFullYear()} الهتاري بلس</span>
+          <span>© {new Date().getFullYear()} شركة ثقة التوصيل</span>
           <span
             className={`online ${workspaceStatusTone}`}
             role="status"

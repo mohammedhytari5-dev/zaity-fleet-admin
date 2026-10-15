@@ -4,7 +4,7 @@ import { promisify } from "node:util";
 import { drizzle } from "drizzle-orm/mysql2";
 import { createPool } from "mysql2";
 import { getMysqlConnectionOptions } from "./db-connection";
-import { AuditLog, Claim, Client, Contract, ContractItem, Document, Driver, Employee, InsertEmployee, InsertClaim, InsertClient, InsertContract, InsertContractItem, InsertDocument, InsertDriver, InsertMaintenanceRequest, InsertUser, InsertVehicle, InsertVehicleExpense, VehicleExpense, InsertVehicleRevenue, VehicleRevenue, MaintenanceRequest, User, Vehicle, auditLogs, claims, clientRepresentatives, clients, contractItems, contracts, documents, drivers, employees, maintenanceEvents, maintenanceRequests, notifications, notificationReads, payments, vehicleExpenses, vehicleRevenues, settingCatalog, tasks, users, vehicles, InventoryItem, InsertInventoryItem, InventoryMovement, InsertInventoryMovement, inventoryItems, inventoryMovements, InventoryRequest, inventoryRequests, inventoryRequestItems, Accident, InsertAccident, accidents, AccidentEvent, accidentEvents, PurchaseRequest, InsertPurchaseRequest, PurchaseQuote, InsertPurchaseQuote, purchaseRequests, purchaseQuotes, Account, InsertAccount, FiscalPeriod, InsertFiscalPeriod, JournalEntry, InsertJournalEntry, JournalLine, InsertJournalLine, accounts, fiscalPeriods, journalEntries, journalLines, Payroll, InsertPayroll, Leave, InsertLeave, payroll, leaves, Attendance, InsertAttendance, BiometricDevice, InsertBiometricDevice, attendance, biometricDevices } from "../drizzle/schema";
+import { AuditLog, Claim, Client, Contract, ContractItem, Document, Driver, Employee, InsertEmployee, InsertClaim, InsertClient, InsertContract, InsertContractItem, InsertDocument, InsertDriver, InsertMaintenanceRequest, InsertUser, InsertVehicle, InsertVehicleExpense, VehicleExpense, InsertVehicleRevenue, VehicleRevenue, MaintenanceRequest, User, Vehicle, auditLogs, claims, clientRepresentatives, clients, contractItems, contracts, documents, drivers, employees, maintenanceEvents, maintenanceRequests, notifications, notificationReads, payments, vehicleExpenses, vehicleRevenues, settingCatalog, tasks, users, vehicles, InventoryItem, InsertInventoryItem, InventoryMovement, InsertInventoryMovement, inventoryItems, inventoryMovements, InventoryRequest, inventoryRequests, inventoryRequestItems, Accident, InsertAccident, accidents, AccidentEvent, accidentEvents, PurchaseRequest, InsertPurchaseRequest, PurchaseQuote, InsertPurchaseQuote, purchaseRequests, purchaseQuotes, Account, InsertAccount, FiscalPeriod, InsertFiscalPeriod, JournalEntry, InsertJournalEntry, JournalLine, InsertJournalLine, accounts, fiscalPeriods, journalEntries, journalLines, Payroll, InsertPayroll, Leave, InsertLeave, payroll, leaves, Attendance, InsertAttendance, BiometricDevice, InsertBiometricDevice, attendance, biometricDevices, VehicleInspection, InsertVehicleInspection, vehicleInspections, EmployeeRequest, InsertEmployeeRequest, employeeRequests, ClientPortalRequest, InsertClientPortalRequest, clientPortalRequests, Custody, InsertCustody, CustodyExpense, InsertCustodyExpense, PayrollInquiry, InsertPayrollInquiry, custodies, custodyExpenses, payrollInquiries } from "../drizzle/schema";
 import { AttendanceCalculator, BiometricLogParser } from "./attendance-domain";
 import { canAdvanceMaintenance, canCloseMaintenance, canEditMaintenanceQuote, hasMaintenanceQuote, statusForMaintenanceStage, type MaintenanceStage } from "../shared/maintenance-domain";
 import { InsertProject, Project, projects } from "../drizzle/schema";
@@ -558,21 +558,38 @@ export async function listEmployees(): Promise<Employee[] | null> {
   if (!db) return null;
   return db.select().from(employees).where(isNull(employees.archivedAt)).orderBy(desc(employees.createdAt));
 }
+function sanitizeSqlDate(val: unknown): string | null {
+  if (!val) return null;
+  const s = String(val).trim();
+  if (s === "—" || s === "-" || s === "" || s.toLowerCase() === "null") return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const dmy = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}`;
+  const ymd = s.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+  if (ymd) return `${ymd[1]}-${ymd[2].padStart(2, "0")}-${ymd[3].padStart(2, "0")}`;
+  return null;
+}
+
 export async function createEmployee(input: InsertEmployee): Promise<Employee | null> {
   const db = await getDb();
   if (!db) return null;
   const valuesToInsert = {
     ...input,
     empNo: input.empNo || input.employeeNo,
+    hireDate: sanitizeSqlDate(input.hireDate),
   };
-  const result = await db.insert(employees).values(valuesToInsert);
+  const result = await db.insert(employees).values(valuesToInsert as any);
   const id = Number(result[0].insertId);
   return (await db.select().from(employees).where(eq(employees.id, id)).limit(1))[0] ?? null;
 }
 export async function updateEmployee(id: number, input: Partial<InsertEmployee>): Promise<Employee | null> {
   const db = await getDb();
   if (!db) return null;
-  await db.update(employees).set(input).where(and(eq(employees.id, id), isNull(employees.archivedAt)));
+  const normalized = {
+    ...input,
+    ...(input.hireDate !== undefined ? { hireDate: sanitizeSqlDate(input.hireDate) } : {}),
+  };
+  await db.update(employees).set(normalized as any).where(and(eq(employees.id, id), isNull(employees.archivedAt)));
   return (await db.select().from(employees).where(eq(employees.id, id)).limit(1))[0] ?? null;
 }
 export async function archiveEmployee(id: number, actor: LedgerActor = {}): Promise<boolean> {
@@ -654,7 +671,7 @@ export async function generateMonthlyPayroll(month: string): Promise<Payroll[] |
   const activeEmployees = await db
     .select()
     .from(employees)
-    .where(and(eq(employees.status, "نشط"), isNull(employees.archivedAt)));
+    .where(and(inArray(employees.status, ["نشط", "إجازة"]), isNull(employees.archivedAt)));
 
   for (const emp of activeEmployees) {
     const existing = await db
@@ -709,6 +726,117 @@ export async function archiveLeave(id: number): Promise<boolean> {
   const db = await getDb();
   if (!db) return false;
   await db.delete(leaves).where(eq(leaves.id, id));
+  return true;
+}
+
+export async function listVehicleInspections(filters?: { driverId?: number; vehicleId?: number; hasIssue?: number }): Promise<VehicleInspection[] | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const conditions = [];
+  if (filters?.driverId) conditions.push(eq(vehicleInspections.driverId, filters.driverId));
+  if (filters?.vehicleId) conditions.push(eq(vehicleInspections.vehicleId, filters.vehicleId));
+  if (filters?.hasIssue !== undefined) conditions.push(eq(vehicleInspections.hasIssue, filters.hasIssue));
+
+  const query = db.select().from(vehicleInspections);
+  if (conditions.length) {
+    return query.where(and(...conditions)).orderBy(desc(vehicleInspections.createdAt));
+  }
+  return query.orderBy(desc(vehicleInspections.createdAt));
+}
+
+export async function createVehicleInspection(input: InsertVehicleInspection): Promise<VehicleInspection | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.insert(vehicleInspections).values(input);
+  const id = Number(result[0].insertId);
+  return (await db.select().from(vehicleInspections).where(eq(vehicleInspections.id, id)).limit(1))[0] ?? null;
+}
+
+export async function updateVehicleInspection(id: number, input: Partial<InsertVehicleInspection>): Promise<VehicleInspection | null> {
+  const db = await getDb();
+  if (!db) return null;
+  await db.update(vehicleInspections).set(input).where(eq(vehicleInspections.id, id));
+  return (await db.select().from(vehicleInspections).where(eq(vehicleInspections.id, id)).limit(1))[0] ?? null;
+}
+
+export async function deleteVehicleInspection(id: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  await db.delete(vehicleInspections).where(eq(vehicleInspections.id, id));
+  return true;
+}
+
+export async function listEmployeeRequests(filters?: { employeeId?: number; driverId?: number; status?: string }): Promise<EmployeeRequest[] | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const conditions = [];
+  if (filters?.employeeId) conditions.push(eq(employeeRequests.employeeId, filters.employeeId));
+  if (filters?.driverId) conditions.push(eq(employeeRequests.driverId, filters.driverId));
+  if (filters?.status) conditions.push(eq(employeeRequests.status, filters.status as any));
+
+  const query = db.select().from(employeeRequests);
+  if (conditions.length) {
+    return query.where(and(...conditions)).orderBy(desc(employeeRequests.createdAt));
+  }
+  return query.orderBy(desc(employeeRequests.createdAt));
+}
+
+export async function createEmployeeRequest(input: InsertEmployeeRequest): Promise<EmployeeRequest | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.insert(employeeRequests).values(input);
+  const id = Number(result[0].insertId);
+  return (await db.select().from(employeeRequests).where(eq(employeeRequests.id, id)).limit(1))[0] ?? null;
+}
+
+export async function updateEmployeeRequest(id: number, input: Partial<InsertEmployeeRequest>): Promise<EmployeeRequest | null> {
+  const db = await getDb();
+  if (!db) return null;
+  await db.update(employeeRequests).set(input).where(eq(employeeRequests.id, id));
+  return (await db.select().from(employeeRequests).where(eq(employeeRequests.id, id)).limit(1))[0] ?? null;
+}
+
+export async function deleteEmployeeRequest(id: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  await db.delete(employeeRequests).where(eq(employeeRequests.id, id));
+  return true;
+}
+
+export async function listClientPortalRequests(filters?: { requestType?: string; status?: string; clientType?: string }): Promise<ClientPortalRequest[] | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const conditions = [];
+  if (filters?.requestType && filters.requestType !== "الكل") conditions.push(eq(clientPortalRequests.requestType, filters.requestType));
+  if (filters?.status && filters.status !== "الكل") conditions.push(eq(clientPortalRequests.status, filters.status));
+  if (filters?.clientType && filters.clientType !== "الكل") conditions.push(eq(clientPortalRequests.clientType, filters.clientType));
+
+  const query = db.select().from(clientPortalRequests);
+  if (conditions.length) {
+    return query.where(and(...conditions)).orderBy(desc(clientPortalRequests.createdAt));
+  }
+  return query.orderBy(desc(clientPortalRequests.createdAt));
+}
+
+export async function createClientPortalRequest(input: InsertClientPortalRequest): Promise<ClientPortalRequest | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.insert(clientPortalRequests).values(input);
+  const id = Number(result[0].insertId);
+  return (await db.select().from(clientPortalRequests).where(eq(clientPortalRequests.id, id)).limit(1))[0] ?? null;
+}
+
+export async function updateClientPortalRequest(id: number, input: Partial<InsertClientPortalRequest>): Promise<ClientPortalRequest | null> {
+  const db = await getDb();
+  if (!db) return null;
+  await db.update(clientPortalRequests).set(input).where(eq(clientPortalRequests.id, id));
+  return (await db.select().from(clientPortalRequests).where(eq(clientPortalRequests.id, id)).limit(1))[0] ?? null;
+}
+
+export async function deleteClientPortalRequest(id: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  await db.delete(clientPortalRequests).where(eq(clientPortalRequests.id, id));
   return true;
 }
 
@@ -808,18 +936,32 @@ export async function syncBiometricDeviceLogs(deviceId?: number, date = new Date
     db.select().from(drivers).where(and(ne(drivers.status, "موقوف"), isNull(drivers.archivedAt))),
   ]);
 
+  const linkedDriverIds = new Set(
+    activeEmployees.map(e => e.driverId).filter((id): id is number => id !== null && id !== undefined)
+  );
+
   let syncedCount = 0;
-  const calc = new AttendanceCalculator();
 
   for (const emp of activeEmployees) {
     const existing = await db.select().from(attendance).where(and(eq(attendance.employeeId, emp.id), eq(attendance.date, date))).limit(1);
     if (!existing.length) {
+      const shiftStart = emp.shiftStart || "08:00";
+      const shiftEnd = emp.shiftEnd || "17:00";
+      const gracePeriod = emp.gracePeriodMinutes ?? 15;
+      const calc = new AttendanceCalculator(shiftStart, shiftEnd, gracePeriod);
+
+      const [sH, sM] = shiftStart.split(":").map(Number);
+      const [eH, eM] = shiftEnd.split(":").map(Number);
+
       const randomMinutes = ((emp.id * 7) % 35);
-      const checkInHour = 8;
+      const inHour = isNaN(sH) ? 8 : sH;
       const checkInMin = randomMinutes < 10 ? `0${randomMinutes}` : `${randomMinutes}`;
-      const checkIn = `0${checkInHour}:${checkInMin}:00`;
-      const checkOut = `17:0${(emp.id * 3) % 10}:00`;
+      const checkIn = `${String(inHour).padStart(2, "0")}:${checkInMin}:00`;
+      const outHour = isNaN(eH) ? 17 : eH;
+      const checkOut = `${String(outHour).padStart(2, "0")}:0${(emp.id * 3) % 10}:00`;
+
       const delay = calc.calculateDelay(checkIn);
+      const earlyExit = calc.calculateEarlyDeparture(checkOut);
       const workHours = calc.calculateWorkHours(checkIn, checkOut);
       const overtime = calc.calculateOvertime(workHours);
       const status = calc.determineStatus(checkIn, delay);
@@ -833,7 +975,11 @@ export async function syncBiometricDeviceLogs(deviceId?: number, date = new Date
         checkOut,
         workHours,
         delayMinutes: delay,
+        earlyExitMinutes: earlyExit,
         overtimeHours: overtime,
+        shiftName: emp.shiftName || "الدوام الافتراضي (08:00 - 17:00)",
+        shiftStart,
+        shiftEnd,
         status,
         source: "جهاز بصمة",
         deviceIp: targetDevice.ip,
@@ -843,17 +989,20 @@ export async function syncBiometricDeviceLogs(deviceId?: number, date = new Date
     }
   }
 
+  const defaultDriverCalc = new AttendanceCalculator("08:00:00", "17:00:00", 15);
   for (const drv of activeDrivers) {
+    if (linkedDriverIds.has(drv.id)) continue;
     const existing = await db.select().from(attendance).where(and(eq(attendance.employeeCode, `DRV-${drv.id}`), eq(attendance.date, date))).limit(1);
     if (!existing.length) {
       const randomMinutes = ((drv.id * 5) % 25);
       const checkInMin = randomMinutes < 10 ? `0${randomMinutes}` : `${randomMinutes}`;
       const checkIn = `08:${checkInMin}:00`;
       const checkOut = `17:15:00`;
-      const delay = calc.calculateDelay(checkIn);
-      const workHours = calc.calculateWorkHours(checkIn, checkOut);
-      const overtime = calc.calculateOvertime(workHours);
-      const status = calc.determineStatus(checkIn, delay);
+      const delay = defaultDriverCalc.calculateDelay(checkIn);
+      const earlyExit = defaultDriverCalc.calculateEarlyDeparture(checkOut);
+      const workHours = defaultDriverCalc.calculateWorkHours(checkIn, checkOut);
+      const overtime = defaultDriverCalc.calculateOvertime(workHours);
+      const status = defaultDriverCalc.determineStatus(checkIn, delay);
 
       await db.insert(attendance).values({
         employeeId: null,
@@ -864,7 +1013,11 @@ export async function syncBiometricDeviceLogs(deviceId?: number, date = new Date
         checkOut,
         workHours,
         delayMinutes: delay,
+        earlyExitMinutes: earlyExit,
         overtimeHours: overtime,
+        shiftName: "الدوام الافتراضي (08:00 - 17:00)",
+        shiftStart: "08:00",
+        shiftEnd: "17:00",
         status,
         source: "جهاز بصمة",
         deviceIp: targetDevice.ip,
@@ -988,7 +1141,11 @@ export async function archiveProject(id: number): Promise<boolean> {
 export async function createDriver(input: InsertDriver): Promise<Driver | null> {
   const db = await getDb();
   if (!db) return null;
-  const result = await db.insert(drivers).values(input);
+  const valuesToInsert = {
+    ...input,
+    renewal: sanitizeSqlDate(input.renewal),
+  };
+  const result = await db.insert(drivers).values(valuesToInsert as any);
   const id = Number(result[0].insertId);
   const created = await db.select().from(drivers).where(eq(drivers.id, id)).limit(1);
   return created[0] ?? null;
@@ -997,10 +1154,14 @@ export async function createDriver(input: InsertDriver): Promise<Driver | null> 
 export async function updateDriver(id: number, input: Partial<InsertDriver>): Promise<Driver | null> {
   const db = await getDb();
   if (!db) return null;
+  const normalized = {
+    ...input,
+    ...(input.renewal !== undefined ? { renewal: sanitizeSqlDate(input.renewal) } : {}),
+  };
   return db.transaction(async tx => {
     const current = (await tx.select().from(drivers).where(and(eq(drivers.id, id), isNull(drivers.archivedAt))).limit(1))[0];
     if (!current) return null;
-    await tx.update(drivers).set(input).where(and(eq(drivers.id, id), isNull(drivers.archivedAt)));
+    await tx.update(drivers).set(normalized as any).where(and(eq(drivers.id, id), isNull(drivers.archivedAt)));
     const linkedNameUpdate = linkedVehicleDriverNameUpdate(current, input.name);
     if (linkedNameUpdate) {
       await tx.update(vehicles).set({ driver: linkedNameUpdate.name }).where(and(eq(vehicles.id, linkedNameUpdate.vehicleId), eq(vehicles.driverId, id), isNull(vehicles.archivedAt)));
@@ -2957,5 +3118,172 @@ export async function getVatDeclaration(options: {
   if (!db) return null;
   return getVatDeclarationReport(db, options);
 }
+
+export async function listCustodies(filters?: {
+  custodianId?: number;
+  custodianType?: string;
+  status?: string;
+  custodyType?: string;
+}): Promise<Custody[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const conditions = [];
+  if (filters?.custodianId !== undefined && filters?.custodianType !== undefined) {
+    conditions.push(and(eq(custodies.custodianId, filters.custodianId), eq(custodies.custodianType, filters.custodianType)));
+  }
+  if (filters?.status) {
+    conditions.push(eq(custodies.status, filters.status));
+  }
+  if (filters?.custodyType) {
+    conditions.push(eq(custodies.custodyType, filters.custodyType));
+  }
+  const query = db.select().from(custodies);
+  return (conditions.length > 0 ? query.where(and(...conditions)) : query).orderBy(desc(custodies.createdAt));
+}
+
+export async function getCustody(id: number): Promise<Custody | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db.select().from(custodies).where(eq(custodies.id, id)).limit(1);
+  return rows[0] ?? null;
+}
+
+export async function createCustody(input: InsertCustody, actor: LedgerActor = {}): Promise<Custody | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const total = Number(input.totalAmount || 0);
+  const code = input.code || `CUST-${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2, "0")}-${Math.floor(1000 + Math.random() * 9000)}`;
+  const insertData = {
+    ...input,
+    code,
+    totalAmount: total,
+    spentAmount: 0,
+    remainingAmount: total,
+    acceptanceStatus: "بانتظار الاستلام",
+    status: "نشطة",
+    createdByUserId: actor.id ?? null,
+    createdByName: actor.name || "—",
+  };
+  const result = await db.insert(custodies).values(insertData);
+  const id = Number((result as any)[0]?.insertId ?? 0);
+  if (!id) return null;
+  return getCustody(id);
+}
+
+export async function acceptCustody(id: number, amount: number, actor: LedgerActor = {}): Promise<Custody | null> {
+  const db = await getDb();
+  if (!db) return null;
+  await db.update(custodies).set({
+    acceptanceStatus: "تم الاستلام",
+    acceptedAt: new Date(),
+    acceptedAmount: amount,
+  }).where(eq(custodies.id, id));
+  return getCustody(id);
+}
+
+export async function recordCustodyExpense(input: InsertCustodyExpense, actor: LedgerActor = {}): Promise<CustodyExpense | null> {
+  const db = await getDb();
+  if (!db) return null;
+  return db.transaction(async (tx) => {
+    const custody = (await tx.select().from(custodies).where(eq(custodies.id, input.custodyId)).limit(1))[0];
+    if (!custody) throw new Error("العهدة غير موجودة");
+
+    const amount = Number(input.amount || 0);
+    const newSpent = Number(custody.spentAmount || 0) + amount;
+    const newRemaining = Number(custody.totalAmount || 0) - newSpent;
+
+    const res = await tx.insert(custodyExpenses).values({
+      ...input,
+      amount,
+      reportedByUserId: actor.id ?? null,
+      reportedByName: actor.name || "—",
+    });
+    const expenseId = Number((res as any)[0]?.insertId ?? 0);
+
+    await tx.update(custodies).set({
+      spentAmount: newSpent,
+      remainingAmount: newRemaining,
+      status: newRemaining <= 0 ? "مستنفذة" : custody.status,
+    }).where(eq(custodies.id, input.custodyId));
+
+    const created = (await tx.select().from(custodyExpenses).where(eq(custodyExpenses.id, expenseId)).limit(1))[0];
+    return created ?? null;
+  });
+}
+
+export async function settleCustody(id: number, notes?: string, actor: LedgerActor = {}): Promise<Custody | null> {
+  const db = await getDb();
+  if (!db) return null;
+  await db.update(custodies).set({
+    status: "مسواة",
+    settledAt: new Date(),
+    notes: notes ? sql`CONCAT(COALESCE(notes, ''), '\n', ${notes})` : undefined,
+  }).where(eq(custodies.id, id));
+  return getCustody(id);
+}
+
+export async function listCustodyExpenses(custodyId: number): Promise<CustodyExpense[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(custodyExpenses).where(eq(custodyExpenses.custodyId, custodyId)).orderBy(desc(custodyExpenses.createdAt));
+}
+
+export async function listPayrollInquiries(filters?: {
+  payrollId?: number;
+  employeeOrDriverId?: number;
+  personType?: string;
+}): Promise<PayrollInquiry[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const conditions = [];
+  if (filters?.payrollId) conditions.push(eq(payrollInquiries.payrollId, filters.payrollId));
+  if (filters?.employeeOrDriverId && filters?.personType) {
+    conditions.push(and(eq(payrollInquiries.employeeOrDriverId, filters.employeeOrDriverId), eq(payrollInquiries.personType, filters.personType)));
+  }
+  const query = db.select().from(payrollInquiries);
+  return (conditions.length > 0 ? query.where(and(...conditions)) : query).orderBy(desc(payrollInquiries.createdAt));
+}
+
+export async function createPayrollInquiry(input: InsertPayrollInquiry, actor: LedgerActor = {}): Promise<PayrollInquiry | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const res = await db.insert(payrollInquiries).values({
+    ...input,
+    status: "قيد المراجعة",
+  });
+  const id = Number((res as any)[0]?.insertId ?? 0);
+  if (!id) return null;
+  const rows = await db.select().from(payrollInquiries).where(eq(payrollInquiries.id, id)).limit(1);
+  return rows[0] ?? null;
+}
+
+export async function respondPayrollInquiry(id: number, responseText: string, proofDocName?: string, proofDocUrl?: string, actor: LedgerActor = {}): Promise<PayrollInquiry | null> {
+  const db = await getDb();
+  if (!db) return null;
+  await db.update(payrollInquiries).set({
+    financeResponse: responseText,
+    proofDocName: proofDocName || null,
+    proofDocUrl: proofDocUrl || null,
+    status: "تم الرد",
+    respondedByUserId: actor.id ?? null,
+    respondedByName: actor.name || "—",
+    respondedAt: new Date(),
+  }).where(eq(payrollInquiries.id, id));
+  const rows = await db.select().from(payrollInquiries).where(eq(payrollInquiries.id, id)).limit(1);
+  return rows[0] ?? null;
+}
+
+export async function completeDriverMaintenance(id: number, invoiceUrl: string, notes?: string, actor: LedgerActor = {}): Promise<MaintenanceRequest | null> {
+  const db = await getDb();
+  if (!db) return null;
+  await db.update(maintenanceRequests).set({
+    driverCompletedAt: new Date(),
+    driverInvoiceUrl: invoiceUrl,
+    driverNotes: notes || null,
+  }).where(eq(maintenanceRequests.id, id));
+  const rows = await db.select().from(maintenanceRequests).where(eq(maintenanceRequests.id, id)).limit(1);
+  return rows[0] ?? null;
+}
+
 
 

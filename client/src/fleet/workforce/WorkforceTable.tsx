@@ -18,6 +18,7 @@ interface WorkforceTableProps {
   onEdit: (member: any) => void;
   onArchive: (member: any) => void;
   onAdd: () => void;
+  onImport?: () => void;
 }
 
 export const WorkforceTable: React.FC<WorkforceTableProps> = ({
@@ -31,6 +32,7 @@ export const WorkforceTable: React.FC<WorkforceTableProps> = ({
   onEdit,
   onArchive,
   onAdd,
+  onImport,
 }) => {
   // Filtering based on OOP methods and activeTab
   const filtered = members.filter((person) => {
@@ -63,9 +65,9 @@ export const WorkforceTable: React.FC<WorkforceTableProps> = ({
           id: m.id,
           employeeNo: m.employeeNo,
           name: m.name,
-          category: isDrv ? "سائق أسطول" : "إداري/تشغيلي",
+          category: isDrv ? "سائق" : "موظف إداري",
+          jobTitle: m.jobTitle || (isDrv ? "سائق" : "موظف إداري"),
           department: m.department,
-          jobTitle: m.jobTitle,
           assignedVehicle: drvMember?.assignedVehiclePlate || "—",
           drivingLicense: drvMember?.licenseType || "—",
           licenseRenewal: drvMember?.licenseRenewal || "—",
@@ -80,8 +82,8 @@ export const WorkforceTable: React.FC<WorkforceTableProps> = ({
         "employeeNo",
         "name",
         "category",
-        "department",
         "jobTitle",
+        "department",
         "assignedVehicle",
         "drivingLicense",
         "licenseRenewal",
@@ -91,7 +93,22 @@ export const WorkforceTable: React.FC<WorkforceTableProps> = ({
         "status",
         "hireDate",
       ],
-      "workforce_employees_drivers"
+      `كادر_الموظفين_والسائقين_${new Date().toISOString().slice(0, 10)}`,
+      [
+        "الرقم الوظيفي",
+        "الاسم الكامل",
+        "تصنيف الكادر (موظف إداري / سائق)",
+        "المسمى الوظيفي",
+        "القسم",
+        "المركبة المسندة",
+        "نوع رخصة القيادة",
+        "تاريخ انتهاء الرخصة",
+        "رقم الهاتف",
+        "رقم الهوية / الإقامة",
+        "الراتب الأساسي",
+        "الحالة",
+        "تاريخ المباشرة",
+      ]
     );
   };
 
@@ -112,6 +129,8 @@ export const WorkforceTable: React.FC<WorkforceTableProps> = ({
         "الإجراءات",
       ]}
       onExport={handleExport}
+      onImport={onImport}
+      importLabel="استيراد من إكسل"
       search={search}
       setSearch={setSearch}
       tabs={[

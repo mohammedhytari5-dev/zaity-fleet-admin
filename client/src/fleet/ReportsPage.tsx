@@ -964,7 +964,7 @@ export function ReportsPage({
                         filteredTotals
                       ),
                       current.columns,
-                      "zaity-" +
+                      "thiqa-" +
                         activeSection +
                         "-" +
                         (activeSection === "employees" ||

@@ -40,6 +40,35 @@ describe("AttendanceCalculator (Domain Engine)", () => {
     const overtime = calc.calculateOvertime(workHours, 8);
     expect(overtime).toBe(3);
   });
+
+  it("supports flexible shifts and calculates delay and early departure accurately", () => {
+    // Early morning shift: 06:00 to 14:00 with 10 min grace period
+    const morningCalc = new AttendanceCalculator("06:00", "14:00", 10);
+
+    // Arrives at 06:08 -> within 10 min grace period
+    expect(morningCalc.calculateDelay("06:08:00")).toBe(0);
+
+    // Arrives at 06:25 -> 25 minutes late
+    expect(morningCalc.calculateDelay("06:25:00")).toBe(25);
+
+    // Leaves at 13:40 -> 20 minutes early departure
+    expect(morningCalc.calculateEarlyDeparture("13:40:00")).toBe(20);
+
+    // Leaves at 14:05 -> on time / no early departure
+    expect(morningCalc.calculateEarlyDeparture("14:05:00")).toBe(0);
+
+    // Evening / Night shift: 16:00 to 01:00 with 15 min grace
+    const eveningCalc = new AttendanceCalculator("16:00", "01:00", 15);
+
+    // Arrives at 16:20 -> 20 minutes late
+    expect(eveningCalc.calculateDelay("16:20:00")).toBe(20);
+
+    // Leaves at 00:30 (overnight) -> 30 minutes early exit
+    expect(eveningCalc.calculateEarlyDeparture("00:30:00")).toBe(30);
+
+    // Leaves at 01:10 -> 0 early departure
+    expect(eveningCalc.calculateEarlyDeparture("01:10:00")).toBe(0);
+  });
 });
 
 describe("BiometricLogParser (Hardware Parser)", () => {

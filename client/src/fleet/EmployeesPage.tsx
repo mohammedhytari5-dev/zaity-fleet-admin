@@ -13,6 +13,10 @@ import {
   Clock,
   Truck,
   Fingerprint,
+  Smartphone,
+  ClipboardList,
+  CheckCircle2,
+  Upload,
 } from "lucide-react";
 import type {
   ModuleKey,
@@ -45,6 +49,8 @@ import { FleetLicensesSection } from "./workforce/FleetLicensesSection";
 import { AttendanceSection } from "./workforce/AttendanceSection";
 import { EmployeeProfileModal } from "./workforce/EmployeeProfileModal";
 import { EmployeeFormModal } from "./workforce/EmployeeFormModal";
+import { WorkforceSelfServiceModal } from "./workforce/WorkforceSelfServiceModal";
+import { EmployeeRequestsSection } from "./workforce/EmployeeRequestsSection";
 
 export function EmployeesPage({
   canAccess,
@@ -53,14 +59,29 @@ export function EmployeesPage({
 }: {
   canAccess: (key: ModuleKey) => boolean;
   canManageAccounts: boolean;
-  initialTab?: "employees" | "drivers" | "attendance" | "payroll" | "leaves" | "residencies";
+  initialTab?:
+    | "employees"
+    | "drivers"
+    | "attendance"
+    | "payroll"
+    | "leaves"
+    | "residencies"
+    | "requests";
 }) {
   const utils = trpc.useUtils();
 
   // Navigation Subtabs
   const [mainTab, setMainTab] = useState<
-    "employees" | "drivers" | "attendance" | "payroll" | "leaves" | "residencies"
+    | "employees"
+    | "drivers"
+    | "attendance"
+    | "payroll"
+    | "leaves"
+    | "residencies"
+    | "requests"
   >(initialTab || "employees");
+
+  const [selfServiceOpen, setSelfServiceOpen] = useState(false);
 
   // Filter tabs for each view
   const [employeeTab, setEmployeeTab] = useState("الكل");
@@ -112,6 +133,15 @@ export function EmployeesPage({
     undefined,
     { enabled: canAccess("projects") }
   );
+
+  const { data: employeeRequestsList = [] } = trpc.employeeRequests.list.useQuery(
+    undefined,
+    { staleTime: 20000 }
+  );
+
+  const pendingRequestsCount = employeeRequestsList.filter(
+    (r) => r.status === "قيد المراجعة"
+  ).length;
 
   // Mutations
   const createEmployee = trpc.employees.create.useMutation();
@@ -223,6 +253,10 @@ export function EmployeesPage({
     transportAllowance: 0,
     otherAllowance: 0,
     contractType: "دوام كامل",
+    shiftName: "الدوام الافتراضي (08:00 - 17:00)",
+    shiftStart: "08:00",
+    shiftEnd: "17:00",
+    gracePeriodMinutes: 15,
     residencyExpiry: "—",
     insuranceExpiry: "—",
     hireDate: formatCompanyDate(),
@@ -265,6 +299,10 @@ export function EmployeesPage({
       housingAllowance: rawEmp.housingAllowance ?? employee.compensation?.housingAllowance ?? 0,
       transportAllowance: rawEmp.transportAllowance ?? employee.compensation?.transportAllowance ?? 0,
       otherAllowance: rawEmp.otherAllowance ?? employee.compensation?.otherAllowance ?? 0,
+      shiftName: rawEmp.shiftName || employee.shiftName || "الدوام الافتراضي (08:00 - 17:00)",
+      shiftStart: rawEmp.shiftStart || employee.shiftStart || "08:00",
+      shiftEnd: rawEmp.shiftEnd || employee.shiftEnd || "17:00",
+      gracePeriodMinutes: rawEmp.gracePeriodMinutes ?? employee.gracePeriodMinutes ?? 15,
       driverId: effectiveDriverId,
       isDriver: isDrv,
       driverLicense: matchedDrv?.license || employee.licenseType || "خصوصي",
@@ -384,6 +422,10 @@ export function EmployeesPage({
         transportAllowance: Number(data.transportAllowance || 0),
         otherAllowance: Number(data.otherAllowance || 0),
         contractType: data.contractType || "دوام كامل",
+        shiftName: data.shiftName || "الدوام الافتراضي (08:00 - 17:00)",
+        shiftStart: data.shiftStart || "08:00",
+        shiftEnd: data.shiftEnd || "17:00",
+        gracePeriodMinutes: Number(data.gracePeriodMinutes ?? 15),
         residencyExpiry: data.residencyExpiry || "—",
         insuranceExpiry: data.insuranceExpiry || "—",
         hireDate: data.hireDate || "—",
@@ -401,16 +443,16 @@ export function EmployeesPage({
       }
 
       setForm(null);
-      await Promise.all([
-        utils.employees.list.invalidate(),
-        utils.drivers.list.invalidate(),
-        utils.vehicles.list.invalidate(),
-      ]);
       toast.success(
         isExisting
           ? "تم حفظ التعديلات على ملف الموظف بنجاح"
           : "تم حفظ ملف الموظف بنجاح"
       );
+      void Promise.all([
+        utils.employees.list.invalidate(),
+        utils.drivers.list.invalidate(),
+        utils.vehicles.list.invalidate(),
+      ]);
     } catch (err: any) {
       toast.error(`تعذر الحفظ: ${err.message}`);
     }
@@ -505,7 +547,7 @@ export function EmployeesPage({
   return (
     <>
       <PageHeader
-        eyebrow="الهتاري بلس / الموارد البشرية"
+        eyebrow="شركة ثقة التوصيل / الموارد البشرية"
         title="إدارة الموارد البشرية (Human Resources)"
         description="إدارة متكاملة للقوى العاملة: موظفو الإدارة، سائقو الأسطول، كشف الحضور والانصراف والبصمة، مسيرات الرواتب الشهرية، الإجازات، ومتابعة الامتثال والتراخيص."
         action={
@@ -526,19 +568,53 @@ export function EmployeesPage({
             ? () => setLeaveModal("new")
             : undefined
         }
+        secondaryAction={mainTab === "employees" ? "استيراد الكادر من إكسل" : undefined}
+        onSecondaryAction={mainTab === "employees" ? () => setImportOpen(true) : undefined}
+        extra={
+          <button
+            type="button"
+            onClick={() => setSelfServiceOpen(true)}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "0.45rem",
+              background: "linear-gradient(135deg, #1e3a8a, #2563eb)",
+              color: "white",
+              border: "none",
+              borderRadius: "8px",
+              padding: "0.55rem 1rem",
+              fontSize: "0.85rem",
+              fontWeight: 700,
+              cursor: "pointer",
+              boxShadow: "0 2px 8px rgba(37, 99, 235, 0.25)",
+              transition: "all 0.2s ease",
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.transform = "translateY(-1px)")}
+            onMouseLeave={(e) => (e.currentTarget.style.transform = "none")}
+          >
+            <Smartphone size={16} />
+            <span>بوابة الخدمات الذاتية للكادر</span>
+          </button>
+        }
       />
 
       {/* Main Subtabs Navigation */}
       <div
         className="table-tabs"
         style={{
-          marginBottom: "1.25rem",
           background: "white",
           padding: "0.35rem 0.75rem",
           borderRadius: "10px",
           border: "1px solid var(--border-color, #e5e7eb)",
+          borderBottom: "1px solid var(--border-color, #e5e7eb)",
           display: "flex",
-          gap: "0.75rem",
+          gap: "0.5rem",
+          alignItems: "center",
+          height: "auto",
+          minHeight: "48px",
+          flexWrap: "wrap",
+          marginBottom: "1.25rem",
+          boxShadow: "0 1px 3px rgba(0,0,0,0.03)",
         }}
       >
         <button
@@ -549,6 +625,8 @@ export function EmployeesPage({
             alignItems: "center",
             gap: "0.4rem",
             padding: "0.5rem 0.75rem",
+            height: "auto",
+            whiteSpace: "nowrap",
           }}
         >
           <Users size={16} /> سجل الموظفين والسائقين ({mergedWorkforceDomain.length})
@@ -562,6 +640,8 @@ export function EmployeesPage({
               alignItems: "center",
               gap: "0.4rem",
               padding: "0.5rem 0.75rem",
+              height: "auto",
+              whiteSpace: "nowrap",
             }}
           >
             <Truck size={16} /> السائقون ({driversList.length})
@@ -575,9 +655,41 @@ export function EmployeesPage({
             alignItems: "center",
             gap: "0.4rem",
             padding: "0.5rem 0.75rem",
+            height: "auto",
+            whiteSpace: "nowrap",
           }}
         >
           <Fingerprint size={16} /> الحضور والانصراف (البصمة)
+        </button>
+        <button
+          className={mainTab === "requests" ? "active" : ""}
+          onClick={() => setMainTab("requests")}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "0.4rem",
+            padding: "0.5rem 0.75rem",
+            height: "auto",
+            whiteSpace: "nowrap",
+          }}
+        >
+          <ClipboardList size={16} /> طلبات الكادر والخدمة الذاتية{" "}
+          {pendingRequestsCount > 0 ? (
+            <span
+              style={{
+                background: "#fef3c7",
+                color: "#92400e",
+                borderRadius: "999px",
+                padding: "0.1rem 0.5rem",
+                fontSize: "0.75rem",
+                fontWeight: 700,
+              }}
+            >
+              {pendingRequestsCount} جديد
+            </span>
+          ) : (
+            `(${employeeRequestsList.length})`
+          )}
         </button>
         <button
           className={mainTab === "payroll" ? "active" : ""}
@@ -587,6 +699,8 @@ export function EmployeesPage({
             alignItems: "center",
             gap: "0.4rem",
             padding: "0.5rem 0.75rem",
+            height: "auto",
+            whiteSpace: "nowrap",
           }}
         >
           <DollarSign size={16} /> مسيرات الرواتب ({payrollList.length})
@@ -599,6 +713,8 @@ export function EmployeesPage({
             alignItems: "center",
             gap: "0.4rem",
             padding: "0.5rem 0.75rem",
+            height: "auto",
+            whiteSpace: "nowrap",
           }}
         >
           <Calendar size={16} /> الإجازات ({leavesList.length})
@@ -611,6 +727,8 @@ export function EmployeesPage({
             alignItems: "center",
             gap: "0.4rem",
             padding: "0.5rem 0.75rem",
+            height: "auto",
+            whiteSpace: "nowrap",
           }}
         >
           <Clock size={16} /> الإقامات والرخص والتأمين{" "}
@@ -642,6 +760,7 @@ export function EmployeesPage({
             onEdit={openEditForm}
             onArchive={archive}
             onAdd={openAddForm}
+            onImport={() => setImportOpen(true)}
           />
         </>
       )}
@@ -768,7 +887,7 @@ export function EmployeesPage({
           residencyTab={residencyTab}
           setResidencyTab={setResidencyTab}
           onRefresh={() => utils.employees.list.invalidate()}
-          onEdit={(emp) => setForm({ ...emp })}
+          onEdit={openEditForm}
           onViewProfile={(emp) => setProfile(emp)}
         />
       )}
@@ -782,6 +901,15 @@ export function EmployeesPage({
           driverTab={driverTab}
           setDriverTab={setDriverTab}
           onRefresh={() => utils.drivers.list.invalidate()}
+        />
+      )}
+
+      {/* TAB 6: EMPLOYEE REQUESTS */}
+      {mainTab === "requests" && (
+        <EmployeeRequestsSection
+          employees={list}
+          drivers={driversList as Driver[]}
+          onOpenSelfService={() => setSelfServiceOpen(true)}
         />
       )}
 
@@ -977,12 +1105,12 @@ export function EmployeesPage({
         }}
       />
 
-      {/* MODAL: Import Employees */}
+      {/* MODAL: Import Employees & Drivers */}
       {importOpen && (
         <ImportModal
           config={{
-            label: "الموظفين",
-            sampleFilename: "نموذج_استيراد_الموظفين.csv",
+            label: "الكادر (موظفين وسائقين)",
+            sampleFilename: "نموذج_استيراد_الكادر_موظفين_وسائقين.csv",
             columns: [
               {
                 key: "name",
@@ -991,16 +1119,34 @@ export function EmployeesPage({
                 hint: "محمد علي السالم",
               },
               {
-                key: "employeeNo",
-                header: "رقم الموظف",
+                key: "category",
+                header: "تصنيف الكادر (موظف إداري / سائق)",
                 required: false,
-                hint: "EMP-2024-1001",
+                hint: "موظف إداري (أو: سائق)",
+              },
+              {
+                key: "jobTitle",
+                header: "المسمى الوظيفي",
+                required: false,
+                hint: "محاسب (أو: سائق حافلة)",
+              },
+              {
+                key: "department",
+                header: "القسم",
+                required: false,
+                hint: "الإدارة (أو: الحركة والأسطول)",
+              },
+              {
+                key: "employeeNo",
+                header: "الرقم الوظيفي",
+                required: false,
+                hint: "EMP-2026-1001",
               },
               {
                 key: "nationalId",
                 header: "رقم الهوية / الإقامة",
                 required: false,
-                hint: "1234567890",
+                hint: "1023456789",
               },
               {
                 key: "phone",
@@ -1009,16 +1155,22 @@ export function EmployeesPage({
                 hint: "0501234567",
               },
               {
-                key: "department",
-                header: "القسم",
+                key: "license",
+                header: "نوع رخصة القيادة",
                 required: false,
-                hint: "الإدارة",
+                hint: "عمومي (للسائقين)",
               },
               {
-                key: "jobTitle",
-                header: "المسمى الوظيفي",
+                key: "licenseRenewal",
+                header: "تاريخ انتهاء الرخصة",
                 required: false,
-                hint: "محاسب",
+                hint: "2027-12-31",
+              },
+              {
+                key: "basicSalary",
+                header: "الراتب الأساسي",
+                required: false,
+                hint: "4000",
               },
               {
                 key: "hireDate",
@@ -1033,29 +1185,418 @@ export function EmployeesPage({
                 hint: "نشط",
               },
             ],
-            mapRow: (raw) => ({
-              name: raw["الاسم الكامل"]?.trim() || "",
-              employeeNo:
-                raw["رقم الموظف"]?.trim() ||
-                `EMP-${new Date().getFullYear()}-${Math.floor(
-                  1000 + Math.random() * 9000
-                )}`,
-              nationalId: raw["رقم الهوية / الإقامة"]?.trim() || "—",
-              phone: raw["رقم الهاتف"]?.trim() || "—",
-              email: "—",
-              department: raw["القسم"]?.trim() || "الإدارة",
-              jobTitle: raw["المسمى الوظيفي"]?.trim() || "موظف",
-              hireDate: raw["تاريخ المباشرة"]?.trim() || formatCompanyDate(),
-              status: raw["الحالة"]?.trim() || "نشط",
-            }),
+            mapRow: (raw) => {
+              const clean = (val: string | undefined): string => {
+                if (!val) return "";
+                let s = val.trim();
+                if (s.startsWith("=")) s = s.replace(/^=/, "").replace(/^["']|["']$/g, "").trim();
+                if (/^[+-]?\d+(\.\d+)?[eE][+-]?\d+$/.test(s)) {
+                  try {
+                    const num = Number(s);
+                    if (!isNaN(num)) s = Math.round(num).toString();
+                  } catch {}
+                }
+                return s;
+              };
+
+              const rawName = clean(
+                raw["الاسم الكامل"] ||
+                raw["الاسم"] ||
+                raw["اسم الموظف"] ||
+                raw["اسم الكادر"] ||
+                raw["name"] ||
+                Object.entries(raw).find(([k]) => k.includes("الاسم") || k === "name" || k === "اسم")?.[1]
+              );
+
+              const rawCategory = clean(
+                raw["تصنيف الكادر (موظف إداري / سائق)"] ||
+                raw["تصنيف الكادر"] ||
+                raw["نوع الكادر"] ||
+                raw["الفئة"] ||
+                raw["الكادر"] ||
+                raw["category"] ||
+                ""
+              );
+
+              const rawJobTitle = clean(
+                raw["المسمى الوظيفي"] ||
+                raw["المهنة"] ||
+                raw["الوظيفة"] ||
+                raw["jobTitle"] ||
+                Object.entries(raw).find(([k]) => k.includes("مهنة") || k.includes("وظيفة"))?.[1]
+              );
+
+              const rawLicense = clean(
+                raw["نوع رخصة القيادة"] ||
+                raw["الرخصة"] ||
+                raw["نوع الرخصة"] ||
+                raw["license"]
+              );
+
+              // STRICT driver identification:
+              // Only employees whose category explicitly includes "سائق" OR whose job title contains "سائق"
+              // AND who do NOT hold an administrative/technical/cleaning title.
+              const isAdministrativeTitle = [
+                "إداري", "اداري", "تنظيف", "مشتريات", "مبيعات", "محاسب", "مدير",
+                "تنفيذي", "مهندس", "نظم", "معلومات", "بائع", "ميكانيكي", "كهربائي", "فني", "مشرف"
+              ].some(term => rawJobTitle.includes(term) || rawCategory.includes(term));
+
+              const isDriver = (rawCategory.includes("سائق") || rawJobTitle.includes("سائق")) && !isAdministrativeTitle;
+
+              const category = isDriver ? "سائق" : "موظف إداري";
+              const defaultDept = isDriver ? "الحركة والأسطول" : "الإدارة العامة";
+              const defaultJob = isDriver ? (rawJobTitle || "سائق حافلة") : (rawJobTitle || "موظف إداري");
+
+              let rawPhone = clean(raw["رقم الهاتف"] || raw["الهاتف"] || raw["الجوال"] || raw["phone"]);
+              if (/^5\d{8}$/.test(rawPhone)) rawPhone = `0${rawPhone}`;
+
+              const rawNationalId = clean(
+                raw["رقم الهوية / الإقامة"] ||
+                raw["رقم الإقامة"] ||
+                raw["رقم الهوية"] ||
+                raw["الإقامة"] ||
+                raw["الهوية"] ||
+                raw["iqama"] ||
+                raw["nationalId"] ||
+                Object.entries(raw).find(([k]) => k.includes("إقامة") || k.includes("اقامة") || k.includes("هوية"))?.[1]
+              );
+
+              return {
+                name: rawName,
+                category,
+                isDriver,
+                jobTitle: rawJobTitle || defaultJob,
+                department: clean(raw["القسم"] || raw["department"]) || defaultDept,
+                employeeNo:
+                  clean(raw["الرقم الوظيفي"] || raw["رقم الموظف"] || raw["employeeNo"]) ||
+                  `EMP-${new Date().getFullYear()}-${Math.floor(
+                    1000 + Math.random() * 9000
+                  )}`,
+                nationalId: rawNationalId || "—",
+                phone: rawPhone || "—",
+                email: "—",
+                license: rawLicense || (isDriver ? "عمومي" : "—"),
+                licenseRenewal:
+                  clean(raw["تاريخ انتهاء الرخصة"] || raw["انتهاء الرخصة"]) || "—",
+                basicSalary: Number(clean(raw["الراتب الأساسي"] || raw["الراتب"]) || 0),
+                hireDate:
+                  clean(raw["تاريخ المباشرة"] || raw["تاريخ التعيين"]) ||
+                  formatCompanyDate(),
+                status: clean(raw["الحالة"]) || "نشط",
+              };
+            },
           }}
           onClose={() => setImportOpen(false)}
           onImport={async (rows) => {
-            for (const row of rows) {
-              await createEmployee.mutateAsync(row as any);
+            let createdCount = 0;
+            let updatedCount = 0;
+            let untouchedCount = 0;
+
+            const cleanText = (s: unknown) =>
+              String(s ?? "").trim().replace(/\s+/g, " ");
+
+            // Parse date to valid YYYY-MM-DD or null to prevent database errors
+            const parseIsoDate = (d: unknown): string | null => {
+              if (!d) return null;
+              const s = String(d).trim();
+              if (s === "—" || s === "-" || s === "" || s.toLowerCase() === "null") return null;
+              if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+              const dmy = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+              if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}`;
+              const ymd = s.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+              if (ymd) return `${ymd[1]}-${ymd[2].padStart(2, "0")}-${ymd[3].padStart(2, "0")}`;
+              return null;
+            };
+
+            // Normalize Arabic text for robust name comparison (alef, taa marbuta, harakat, etc.)
+            const normalizeArabic = (s: unknown) =>
+              cleanText(s)
+                .toLowerCase()
+                .replace(/[إأآا]/g, "ا")
+                .replace(/ة/g, "ه")
+                .replace(/ى/g, "ي")
+                .replace(/[\u064B-\u065F]/g, "");
+
+            // Index existing employees
+            const existingByNationalId = new Map<string, EmployeeRow>();
+            const existingByName = new Map<string, EmployeeRow>();
+            const existingByEmpNo = new Map<string, EmployeeRow>();
+
+            for (const emp of list) {
+              if (emp.nationalId && emp.nationalId !== "—") {
+                const norm = normalizeIdentityNumber(emp.nationalId);
+                if (norm && norm !== "—") existingByNationalId.set(norm, emp);
+              }
+              if (emp.name) {
+                const normName = normalizeArabic(emp.name);
+                if (normName) existingByName.set(normName, emp);
+              }
+              if (emp.employeeNo) {
+                existingByEmpNo.set(cleanText(emp.employeeNo), emp);
+              }
             }
-            void utils.employees.list.invalidate();
+
+            // Index existing drivers
+            const existingDriversById = new Map<number, Driver>();
+            const existingDriversByNationalId = new Map<string, Driver>();
+            const existingDriversByName = new Map<string, Driver>();
+
+            for (const drv of (driversList as Driver[])) {
+              existingDriversById.set(drv.id, drv);
+              if (drv.idNo && drv.idNo !== "—") {
+                const norm = normalizeIdentityNumber(drv.idNo);
+                if (norm && norm !== "—") existingDriversByNationalId.set(norm, drv);
+              }
+              if (drv.name) {
+                const normName = normalizeArabic(drv.name);
+                if (normName) existingDriversByName.set(normName, drv);
+              }
+            }
+
+            for (const row of rows) {
+              const normalizedNationalId =
+                row.nationalId && row.nationalId !== "—"
+                  ? normalizeIdentityNumber(row.nationalId)
+                  : "—";
+
+              const validId = normalizedNationalId !== "—" ? normalizedNationalId : "";
+              const normName = normalizeArabic(row.name);
+              const cleanEmpNo = cleanText(row.employeeNo);
+              const cleanHireDate = parseIsoDate(row.hireDate) || formatCompanyDate();
+              const cleanRenewal = parseIsoDate(row.licenseRenewal);
+
+              // Check if employee already exists:
+              // 1. By National / Iqama ID (exact 10 digits match)
+              // 2. By normalized full name
+              // 3. By employee number
+              const existingEmp =
+                (validId ? existingByNationalId.get(validId) : undefined) ||
+                (normName ? existingByName.get(normName) : undefined) ||
+                (cleanEmpNo ? existingByEmpNo.get(cleanEmpNo) : undefined);
+
+              if (existingEmp) {
+                // Existing employee found! Do NOT duplicate. Only update missing data.
+                let hasChanges = false;
+                const empUpdateData: Record<string, any> = {};
+
+                if (
+                  (!existingEmp.nationalId || existingEmp.nationalId === "—") &&
+                  validId &&
+                  validId.length === 10
+                ) {
+                  empUpdateData.nationalId = validId;
+                  hasChanges = true;
+                }
+
+                if (
+                  (!existingEmp.phone || existingEmp.phone === "—") &&
+                  row.phone &&
+                  row.phone !== "—"
+                ) {
+                  empUpdateData.phone = row.phone;
+                  hasChanges = true;
+                }
+
+                if (
+                  (!existingEmp.jobTitle || existingEmp.jobTitle === "—" || existingEmp.jobTitle === "موظف") &&
+                  row.jobTitle &&
+                  row.jobTitle !== "—" &&
+                  row.jobTitle !== "موظف"
+                ) {
+                  empUpdateData.jobTitle = row.jobTitle;
+                  hasChanges = true;
+                }
+
+                if (
+                  (!existingEmp.department || existingEmp.department === "—" || existingEmp.department === "الإدارة") &&
+                  row.department &&
+                  row.department !== "—" &&
+                  row.department !== "الإدارة"
+                ) {
+                  empUpdateData.department = row.department;
+                  hasChanges = true;
+                }
+
+                if (
+                  (!existingEmp.basicSalary || Number(existingEmp.basicSalary) === 0) &&
+                  Number(row.basicSalary || 0) > 0
+                ) {
+                  empUpdateData.basicSalary = Number(row.basicSalary);
+                  hasChanges = true;
+                }
+
+                if (
+                  (!existingEmp.hireDate || existingEmp.hireDate === "—") &&
+                  cleanHireDate
+                ) {
+                  empUpdateData.hireDate = cleanHireDate;
+                  hasChanges = true;
+                }
+
+                // Driver sync or unlink for existing employee
+                let linkedDriverId = existingEmp.driverId ?? null;
+                if (row.isDriver) {
+                  let existingDrv = linkedDriverId ? existingDriversById.get(linkedDriverId) : undefined;
+                  if (!existingDrv) {
+                    existingDrv =
+                      (validId ? existingDriversByNationalId.get(validId) : undefined) ||
+                      (normName ? existingDriversByName.get(normName) : undefined);
+                  }
+
+                  if (existingDrv) {
+                    linkedDriverId = existingDrv.id;
+                    const drvUpdate: Record<string, any> = {};
+                    if ((!existingDrv.idNo || existingDrv.idNo === "—") && validId && validId.length === 10) {
+                      drvUpdate.idNo = validId;
+                    }
+                    if ((!existingDrv.phone || existingDrv.phone === "—") && row.phone && row.phone !== "—") {
+                      drvUpdate.phone = row.phone;
+                    }
+                    if (
+                      (!existingDrv.license || existingDrv.license === "—" || existingDrv.license === "خصوصي") &&
+                      row.license &&
+                      row.license !== "—"
+                    ) {
+                      drvUpdate.license = row.license;
+                    }
+                    if (
+                      (!existingDrv.renewal || existingDrv.renewal === "—") &&
+                      cleanRenewal
+                    ) {
+                      drvUpdate.renewal = cleanRenewal;
+                    }
+                    if (Object.keys(drvUpdate).length > 0) {
+                      await updateDriver.mutateAsync({ id: existingDrv.id, data: drvUpdate });
+                      hasChanges = true;
+                    }
+                  } else {
+                    const createdDriver = await createDriver.mutateAsync({
+                      name: row.name,
+                      phone: row.phone || "—",
+                      idNo: validId || "—",
+                      license: row.license || "عمومي",
+                      renewal: cleanRenewal || "—",
+                      status: "متاح",
+                      vehicleId: null,
+                    });
+                    linkedDriverId = createdDriver.id;
+                    existingDriversById.set(createdDriver.id, createdDriver as any);
+                    existingDriversByName.set(normName, createdDriver as any);
+                    if (validId) existingDriversByNationalId.set(validId, createdDriver as any);
+                    hasChanges = true;
+                  }
+
+                  if (!existingEmp.driverId && linkedDriverId) {
+                    empUpdateData.driverId = linkedDriverId;
+                    hasChanges = true;
+                  }
+                } else {
+                  // If the employee is NOT a driver, but was mistakenly linked to a driver before, unlink them!
+                  if (existingEmp.driverId) {
+                    empUpdateData.driverId = null;
+                    hasChanges = true;
+                    try {
+                      await archiveDriver.mutateAsync({ id: existingEmp.driverId });
+                    } catch {}
+                  }
+                }
+
+                if (Object.keys(empUpdateData).length > 0) {
+                  await updateEmployee.mutateAsync({ id: existingEmp.id, data: empUpdateData });
+                }
+
+                if (hasChanges) {
+                  updatedCount++;
+                } else {
+                  untouchedCount++;
+                }
+              } else {
+                // New employee: add to database
+                let linkedDriverId: number | null = null;
+                if (row.isDriver) {
+                  let existingDrv =
+                    (validId ? existingDriversByNationalId.get(validId) : undefined) ||
+                    (normName ? existingDriversByName.get(normName) : undefined);
+
+                  if (existingDrv) {
+                    linkedDriverId = existingDrv.id;
+                  } else {
+                    const createdDriver = await createDriver.mutateAsync({
+                      name: row.name,
+                      phone: row.phone || "—",
+                      idNo: validId || "—",
+                      license: row.license || "عمومي",
+                      renewal: cleanRenewal || "—",
+                      status: "متاح",
+                      vehicleId: null,
+                    });
+                    linkedDriverId = createdDriver.id;
+                    existingDriversById.set(createdDriver.id, createdDriver as any);
+                    existingDriversByName.set(normName, createdDriver as any);
+                    if (validId) existingDriversByNationalId.set(validId, createdDriver as any);
+                  }
+                }
+
+                const createdEmployee = await createEmployee.mutateAsync({
+                  name: row.name,
+                  employeeNo: row.employeeNo,
+                  nationalId: normalizedNationalId,
+                  phone: row.phone || "—",
+                  email: "—",
+                  department: row.department,
+                  jobTitle: row.jobTitle,
+                  basicSalary: Number(row.basicSalary || 0),
+                  housingAllowance: 0,
+                  transportAllowance: 0,
+                  otherAllowance: 0,
+                  contractType: "دوام كامل",
+                  shiftName: "الدوام الافتراضي (08:00 - 17:00)",
+                  shiftStart: "08:00",
+                  shiftEnd: "17:00",
+                  gracePeriodMinutes: 15,
+                  residencyExpiry: "—",
+                  insuranceExpiry: "—",
+                  hireDate: cleanHireDate,
+                  status: (row.status || "نشط") as any,
+                  notes: row.isDriver ? "تم استيراده كسائق أسطول" : "تم استيراده كموظف إداري",
+                  driverId: linkedDriverId,
+                } as any);
+
+                createdCount++;
+                // Add to lookup maps to prevent duplicate within the same imported file
+                if (validId) existingByNationalId.set(validId, createdEmployee as any);
+                if (normName) existingByName.set(normName, createdEmployee as any);
+                if (cleanEmpNo) existingByEmpNo.set(cleanEmpNo, createdEmployee as any);
+              }
+            }
+
+            await Promise.all([
+              utils.employees.list.invalidate(),
+              utils.drivers.list.invalidate(),
+              utils.vehicles.list.invalidate(),
+            ]);
+
+            if (createdCount > 0 && updatedCount > 0) {
+              return `تمت المزامنة الذكية: إضافة ${createdCount} كادر جديد، وتحديث بيانات ${updatedCount} كادر مسجل مسبقاً دون أي تكرار.`;
+            } else if (createdCount > 0) {
+              return `تمت العملية بنجاح: إضافة ${createdCount} كادر جديد (لا يوجد تكرار).`;
+            } else if (updatedCount > 0) {
+              return `الأسماء مسجلة مسبقاً: تم تحديث البيانات الناقصة لـ ${updatedCount} كادر دون تكرار أي اسم.`;
+            } else {
+              return `جميع الأسماء (${rows.length}) مسجلة مسبقاً وكاملة البيانات؛ تم منع التكرار بالكامل.`;
+            }
           }}
+        />
+      )}
+
+      {/* MODAL: Unified Workforce & Driver Self-Service Portal */}
+      {selfServiceOpen && (
+        <WorkforceSelfServiceModal
+          onClose={() => setSelfServiceOpen(false)}
+          employees={list}
+          drivers={driversList as Driver[]}
+          vehicles={employeeVehicles as Vehicle[]}
+          mode="hr"
         />
       )}
     </>

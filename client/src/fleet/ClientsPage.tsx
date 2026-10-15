@@ -1,6 +1,7 @@
 import React, { useState } from "react";
+import { trpc } from "@/lib/trpc";
 import { matchesQuickSearch } from "@/lib/quick-search";
-import { MoreHorizontal, Sparkles } from "lucide-react";
+import { MoreHorizontal, Sparkles, Users, Globe } from "lucide-react";
 import type { Row, Client } from "./types";
 import {
   PageHeader,
@@ -8,6 +9,7 @@ import {
   ContextMenu,
   exportCsv,
 } from "./common";
+import { ClientPortalRequestsSection } from "./clients/ClientPortalRequestsSection";
 
 export function ClientsPage({
   clients,
@@ -18,9 +20,16 @@ export function ClientsPage({
   onOpenForm: (row?: Row) => void;
   onAction: (action: string, row: Row) => void;
 }) {
+  const [mainTab, setMainTab] = useState<"registered" | "portal_requests">("registered");
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState("الكل");
   const [menu, setMenu] = useState<number | null>(null);
+
+  const portalRequestsQuery = trpc.clientPortal.list.useQuery(undefined, {
+    staleTime: 15000,
+  });
+  const portalRequests = portalRequestsQuery.data ?? [];
+  const newRequestsCount = portalRequests.filter((r) => r.status === "جديد").length;
 
   const filtered = clients.filter(
     (c) =>
@@ -34,11 +43,72 @@ export function ClientsPage({
     <>
       <PageHeader
         eyebrow="التشغيل / الحسابات"
-        title="العملاء"
-        description="ملفات العملاء والعقود والمركبات والمطالبات المرتبطة بكل حساب."
-        action="إضافة عميل"
-        onAction={() => onOpenForm()}
+        title="إدارة العملاء وبوابة الطلبات العامة"
+        description="ملفات العملاء المعتمدين، العقود، وطلبات واستفسارات بوابة العملاء العامة الواردة بدون تسجيل دخول."
+        action={mainTab === "registered" ? "إضافة عميل" : undefined}
+        onAction={mainTab === "registered" ? () => onOpenForm() : undefined}
       />
+
+      {/* Sub-navigation Tabs: Registered Clients vs Public Portal Requests */}
+      <div
+        className="table-tabs"
+        style={{
+          background: "white",
+          padding: "0.35rem 0.75rem",
+          borderRadius: "10px",
+          border: "1px solid var(--border-color, #e5e7eb)",
+          display: "flex",
+          gap: "0.5rem",
+          marginBottom: "1.25rem",
+          flexWrap: "wrap",
+        }}
+      >
+        <button
+          className={mainTab === "registered" ? "active" : ""}
+          onClick={() => setMainTab("registered")}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "0.4rem",
+            padding: "0.5rem 0.85rem",
+          }}
+        >
+          <Users size={16} /> سجل العملاء المعتمدين ({clients.length})
+        </button>
+        <button
+          className={mainTab === "portal_requests" ? "active" : ""}
+          onClick={() => setMainTab("portal_requests")}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "0.4rem",
+            padding: "0.5rem 0.85rem",
+          }}
+        >
+          <Globe size={16} /> طلبات وبلاغات بوابة العملاء العامة{" "}
+          {newRequestsCount > 0 ? (
+            <span
+              style={{
+                background: "#fef3c7",
+                color: "#92400e",
+                borderRadius: "999px",
+                padding: "0.1rem 0.5rem",
+                fontSize: "0.75rem",
+                fontWeight: 700,
+              }}
+            >
+              {newRequestsCount} جديد 🟡
+            </span>
+          ) : (
+            `(${portalRequests.length})`
+          )}
+        </button>
+      </div>
+
+      {mainTab === "portal_requests" ? (
+        <ClientPortalRequestsSection />
+      ) : (
+        <>
 
       {clients.length > 0 &&
         (() => {
@@ -114,6 +184,8 @@ export function ClientsPage({
           </tr>
         ))}
       </TableShell>
+        </>
+      )}
     </>
   );
 }

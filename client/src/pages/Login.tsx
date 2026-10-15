@@ -43,14 +43,27 @@ export default function Login() {
   return (
     <main className="login-page" dir="rtl">
       <section className="login-card">
-        <div className="login-brand"><span className="login-logo">هـ</span><div><strong>الهتاري بلس</strong><small>إدارة الأسطول</small></div></div>
+        <div className="login-brand"><span className="login-logo">ث</span><div><strong>شركة ثقة التوصيل</strong><small>إدارة الأسطول</small></div></div>
         <div className="login-heading"><span className="login-icon"><ShieldCheck size={22} /></span><h1>تسجيل الدخول</h1><p>أدخل بيانات حسابك للوصول إلى لوحة التحكم.</p></div>
         <form onSubmit={submit} className="login-form">
-          <label className="login-field"><span>اسم المستخدم</span><div><UserRound size={17} /><input type="text" value={username} onChange={event => setUsername(event.target.value)} placeholder="username" autoComplete="username" autoFocus /></div></label>
+          <label className="login-field"><span>اسم المستخدم</span><div><UserRound size={17} /><input type="text" value={username} onChange={event => setUsername(event.target.value)} placeholder="أدخل اسم المستخدم" autoComplete="username" autoFocus /></div></label>
           <label className="login-field"><span>كلمة المرور</span><div><LockKeyhole size={17} /><input type="password" value={password} onChange={event => setPassword(event.target.value)} placeholder="أدخل كلمة المرور" autoComplete="current-password" /></div></label>
           <button className="btn primary login-submit" type="submit" disabled={login.isPending}><LogIn size={17} />{login.isPending ? "جارٍ الدخول..." : "دخول إلى النظام"}</button>
         </form>
         <p className="login-note">إذا لم يكن لديك حساب، تواصل مع مدير النظام لإنشائه.</p>
+        <div style={{ marginTop: "1rem", paddingTop: "0.75rem", borderTop: "1px solid #e2e8f0", textAlign: "center" }}>
+          <a
+            href="/client-portal"
+            style={{
+              color: "#2563eb",
+              fontSize: "0.86rem",
+              fontWeight: 700,
+              textDecoration: "none",
+            }}
+          >
+            هل أنت عميل وتبحث عن استئجار باصات؟ اضغط هنا 🚌
+          </a>
+        </div>
       </section>
     </main>
   );

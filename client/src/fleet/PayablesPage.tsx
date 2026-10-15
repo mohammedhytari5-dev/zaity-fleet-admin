@@ -434,6 +434,9 @@ export function PayablesPage({
                       }
                     >
                       <option value="">فاتورة عامة / غير مرتبطة بباص</option>
+                      {bill.vehicleId && !vehicles.some((vehicle) => vehicle.id === bill.vehicleId) && (
+                        <option value={bill.vehicleId}>باص #{bill.vehicleId}</option>
+                      )}
                       {vehicles.map((vehicle) => (
                         <option key={vehicle.id} value={vehicle.id}>
                           {vehicle.plate} · {vehicle.brand} {vehicle.model}

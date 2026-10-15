@@ -62,7 +62,7 @@ export default function InvoicesPage({ canAccessFinance = true }: InvoicesPagePr
   );
 
   // Seller info (prefilled company defaults)
-  const [sellerName, setSellerName] = useState("شركة زيتي لحلول الأساطيل المحدودة");
+  const [sellerName, setSellerName] = useState("شركة ثقة التوصيل المحدودة");
   const [sellerVatNumber, setSellerVatNumber] = useState("310123456700003");
   const [sellerCity, setSellerCity] = useState("الرياض");
   const [sellerAddress, setSellerAddress] = useState("طريق الملك فهد، حي الصحافة");

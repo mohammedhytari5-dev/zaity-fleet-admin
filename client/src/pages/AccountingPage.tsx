@@ -23,7 +23,11 @@ import {
   Unlock,
   ChevronDown,
   ChevronUp,
+  Paperclip,
 } from "lucide-react";
+import { readUploadDataUrl, SUPPORTED_UPLOAD_ACCEPT } from "@/lib/fileUploads";
+import { DocumentPreviewModal } from "@/fleet/common";
+import { isLinkedDocument } from "@/lib/documentRelations";
 import {
   ACCOUNT_TYPE_LABELS,
   NORMAL_BALANCE_FOR_TYPE,
@@ -66,6 +70,18 @@ export default function AccountingPage({ canAccessFinance = true }: AccountingPa
   ]);
   const [expandedEntryId, setExpandedEntryId] = useState<number | null>(null);
 
+  // Document attachment for new entry
+  const [newEntryDocFile, setNewEntryDocFile] = useState<File | null>(null);
+  const [newEntryDocType, setNewEntryDocType] = useState("سند قيد");
+  const [newEntryDocName, setNewEntryDocName] = useState("");
+  const [isPostingEntry, setIsPostingEntry] = useState(false);
+  const [previewDocModal, setPreviewDocModal] = useState<{
+    title: string;
+    fileUrl: string;
+    fileName?: string;
+    type?: string;
+  } | null>(null);
+
   // Ledger state
   const [selectedLedgerAccountId, setSelectedLedgerAccountId] = useState<number | null>(null);
   const [ledgerStartDate, setLedgerStartDate] = useState("");
@@ -87,6 +103,9 @@ export default function AccountingPage({ canAccessFinance = true }: AccountingPa
   // Queries
   const accountsQuery = trpc.accounting.listAccounts.useQuery(undefined);
   const entriesQuery = trpc.accounting.listEntries.useQuery(undefined);
+  const documentsQuery = trpc.documents.list.useQuery(undefined, {
+    enabled: canAccessFinance,
+  });
   const periodsQuery = trpc.accounting.listPeriods.useQuery();
   const trialBalanceQuery = trpc.accounting.trialBalance.useQuery({
     asOfDate: trialBalanceAsOfDate || undefined,
@@ -140,10 +159,14 @@ export default function AccountingPage({ canAccessFinance = true }: AccountingPa
         { accountId: 0, debit: 0, credit: 0, description: "" },
         { accountId: 0, debit: 0, credit: 0, description: "" },
       ]);
+      setNewEntryDocFile(null);
+      setNewEntryDocType("سند قيد");
+      setNewEntryDocName("");
       utils.accounting.listEntries.invalidate();
       utils.accounting.trialBalance.invalidate();
       utils.accounting.incomeStatement.invalidate();
       utils.accounting.balanceSheet.invalidate();
+      void utils.documents.list.invalidate();
       if (selectedLedgerAccountId) utils.accounting.accountLedger.invalidate();
     },
     onError: (err) => toast.error(`تعذر ترحيل القيد: ${err.message}`),
@@ -250,7 +273,7 @@ export default function AccountingPage({ canAccessFinance = true }: AccountingPa
     });
   };
 
-  const handlePostEntry = () => {
+  const handlePostEntry = async () => {
     if (!newEntryDescription.trim()) {
       toast.error("يرجى إدخال وصف للقيد");
       return;
@@ -265,6 +288,30 @@ export default function AccountingPage({ canAccessFinance = true }: AccountingPa
       return;
     }
 
+    setIsPostingEntry(true);
+    let docPayload: {
+      name?: string;
+      type: string;
+      fileName: string;
+      fileUrl: string;
+    } | undefined = undefined;
+
+    if (newEntryDocFile) {
+      try {
+        const fileUrl = await readUploadDataUrl(newEntryDocFile);
+        docPayload = {
+          name: newEntryDocName.trim() || newEntryDocFile.name,
+          type: newEntryDocType || "سند قيد",
+          fileName: newEntryDocFile.name,
+          fileUrl,
+        };
+      } catch (err: any) {
+        toast.error(`تعذر قراءة ملف المستند: ${err.message}`);
+        setIsPostingEntry(false);
+        return;
+      }
+    }
+
     createEntryMutation.mutate({
       entryDate: newEntryDate,
       description: newEntryDescription,
@@ -275,6 +322,9 @@ export default function AccountingPage({ canAccessFinance = true }: AccountingPa
         credit: l.credit,
         description: l.description || undefined,
       })),
+      document: docPayload,
+    }, {
+      onSettled: () => setIsPostingEntry(false),
     });
   };
 
@@ -618,13 +668,14 @@ export default function AccountingPage({ canAccessFinance = true }: AccountingPa
                     <th className="py-3 px-4">إجمالي المدين</th>
                     <th className="py-3 px-4">إجمالي الدائن</th>
                     <th className="py-3 px-4">الحالة</th>
+                    <th className="py-3 px-4 text-center">المستند المرفق</th>
                     <th className="py-3 px-4 text-center">إجراءات</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/60">
                   {(entriesQuery.data ?? []).length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="py-8 text-center text-muted-foreground">
+                      <td colSpan={9} className="py-8 text-center text-muted-foreground">
                         لا توجد قيود يومية مسجلة بعد.
                       </td>
                     </tr>
@@ -665,6 +716,48 @@ export default function AccountingPage({ canAccessFinance = true }: AccountingPa
                               ? "معكوس"
                               : "مسودة"}
                           </span>
+                        </td>
+                        <td className="py-3 px-4 text-center">
+                          {(() => {
+                            const entryDocs = (documentsQuery.data ?? []).filter((doc: any) =>
+                              isLinkedDocument(doc, "قيد يومية", entry.id)
+                            );
+                            if (entryDocs.length === 0) {
+                              return <span className="text-muted-foreground text-xs">—</span>;
+                            }
+                            const firstDoc = entryDocs[0];
+                            return (
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  try {
+                                    let url = firstDoc.fileUrl;
+                                    if (!url) {
+                                      const fetched = await utils.documents.file.fetch({ id: firstDoc.id });
+                                      url = fetched?.url;
+                                    }
+                                    if (url) {
+                                      setPreviewDocModal({
+                                        title: firstDoc.name || `مستند قيد #${entry.entryNumber}`,
+                                        fileUrl: url,
+                                        fileName: firstDoc.fileName || firstDoc.name,
+                                        type: firstDoc.type,
+                                      });
+                                    } else {
+                                      toast.error("ملف المستند غير متاح");
+                                    }
+                                  } catch (e: any) {
+                                    toast.error(e.message || "تعذر فتح المستند");
+                                  }
+                                }}
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-teal-50 text-teal-700 hover:bg-teal-100 transition-colors border border-teal-200"
+                                title={firstDoc.name || "معاينة المستند المرفق"}
+                              >
+                                <Paperclip className="w-3 h-3" />
+                                <span>{firstDoc.type || "مستند"} ({entryDocs.length})</span>
+                              </button>
+                            );
+                          })()}
                         </td>
                         <td className="py-3 px-4 text-center">
                           <div className="flex items-center justify-center gap-2">
@@ -1592,6 +1685,128 @@ export default function AccountingPage({ canAccessFinance = true }: AccountingPa
                 </div>
               </div>
 
+              {/* Optional Document Attachment */}
+              <div
+                style={{
+                  marginBottom: "1.25rem",
+                  padding: "1rem",
+                  borderRadius: "0.5rem",
+                  background: "#f8fafc",
+                  border: "1px dashed #cbd5e1",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.75rem" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                    <Paperclip size={16} style={{ color: "#0f766e" }} />
+                    <strong style={{ fontSize: "0.85rem", color: "#0f766e" }}>المستندات والمرفقات المؤيدة للقيد</strong>
+                    <span style={{ fontSize: "0.7rem", color: "#64748b", background: "#e2e8f0", padding: "0.1rem 0.5rem", borderRadius: "0.375rem" }}>
+                      اختياري
+                    </span>
+                  </div>
+                  {newEntryDocFile && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewEntryDocFile(null);
+                        setNewEntryDocName("");
+                      }}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: "#ef4444",
+                        fontSize: "0.75rem",
+                        cursor: "pointer",
+                        fontWeight: 600,
+                      }}
+                    >
+                      ✕ إزالة المرفق
+                    </button>
+                  )}
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "0.75rem", marginBottom: "0.75rem" }}>
+                  <div>
+                    <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "#64748b", marginBottom: "0.25rem" }}>
+                      نوع المستند المرفق
+                    </label>
+                    <select
+                      value={newEntryDocType}
+                      onChange={(e) => setNewEntryDocType(e.target.value)}
+                      style={{
+                        width: "100%",
+                        padding: "0.45rem 0.65rem",
+                        background: "#ffffff",
+                        border: "1px solid #cbd5e1",
+                        borderRadius: "0.375rem",
+                        fontSize: "0.8rem",
+                        color: "#0f172a",
+                      }}
+                    >
+                      <option value="سند قيد">سند قيد (Journal Voucher)</option>
+                      <option value="فاتورة مؤيدة">فاتورة مؤيدة (Supporting Invoice)</option>
+                      <option value="إشعار بنكي">إشعار بنكي / تحويل (Bank Transfer)</option>
+                      <option value="إيصال سداد">إيصال سداد (Payment Receipt)</option>
+                      <option value="مستند تسوية">مستند تسوية (Settlement Document)</option>
+                      <option value="أخرى">أخرى (Other Document)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "#64748b", marginBottom: "0.25rem" }}>
+                      وصف أو اسم المستند (اختياري)
+                    </label>
+                    <input
+                      type="text"
+                      value={newEntryDocName}
+                      onChange={(e) => setNewEntryDocName(e.target.value)}
+                      placeholder="مثال: إشعار تحويل البنك الأهلي رقم 98234"
+                      style={{
+                        width: "100%",
+                        padding: "0.45rem 0.65rem",
+                        background: "#ffffff",
+                        border: "1px solid #cbd5e1",
+                        borderRadius: "0.375rem",
+                        fontSize: "0.8rem",
+                        color: "#0f172a",
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "#64748b", marginBottom: "0.25rem" }}>
+                    اختيار الملف المرفق (PDF, صور, ملفات Excel)
+                  </label>
+                  <input
+                    type="file"
+                    accept={SUPPORTED_UPLOAD_ACCEPT}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) {
+                        setNewEntryDocFile(f);
+                        if (!newEntryDocName) setNewEntryDocName(f.name);
+                      }
+                    }}
+                    style={{
+                      width: "100%",
+                      padding: "0.4rem 0.5rem",
+                      background: "#ffffff",
+                      border: "1px solid #cbd5e1",
+                      borderRadius: "0.375rem",
+                      fontSize: "0.8rem",
+                      color: "#0f172a",
+                    }}
+                  />
+                  {newEntryDocFile && (
+                    <div style={{ marginTop: "0.4rem", fontSize: "0.75rem", color: "#0f766e", display: "flex", alignItems: "center", gap: "0.35rem" }}>
+                      <span>✓ تم اختيار الملف:</span>
+                      <strong>{newEntryDocFile.name}</strong>
+                      <span>({(newEntryDocFile.size / 1024).toFixed(1)} KB)</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
               {/* Balancing Verification Banner */}
               <div
                 style={{
@@ -1637,14 +1852,14 @@ export default function AccountingPage({ canAccessFinance = true }: AccountingPa
                 <button
                   type="button"
                   className="btn primary"
-                  disabled={!isEntryBalanced || createEntryMutation.isPending}
+                  disabled={!isEntryBalanced || createEntryMutation.isPending || isPostingEntry}
                   onClick={handlePostEntry}
                   style={{
                     background: isEntryBalanced ? "#0f766e" : "#94a3b8",
                     cursor: isEntryBalanced ? "pointer" : "not-allowed",
                   }}
                 >
-                  {createEntryMutation.isPending ? "جارٍ الترحيل..." : "ترحيل القيد رسمياً"}
+                  {createEntryMutation.isPending || isPostingEntry ? "جارٍ الترحيل وإرفاق المستند..." : "ترحيل القيد رسمياً"}
                 </button>
               </div>
             </div>
@@ -1778,6 +1993,19 @@ export default function AccountingPage({ canAccessFinance = true }: AccountingPa
             </div>
           </div>
         </div>
+      )}
+
+      {/* DOCUMENT PREVIEW MODAL */}
+      {previewDocModal && (
+        <DocumentPreviewModal
+          title={previewDocModal.title}
+          fileUrl={previewDocModal.fileUrl}
+          fileName={previewDocModal.fileName}
+          type={previewDocModal.type}
+          entity="قيد يومية"
+          status="ساري"
+          onClose={() => setPreviewDocModal(null)}
+        />
       )}
     </div>
   );

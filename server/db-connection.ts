@@ -5,6 +5,13 @@ export type MysqlConnectionOptions = {
   password: string;
   database: string;
   ssl?: { rejectUnauthorized: boolean };
+  waitForConnections?: boolean;
+  connectionLimit?: number;
+  maxIdle?: number;
+  idleTimeout?: number;
+  queueLimit?: number;
+  enableKeepAlive?: boolean;
+  keepAliveInitialDelay?: number;
 };
 
 /**
@@ -34,5 +41,12 @@ export function getMysqlConnectionOptions(connectionString: string): MysqlConnec
     password: decodeURIComponent(url.password),
     database: decodeURIComponent(url.pathname.replace(/^\//, "")),
     ...(ssl ? { ssl } : {}),
+    waitForConnections: true,
+    connectionLimit: 30,
+    maxIdle: 20,
+    idleTimeout: 60000,
+    queueLimit: 0,
+    enableKeepAlive: true,
+    keepAliveInitialDelay: 10000,
   };
 }

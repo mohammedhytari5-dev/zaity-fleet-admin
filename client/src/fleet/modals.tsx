@@ -1,4 +1,4 @@
-import React, { useState, useMemo, Fragment } from "react";
+import React, { useState, useEffect, useMemo, Fragment } from "react";
 import { trpc } from "@/lib/trpc";
 import { formatCompanyDate } from "@shared/date-utils";
 import {
@@ -332,7 +332,7 @@ export function RecordForm({
           id: Date.now(),
           plate: "",
           brand: "تويوتا",
-          model: "",
+          model: "—",
           year: "2026",
           color: "أبيض",
           mileage: "0 كم",
@@ -349,7 +349,12 @@ export function RecordForm({
           contract: "—",
         };
 
-  const [form, setForm] = useState<Row>(() => row || defaults);
+  const [form, setForm] = useState<Row>(() => (row ? { ...defaults, ...row } : defaults));
+
+  useEffect(() => {
+    setForm(row ? { ...defaults, ...row } : defaults);
+  }, [row, module]);
+
   const editableClaimStatuses = Array.from(
     new Set([
       String(form.status || "جديدة"),
@@ -508,7 +513,7 @@ export function RecordForm({
       : module === "vehicles"
       ? form.plate
       : module === "maintenance"
-      ? form.vehicle
+      ? form.vehicle && form.type && form.type.trim() !== "—"
       : module === "documents"
       ? form.name
       : module === "finance"
@@ -558,6 +563,7 @@ export function RecordForm({
     }
     const payload: Row = {
       ...form,
+      ...(module === "vehicles" ? { model: form.model || form.year || "—" } : {}),
       ...(module === "clients"
         ? {
             vat: normalizeIdentityNumber(form.vat),
@@ -614,21 +620,11 @@ export function RecordForm({
               <span>شركة السيارة</span>
               <select value={form.brand} onChange={(e) => set("brand")(e.target.value)}>
                 <option value="—">اختر الماركة</option>
+                {form.brand && form.brand !== "—" && !(settings ?? []).some((s) => s.category === "car_companies" && s.value === form.brand) && (
+                  <option value={form.brand}>{form.brand}</option>
+                )}
                 {(settings ?? [])
                   .filter((s) => s.category === "car_companies" && s.active)
-                  .map((s) => (
-                    <option key={s.id} value={s.value}>
-                      {s.label}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            <label className="field">
-              <span>الموديل</span>
-              <select value={form.model} onChange={(e) => set("model")(e.target.value)}>
-                <option value="">اختر الموديل</option>
-                {(settings ?? [])
-                  .filter((s) => s.category === "car_models" && s.active)
                   .map((s) => (
                     <option key={s.id} value={s.value}>
                       {s.label}
@@ -641,6 +637,9 @@ export function RecordForm({
               <span>اللون</span>
               <select value={form.color} onChange={(e) => set("color")(e.target.value)}>
                 <option value="">اختر اللون</option>
+                {form.color && !(settings ?? []).some((s) => s.category === "colors" && s.value === form.color) && (
+                  <option value={form.color}>{form.color}</option>
+                )}
                 {(settings ?? [])
                   .filter((s) => s.category === "colors" && s.active)
                   .map((s) => (
@@ -715,6 +714,11 @@ export function RecordForm({
                 }}
               >
                 <option value="">بدون سائق</option>
+                {form.driverId && !drivers.some((d) => String(d.id) === String(form.driverId)) && (
+                  <option value={form.driverId}>
+                    {form.driver && form.driver !== "—" ? form.driver : `سائق #${form.driverId}`}
+                  </option>
+                )}
                 {drivers.map((d) => (
                   <option key={d.id} value={d.id}>
                     {d.name}
@@ -739,8 +743,13 @@ export function RecordForm({
                   }}
                 >
                   <option value="">بدون موظف مسؤول</option>
+                  {form.employeeId && !employees.some((item) => item.id === form.employeeId) && (
+                    <option value={form.employeeId}>
+                      {form.employee && form.employee !== "—" ? form.employee : `موظف #${form.employeeId}`}
+                    </option>
+                  )}
                   {employees
-                    .filter((employee) => employee.status === "نشط")
+                    .filter((employee) => employee.status === "نشط" || employee.id === form.employeeId)
                     .map((employee) => (
                       <option key={employee.id} value={employee.id}>
                         {employee.name} · {employee.jobTitle}
@@ -767,6 +776,11 @@ export function RecordForm({
                 }}
               >
                 <option value="">بدون عميل</option>
+                {form.clientId && !clients.some((c) => String(c.id) === String(form.clientId)) && (
+                  <option value={form.clientId}>
+                    {form.client && form.client !== "—" ? form.client : `عميل #${form.clientId}`}
+                  </option>
+                )}
                 {clients.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}
@@ -794,6 +808,11 @@ export function RecordForm({
                 }}
               >
                 <option value="">بدون عقد</option>
+                {form.contractId && !vehicleContracts.some((c) => String(c.id) === String(form.contractId)) && (
+                  <option value={form.contractId}>
+                    {form.contract && form.contract !== "—" ? form.contract : `عقد #${form.contractId}`}
+                  </option>
+                )}
                 {vehicleContracts.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.ref} - {c.client}
@@ -832,6 +851,11 @@ export function RecordForm({
                   }}
                 >
                   <option value="">بدون مشروع</option>
+                  {form.projectId && !vehicleProjects.some((p) => String(p.id) === String(form.projectId)) && (
+                    <option value={form.projectId}>
+                      {form.project && form.project !== "—" ? form.project : `مشروع #${form.projectId}`}
+                    </option>
+                  )}
                   {vehicleProjects.map((project) => (
                     <option key={project.id} value={project.id}>
                       {project.name}
@@ -878,6 +902,11 @@ export function RecordForm({
                 }}
               >
                 <option value="">اختر مركبة</option>
+                {form.vehicleId && !vehicles.some((v) => String(v.id) === String(form.vehicleId)) && (
+                  <option value={form.vehicleId}>
+                    {form.vehicle || `مركبة #${form.vehicleId}`}
+                  </option>
+                )}
                 {vehicles.map((v) => (
                   <option key={v.id} value={v.id}>
                     {v.plate} · {v.brand}
@@ -885,19 +914,12 @@ export function RecordForm({
                 ))}
               </select>
             </label>
-            <label className="field">
-              <span>نوع الصيانة</span>
-              <select value={form.type} onChange={(e) => set("type")(e.target.value)}>
-                <option value="—">اختر النوع</option>
-                {(settings ?? [])
-                  .filter((s) => s.category === "pm" && s.active)
-                  .map((s) => (
-                    <option key={s.id} value={s.value}>
-                      {s.label}
-                    </option>
-                  ))}
-              </select>
-            </label>
+            <Field
+              label="نوع الصيانة *"
+              value={form.type === "—" ? "" : (form.type || "")}
+              onChange={set("type")}
+              placeholder="اكتب نوع الصيانة (مثال: صيانة دورية، فحص مكابح...)"
+            />
             <label className="field">
               <span>الأولوية</span>
               <select
@@ -1089,61 +1111,75 @@ export function RecordForm({
                 <option>صيانة</option>
               </select>
             </label>
-            <label className="field">
-              <span>الكيان المرتبط</span>
-              <select
-                value={form.entityId || ""}
-                onChange={(e) => {
-                  const options = getDocumentEntities(
-                    String(form.entityType || "مركبة")
-                  );
-                  const item = options.find(
-                    (entity: any) => String(entity.id) === e.target.value
-                  );
-                  setForm((prev) => ({
-                    ...prev,
-                    entityId: item?.id ?? null,
-                    entity: item
-                      ? item.ref && item.vehiclePlate
-                        ? `${item.ref} (${item.vehiclePlate})`
-                        : item.plate ||
-                          item.ref ||
-                          item.name ||
-                          item.title ||
-                          `#${item.id}`
-                      : "—",
-                  }));
-                }}
-              >
-                <option value="">اختر كيان</option>
-                {getDocumentEntities(String(form.entityType || "مركبة")).map(
-                  (entity: any) => (
-                    <option key={entity.id} value={entity.id}>
-                      {entity.ref && entity.vehiclePlate
-                        ? `${entity.ref} · ${entity.vehiclePlate} (${entity.workflowStage || ""})`
-                        : entity.plate ||
-                          entity.ref ||
-                          entity.name ||
-                          entity.title ||
-                          `#${entity.id}`}
-                    </option>
-                  )
-                )}
-              </select>
-            </label>
-            <label className="field">
-              <span>النوع</span>
-              <select value={form.type} onChange={(e) => set("type")(e.target.value)}>
-                <option value="">اختر نوع المستند</option>
-                {(settings ?? [])
-                  .filter((s) => s.category === "attachment_names" && s.active)
-                  .map((s) => (
-                    <option key={s.id} value={s.value}>
-                      {s.label}
-                    </option>
-                  ))}
-              </select>
-            </label>
+              <label className="field">
+                <span>الكيان المرتبط</span>
+                <select
+                  value={form.entityId || ""}
+                  onChange={(e) => {
+                    const options = getDocumentEntities(
+                      String(form.entityType || "مركبة")
+                    );
+                    const item = options.find(
+                      (entity: any) => String(entity.id) === e.target.value
+                    );
+                    setForm((prev) => ({
+                      ...prev,
+                      entityId: item?.id ?? null,
+                      entity: item
+                        ? item.ref && item.vehiclePlate
+                          ? `${item.ref} (${item.vehiclePlate})`
+                          : item.plate ||
+                            item.ref ||
+                            item.name ||
+                            item.title ||
+                            `#${item.id}`
+                        : "—",
+                    }));
+                  }}
+                >
+                  <option value="">اختر كيان</option>
+                  {form.entityId &&
+                    !getDocumentEntities(String(form.entityType || "مركبة")).some(
+                      (entity: any) => String(entity.id) === String(form.entityId)
+                    ) && (
+                      <option value={form.entityId}>
+                        {form.entity && form.entity !== "—"
+                          ? form.entity
+                          : `كيان #${form.entityId}`}
+                      </option>
+                    )}
+                  {getDocumentEntities(String(form.entityType || "مركبة")).map(
+                    (entity: any) => (
+                      <option key={entity.id} value={entity.id}>
+                        {entity.ref && entity.vehiclePlate
+                          ? `${entity.ref} · ${entity.vehiclePlate} (${entity.workflowStage || ""})`
+                          : entity.plate ||
+                            entity.ref ||
+                            entity.name ||
+                            entity.title ||
+                            `#${entity.id}`}
+                      </option>
+                    )
+                  )}
+                </select>
+              </label>
+              <label className="field">
+                <span>النوع</span>
+                <select value={form.type} onChange={(e) => set("type")(e.target.value)}>
+                  <option value="">اختر نوع المستند</option>
+                  {form.type &&
+                    !(settings ?? []).some(
+                      (s) => s.category === "attachment_names" && s.value === form.type
+                    ) && <option value={form.type}>{form.type}</option>}
+                  {(settings ?? [])
+                    .filter((s) => s.category === "attachment_names" && s.active)
+                    .map((s) => (
+                      <option key={s.id} value={s.value}>
+                        {s.label}
+                      </option>
+                    ))}
+                </select>
+              </label>
             <Field
               label="تاريخ الانتهاء"
               value={form.expiry}
@@ -1671,22 +1707,22 @@ export function RecordForm({
       ? {
           title: isEdit ? "تعديل بيانات السائق" : "إضافة سائق جديد",
           fields: [
-            ["name", "الاسم الكامل *"],
-            ["phone", "رقم الهاتف"],
-            ["idNo", "رقم الهوية / الإقامة"],
-            ["license", "نوع الرخصة"],
-            ["renewal", "تاريخ انتهاء الرخصة"],
+            ["name", "الاسم الكامل *", "text"],
+            ["phone", "رقم الهاتف", "text"],
+            ["idNo", "رقم الهوية / الإقامة", "text"],
+            ["license", "نوع الرخصة", "text"],
+            ["renewal", "تاريخ انتهاء الرخصة", "date"],
           ],
         }
       : {
           title: isEdit ? "تعديل بيانات العميل" : "إضافة عميل جديد",
           fields: [
-            ["name", "اسم العميل *"],
-            ["vat", "الرقم الضريبي * (15 رقمًا)"],
-            ["commercial", "السجل التجاري * (10 أرقام)"],
-            ["location", "الموقع"],
-            ["contact", "اسم الممثل"],
-            ["phone", "رقم اتصال الممثل"],
+            ["name", "اسم العميل *", "text"],
+            ["vat", "الرقم الضريبي * (15 رقمًا)", "text"],
+            ["commercial", "السجل التجاري * (10 أرقام)", "text"],
+            ["location", "الموقع", "text"],
+            ["contact", "اسم الممثل", "text"],
+            ["phone", "رقم اتصال الممثل", "text"],
           ],
         };
 
@@ -1694,7 +1730,7 @@ export function RecordForm({
     <Modal title={config.title} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid single">
-          {config.fields.map(([key, label]) =>
+          {config.fields.map(([key, label, fieldType]) =>
             key === "license" ? (
               <label className="field" key={key}>
                 <span>{label}</span>
@@ -1714,6 +1750,7 @@ export function RecordForm({
               <Field
                 key={key}
                 label={label}
+                type={fieldType || "text"}
                 value={form[key]}
                 maxLength={
                   key === "idNo" || key === "commercial"

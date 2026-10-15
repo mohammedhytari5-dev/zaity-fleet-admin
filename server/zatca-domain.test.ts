@@ -78,7 +78,7 @@ describe("ZATCA Domain - Totals & VAT Calculations", () => {
 describe("ZATCA Domain - TLV Base64 QR Code Encoding & Decoding", () => {
   it("encodes and decodes ZATCA TLV tags 1 to 5 with Arabic seller name", () => {
     const qrData = {
-      sellerName: "شركة زيتي لحلول الأساطيل المحدودة",
+      sellerName: "شركة ثقة التوصيل المحدودة",
       sellerVatNumber: "310123456700003",
       timestamp: "2026-10-10T19:30:00Z",
       totalWithVat: "1150.00",
@@ -90,7 +90,7 @@ describe("ZATCA Domain - TLV Base64 QR Code Encoding & Decoding", () => {
     expect(base64.length).toBeGreaterThan(20);
 
     const decoded = parseZatcaTlvBase64(base64);
-    expect(decoded[1]).toBe("شركة زيتي لحلول الأساطيل المحدودة");
+    expect(decoded[1]).toBe("شركة ثقة التوصيل المحدودة");
     expect(decoded[2]).toBe("310123456700003");
     expect(decoded[3]).toBe("2026-10-10T19:30:00Z");
     expect(decoded[4]).toBe("1150.00");
@@ -168,7 +168,7 @@ describe("ZATCA Domain - Invoice Input Validation", () => {
     await expect(
       createTaxInvoiceRecord(dummyDb, {
         issueDate: "2026-10-10",
-        sellerName: "شركة زيتي",
+        sellerName: "شركة ثقة التوصيل",
         sellerVatNumber: "310123456700003",
         buyerName: "عميل",
         lines: [],
@@ -192,7 +192,7 @@ describe("ZATCA Domain - Invoice Input Validation", () => {
     await expect(
       createTaxInvoiceRecord(dummyDb, {
         issueDate: "2026-10-10",
-        sellerName: "شركة زيتي",
+        sellerName: "شركة ثقة التوصيل",
         sellerVatNumber: "310123456700003",
         buyerName: "  ",
         lines: [{ itemDescription: "خدمة", quantity: 1, unitPrice: 100 }],
@@ -205,7 +205,7 @@ describe("ZATCA Domain - Invoice Input Validation", () => {
       createTaxInvoiceRecord(dummyDb, {
         invoiceType: "standard",
         issueDate: "2026-10-10",
-        sellerName: "شركة زيتي",
+        sellerName: "شركة ثقة التوصيل",
         sellerVatNumber: "310123456700003",
         buyerName: "شركة العميل التجارية",
         buyerVatNumber: "",

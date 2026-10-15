@@ -17,7 +17,17 @@ try {
   // sessionStorage unavailable
 }
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 60 * 1000, // Keep loaded data fresh for 60 seconds
+      gcTime: 5 * 60 * 1000, // Keep in memory cache for 5 minutes
+      refetchOnWindowFocus: false, // Prevent aggressive refetch storms on window click/focus
+      refetchOnReconnect: true,
+      retry: 1,
+    },
+  },
+});
 
 const redirectToLoginIfUnauthorized = (error: unknown) => {
   if (!(error instanceof TRPCClientError)) return;

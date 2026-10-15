@@ -10,7 +10,7 @@ import { formatCompanyDate, resolveRenewalStatus } from "./date-utils";
 export type ComplianceUrgency = "expired" | "critical" | "warning" | "valid" | "unknown";
 export type WorkforceStatus = "نشط" | "إجازة" | "في إجازة" | "موقوف" | "منتهي الخدمة" | "متاح" | "مشغول";
 export type PayrollStatus = "مسودة" | "معتمد" | "تم الصرف";
-export type LeaveStatus = "قيد المراجعة" | "معتمد" | "مرفوض";
+export type LeaveStatus = "قيد المراجعة" | "معتمدة" | "معتمد" | "مرفوضة" | "مرفوض";
 export type LeaveType = "سنوية" | "مرضية" | "طارئة" | "بدون راتب";
 
 /**
@@ -517,22 +517,17 @@ export class LeaveRecord {
   }
 
   isApproved(): boolean {
-    return this.status === "معتمد";
+    return this.status === "معتمدة" || this.status === "معتمد";
   }
 
   isRejected(): boolean {
-    return this.status === "مرفوض";
+    return this.status === "مرفوضة" || this.status === "مرفوض";
   }
 
   getStatusBadge(): { label: string; tone: "warning" | "success" | "critical" } {
-    switch (this.status) {
-      case "معتمد":
-        return { label: "معتمد", tone: "success" };
-      case "مرفوض":
-        return { label: "مرفوض", tone: "critical" };
-      default:
-        return { label: "قيد المراجعة", tone: "warning" };
-    }
+    if (this.isApproved()) return { label: "معتمدة", tone: "success" };
+    if (this.isRejected()) return { label: "مرفوضة", tone: "critical" };
+    return { label: "قيد المراجعة", tone: "warning" };
   }
 }
 

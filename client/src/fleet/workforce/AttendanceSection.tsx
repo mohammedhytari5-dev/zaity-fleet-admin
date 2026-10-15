@@ -19,7 +19,7 @@ import {
   Edit2,
   Search,
 } from "lucide-react";
-import { Badge } from "../common";
+import { Badge, exportCsv } from "../common";
 import type { AttendanceRow, EmployeeRow, Driver } from "../types";
 import { BiometricDeviceModal } from "./BiometricDeviceModal";
 import { AttendanceModal } from "./AttendanceModal";
@@ -55,8 +55,8 @@ export function AttendanceSection({
   const handleSync = async () => {
     try {
       const res = await syncMutation.mutateAsync({ date: selectedDate });
-      await utils.attendance.list.invalidate();
-      await utils.attendance.devices.list.invalidate();
+      void utils.attendance.list.invalidate();
+      void utils.attendance.devices.list.invalidate();
       toast.success(
         `تمت المزامنة بنجاح من جهاز البصمة (${res.deviceName}) - تسجيل ${res.synced} حركة لليوم`
       );
@@ -69,7 +69,7 @@ export function AttendanceSection({
     if (!confirm("هل أنت متأكد من حذف هذا السجل؟")) return;
     try {
       await deleteMutation.mutateAsync({ id });
-      await utils.attendance.list.invalidate();
+      void utils.attendance.list.invalidate();
       toast.success("تم حذف سجل الحضور بنجاح");
     } catch (err: any) {
       toast.error(`تعذر الحذف: ${err.message}`);
@@ -82,7 +82,7 @@ export function AttendanceSection({
     try {
       const text = await file.text();
       const res = await importMutation.mutateAsync({ fileContent: text });
-      await utils.attendance.list.invalidate();
+      void utils.attendance.list.invalidate();
       toast.success(`تم استيراد ${res.imported} حركة من ملف البصمة بنجاح`);
     } catch (err: any) {
       toast.error(`تعذر استيراد ملف البصمة: ${err.message}`);
@@ -92,46 +92,53 @@ export function AttendanceSection({
   };
 
   const handleExportCSV = () => {
-    if (!attendanceList.length) {
+    if (!filteredRows.length) {
       toast.error("لا توجد بيانات حضور لتصديرها في هذا اليوم");
       return;
     }
     const headers = [
       "الاسم",
       "الكود",
+      "الوردية",
       "التاريخ",
       "وقت الحضور",
       "وقت الانصراف",
       "ساعات العمل",
       "التأخير (دقيقة)",
+      "الخروج المبكر (دقيقة)",
       "الإضافي (ساعة)",
       "الحالة",
       "المصدر",
     ];
-    const rows = filteredRows.map((r) => [
-      r.employeeName,
-      r.employeeCode,
-      r.date,
-      r.checkIn || "—",
-      r.checkOut || "—",
-      r.workHours || 0,
-      r.delayMinutes || 0,
-      r.overtimeHours || 0,
-      r.status,
-      r.source,
-    ]);
-
-    const csvContent =
-      "data:text/csv;charset=utf-8,\uFEFF" +
-      [headers.join(","), ...rows.map((e) => e.join(","))].join("\n");
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `attendance_${selectedDate}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    toast.success("تم تصدير كشف الحضور بنجاح");
+    const columns = [
+      "employeeName",
+      "employeeCode",
+      "shiftDisplay",
+      "date",
+      "checkInDisplay",
+      "checkOutDisplay",
+      "workHoursDisplay",
+      "delayMinutesDisplay",
+      "earlyExitMinutesDisplay",
+      "overtimeHoursDisplay",
+      "status",
+      "source",
+    ];
+    const rowsForExport = filteredRows.map((r) => ({
+      employeeName: r.employeeName,
+      employeeCode: r.employeeCode,
+      shiftDisplay: r.shiftStart && r.shiftEnd ? `${r.shiftStart} - ${r.shiftEnd}` : "08:00 - 17:00",
+      date: r.date,
+      checkInDisplay: r.checkIn || "—",
+      checkOutDisplay: r.checkOut || "—",
+      workHoursDisplay: r.workHours || 0,
+      delayMinutesDisplay: r.delayMinutes || 0,
+      earlyExitMinutesDisplay: r.earlyExitMinutes || 0,
+      overtimeHoursDisplay: r.overtimeHours || 0,
+      status: r.status,
+      source: r.source,
+    }));
+    exportCsv(rowsForExport as any, columns, `attendance_${selectedDate}`, headers);
   };
 
   // Metrics calculation
@@ -444,11 +451,13 @@ export function AttendanceSection({
             <tr>
               <th>الموظف / السائق</th>
               <th>كود البصمة</th>
+              <th>الوردية</th>
               <th>التاريخ</th>
               <th>وقت الدخول</th>
               <th>وقت الخروج</th>
               <th>ساعات العمل</th>
               <th>التأخير</th>
+              <th>خروج مبكر</th>
               <th>الإضافي</th>
               <th>الحالة</th>
               <th>المصدر</th>
@@ -458,13 +467,13 @@ export function AttendanceSection({
           <tbody>
             {isLoading ? (
               <tr>
-                <td colSpan={11} style={{ textAlign: "center", padding: "2rem", color: "var(--muted)" }}>
+                <td colSpan={13} style={{ textAlign: "center", padding: "2rem", color: "var(--muted)" }}>
                   جاري تحميل كشف الحضور...
                 </td>
               </tr>
             ) : filteredRows.length === 0 ? (
               <tr>
-                <td colSpan={11} style={{ textAlign: "center", padding: "2.5rem" }}>
+                <td colSpan={13} style={{ textAlign: "center", padding: "2.5rem" }}>
                   <Fingerprint size={32} style={{ color: "var(--muted)", margin: "0 auto 8px" }} />
                   <div style={{ color: "var(--ink)", fontWeight: 600 }}>لا توجد حركات حضور مسجلة لهذا التاريخ ({selectedDate})</div>
                   <small style={{ color: "var(--muted)", display: "block", marginTop: 4 }}>
@@ -485,6 +494,11 @@ export function AttendanceSection({
                     <code style={{ fontSize: 12, background: "var(--background)", padding: "2px 6px", borderRadius: 4 }}>
                       {row.employeeCode}
                     </code>
+                  </td>
+                  <td>
+                    <span style={{ fontSize: 11, color: "var(--brand-primary, #25364c)", fontWeight: 600, background: "#f8fafc", padding: "2px 6px", borderRadius: 4, border: "1px solid var(--border)" }}>
+                      {row.shiftStart && row.shiftEnd ? `${row.shiftStart} - ${row.shiftEnd}` : "08:00 - 17:00"}
+                    </span>
                   </td>
                   <td>{row.date}</td>
                   <td>
@@ -515,6 +529,15 @@ export function AttendanceSection({
                       </span>
                     ) : (
                       <span style={{ color: "var(--teal)" }}>0</span>
+                    )}
+                  </td>
+                  <td>
+                    {row.earlyExitMinutes && row.earlyExitMinutes > 0 ? (
+                      <span style={{ color: "#ef4444", fontWeight: 600 }}>
+                        {row.earlyExitMinutes} د
+                      </span>
+                    ) : (
+                      <span style={{ color: "var(--muted)" }}>0</span>
                     )}
                   </td>
                   <td>

@@ -26,16 +26,25 @@ export class AttendanceCalculator {
     shiftEnd = "17:00:00",
     gracePeriodMinutes = 15
   ) {
-    this.defaultShiftStart = shiftStart;
-    this.defaultShiftEnd = shiftEnd;
-    this.gracePeriodMinutes = gracePeriodMinutes;
+    this.defaultShiftStart = AttendanceCalculator.normalizeTime(shiftStart, "08:00:00");
+    this.defaultShiftEnd = AttendanceCalculator.normalizeTime(shiftEnd, "17:00:00");
+    this.gracePeriodMinutes = Math.max(0, gracePeriodMinutes);
+  }
+
+  public static normalizeTime(timeStr?: string | null, fallback = "08:00:00"): string {
+    if (!timeStr || timeStr === "—") return fallback;
+    const parts = timeStr.trim().split(":");
+    const h = (parts[0] || "00").padStart(2, "0");
+    const m = (parts[1] || "00").padStart(2, "0");
+    const s = (parts[2] || "00").padStart(2, "0");
+    return `${h}:${m}:${s}`;
   }
 
   /**
    * Calculates delay in minutes past shift start + grace period.
    */
   public calculateDelay(checkInTime?: string | null): number {
-    if (!checkInTime) return 0;
+    if (!checkInTime || checkInTime === "—") return 0;
     const parts = checkInTime.split(":");
     if (parts.length < 2) return 0;
     const checkInMinutes = parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
@@ -48,10 +57,40 @@ export class AttendanceCalculator {
   }
 
   /**
+   * Calculates early departure in minutes if employee leaves before shift end.
+   */
+  public calculateEarlyDeparture(checkOutTime?: string | null): number {
+    if (!checkOutTime || checkOutTime === "—") return 0;
+    const parts = checkOutTime.split(":");
+    if (parts.length < 2) return 0;
+    const checkOutMinutes = parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+
+    const shiftEndParts = this.defaultShiftEnd.split(":");
+    let shiftEndMinutes = parseInt(shiftEndParts[0], 10) * 60 + parseInt(shiftEndParts[1], 10);
+
+    const shiftStartParts = this.defaultShiftStart.split(":");
+    const shiftStartMinutes = parseInt(shiftStartParts[0], 10) * 60 + parseInt(shiftStartParts[1], 10);
+
+    // If overnight shift (shiftEnd < shiftStart)
+    if (shiftEndMinutes < shiftStartMinutes) {
+      shiftEndMinutes += 24 * 60;
+      let checkOutTotal = checkOutMinutes;
+      if (checkOutTotal < shiftStartMinutes) {
+        checkOutTotal += 24 * 60;
+      }
+      const diff = shiftEndMinutes - checkOutTotal;
+      return diff > 0 ? diff : 0;
+    }
+
+    const diff = shiftEndMinutes - checkOutMinutes;
+    return diff > 0 ? diff : 0;
+  }
+
+  /**
    * Calculates worked hours between check-in and check-out.
    */
   public calculateWorkHours(checkInTime?: string | null, checkOutTime?: string | null): number {
-    if (!checkInTime || !checkOutTime) return 0;
+    if (!checkInTime || !checkOutTime || checkInTime === "—" || checkOutTime === "—") return 0;
     const [inH, inM] = checkInTime.split(":").map(Number);
     const [outH, outM] = checkOutTime.split(":").map(Number);
     if (isNaN(inH) || isNaN(outH)) return 0;

@@ -401,6 +401,10 @@ export const employees = mysqlTable(
     transportAllowance: int("transportAllowance").notNull().default(0),
     otherAllowance: int("otherAllowance").notNull().default(0),
     contractType: varchar("contractType", { length: 80 }).notNull().default("دوام كامل"),
+    shiftName: varchar("shiftName", { length: 80 }).notNull().default("الدوام الافتراضي (08:00 - 17:00)"),
+    shiftStart: varchar("shiftStart", { length: 16 }).notNull().default("08:00"),
+    shiftEnd: varchar("shiftEnd", { length: 16 }).notNull().default("17:00"),
+    gracePeriodMinutes: int("gracePeriodMinutes").notNull().default(15),
     residencyExpiry: varchar("residencyExpiry", { length: 32 }).notNull().default("—"),
     insuranceExpiry: varchar("insuranceExpiry", { length: 32 }).notNull().default("—"),
     notes: text("notes"),
@@ -462,9 +466,13 @@ export const attendance = mysqlTable("attendance", {
   checkOut: varchar("checkOut", { length: 32 }),
   workHours: decimal("workHours", { precision: 6, scale: 2, mode: "number" }).default(0),
   delayMinutes: int("delayMinutes").default(0),
+  earlyExitMinutes: int("earlyExitMinutes").default(0),
   overtimeHours: decimal("overtimeHours", { precision: 6, scale: 2, mode: "number" }).default(0),
   status: mysqlEnum("status", ["حاضر", "تأخير", "غياب", "إجازة", "استئذان", "عطلة"]).notNull().default("حاضر"),
   source: mysqlEnum("source", ["جهاز بصمة", "يدوي", "تطبيق", "ملف"]).notNull().default("جهاز بصمة"),
+  shiftName: varchar("shiftName", { length: 80 }),
+  shiftStart: varchar("shiftStart", { length: 16 }),
+  shiftEnd: varchar("shiftEnd", { length: 16 }),
   deviceIp: varchar("deviceIp", { length: 64 }),
   deviceName: varchar("deviceName", { length: 120 }),
   notes: text("notes"),
@@ -486,6 +494,88 @@ export const biometricDevices = mysqlTable("biometric_devices", {
   notes: text("notes"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const vehicleInspections = mysqlTable("vehicle_inspections", {
+  id: int("id").autoincrement().primaryKey(),
+  driverId: int("driverId").references(() => drivers.id, { onDelete: "set null" }),
+  driverName: varchar("driverName", { length: 160 }).notNull(),
+  vehicleId: int("vehicleId").references(() => vehicles.id, { onDelete: "set null" }),
+  vehiclePlate: varchar("vehiclePlate", { length: 40 }).notNull(),
+  odometer: int("odometer").notNull().default(0),
+  oilStatus: mysqlEnum("oilStatus", ["سليم", "ناقص", "يحتاج تغيير"]).notNull().default("سليم"),
+  waterStatus: mysqlEnum("waterStatus", ["سليم", "ناقص"]).notNull().default("سليم"),
+  tiresStatus: mysqlEnum("tiresStatus", ["ممتاز", "يحتاج هواء", "متضرر"]).notNull().default("ممتاز"),
+  cleanlinessStatus: mysqlEnum("cleanlinessStatus", ["نظيف", "متوسط", "يحتاج غسيل"]).notNull().default("نظيف"),
+  lightsStatus: mysqlEnum("lightsStatus", ["سليم", "عطلان"]).notNull().default("سليم"),
+  brakesStatus: mysqlEnum("brakesStatus", ["سليم", "يحتاج فحص"]).notNull().default("سليم"),
+  acStatus: mysqlEnum("acStatus", ["سليم", "ضعيف", "عطلان"]).notNull().default("سليم"),
+  safetyKitStatus: mysqlEnum("safetyKitStatus", ["متوفر", "ناقص"]).notNull().default("متوفر"),
+  oilPhotoUrl: mediumtext("oilPhotoUrl"),
+  waterPhotoUrl: mediumtext("waterPhotoUrl"),
+  odometerPhotoUrl: mediumtext("odometerPhotoUrl"),
+  exteriorPhotoUrl: mediumtext("exteriorPhotoUrl"),
+  hasIssue: int("hasIssue").notNull().default(0),
+  issueSummary: text("issueSummary"),
+  notes: text("notes"),
+  status: mysqlEnum("status", ["جديد", "تمت المراجعة", "تم تحويله للصيانة"]).notNull().default("جديد"),
+  reviewedBy: varchar("reviewedBy", { length: 160 }),
+  reviewedAt: varchar("reviewedAt", { length: 32 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const employeeRequests = mysqlTable("employee_requests", {
+  id: int("id").autoincrement().primaryKey(),
+  employeeId: int("employeeId").references(() => employees.id, { onDelete: "set null" }),
+  driverId: int("driverId").references(() => drivers.id, { onDelete: "set null" }),
+  personName: varchar("personName", { length: 160 }).notNull(),
+  personRole: mysqlEnum("personRole", ["سائق", "موظف"]).notNull().default("موظف"),
+  department: varchar("department", { length: 120 }).default("—"),
+  requestType: mysqlEnum("requestType", ["إجازة", "نقل كفالة", "خروج نهائي", "خروج وعودة", "سلفة راتب", "تعريف بالراتب", "أخرى"]).notNull(),
+  title: varchar("title", { length: 200 }).notNull(),
+  startDate: varchar("startDate", { length: 32 }),
+  endDate: varchar("endDate", { length: 32 }),
+  days: int("days").default(0),
+  amount: decimal("amount", { precision: 12, scale: 2, mode: "number" }).default(0),
+  reason: text("reason"),
+  attachmentUrl: mediumtext("attachmentUrl"),
+  attachmentName: varchar("attachmentName", { length: 255 }),
+  status: mysqlEnum("status", ["قيد المراجعة", "معتمدة", "مرفوضة", "ملغاة"]).notNull().default("قيد المراجعة"),
+  approvedBy: varchar("approvedBy", { length: 160 }),
+  approvedAt: varchar("approvedAt", { length: 32 }),
+  rejectionReason: text("rejectionReason"),
+  notes: text("notes"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const clientPortalRequests = mysqlTable("client_portal_requests", {
+  id: int("id").autoincrement().primaryKey(),
+  requestType: varchar("request_type", { length: 100 }).notNull(),
+  clientType: varchar("client_type", { length: 50 }).notNull().default("عميل جديد"),
+  companyName: varchar("company_name", { length: 255 }).notNull(),
+  contactPerson: varchar("contact_person", { length: 160 }).notNull(),
+  phone: varchar("phone", { length: 40 }).notNull(),
+  email: varchar("email", { length: 160 }),
+  city: varchar("city", { length: 100 }).notNull(),
+  busType: varchar("bus_type", { length: 100 }),
+  busesCount: int("buses_count").notNull().default(1),
+  duration: varchar("duration", { length: 100 }),
+  startDate: varchar("start_date", { length: 30 }),
+  workNature: varchar("work_nature", { length: 255 }),
+  dailyEstimatedKm: int("daily_estimated_km"),
+  withDriver: int("with_driver").notNull().default(1),
+  withFuel: int("with_fuel").notNull().default(1),
+  currentContractNo: varchar("current_contract_no", { length: 100 }),
+  busPlateNumber: varchar("bus_plate_number", { length: 40 }),
+  driverName: varchar("driver_name", { length: 160 }),
+  details: text("details"),
+  status: varchar("status", { length: 50 }).notNull().default("جديد"),
+  assignedTo: varchar("assigned_to", { length: 160 }),
+  responseNotes: text("response_notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
 });
 
 export const maintenanceRequests = mysqlTable(
@@ -640,6 +730,10 @@ export const maintenanceRequests = mysqlTable(
     closedAt: timestamp("closedAt"),
     receiptName: varchar("receiptName", { length: 255 }),
     receiptUrl: mediumtext("receiptUrl"),
+    damagePhotos: mediumtext("damage_photos"),
+    driverCompletedAt: timestamp("driver_completed_at"),
+    driverInvoiceUrl: mediumtext("driver_invoice_url"),
+    driverNotes: text("driver_notes"),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
     updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
     archivedAt: timestamp("archivedAt"),
@@ -1894,3 +1988,82 @@ export type Attendance = typeof attendance.$inferSelect;
 export type InsertAttendance = typeof attendance.$inferInsert;
 export type BiometricDevice = typeof biometricDevices.$inferSelect;
 export type InsertBiometricDevice = typeof biometricDevices.$inferInsert;
+export type VehicleInspection = typeof vehicleInspections.$inferSelect;
+export type InsertVehicleInspection = typeof vehicleInspections.$inferInsert;
+export type EmployeeRequest = typeof employeeRequests.$inferSelect;
+export type InsertEmployeeRequest = typeof employeeRequests.$inferInsert;
+export type ClientPortalRequest = typeof clientPortalRequests.$inferSelect;
+export type InsertClientPortalRequest = typeof clientPortalRequests.$inferInsert;
+
+export const custodies = mysqlTable("custodies", {
+  id: int("id").autoincrement().primaryKey(),
+  branchId: int("branch_id").notNull().default(1),
+  code: varchar("code", { length: 64 }).notNull().unique(),
+  title: varchar("title", { length: 255 }).notNull(),
+  custodyType: varchar("custody_type", { length: 64 }).notNull(),
+  custodianType: varchar("custodian_type", { length: 32 }).notNull().default("employee"),
+  custodianId: int("custodian_id").notNull(),
+  custodianName: varchar("custodian_name", { length: 255 }).notNull(),
+  paymentMethod: varchar("payment_method", { length: 64 }).notNull().default("تحويل بنكي"),
+  referenceNumber: varchar("reference_number", { length: 120 }),
+  receiptDocName: varchar("receipt_doc_name", { length: 255 }),
+  receiptDocUrl: mediumtext("receipt_doc_url"),
+  totalAmount: decimal("total_amount", { precision: 15, scale: 2, mode: "number" }).notNull().default(0),
+  spentAmount: decimal("spent_amount", { precision: 15, scale: 2, mode: "number" }).notNull().default(0),
+  remainingAmount: decimal("remaining_amount", { precision: 15, scale: 2, mode: "number" }).notNull().default(0),
+  acceptanceStatus: varchar("acceptance_status", { length: 32 }).notNull().default("بانتظار الاستلام"),
+  acceptedAt: timestamp("accepted_at"),
+  acceptedAmount: decimal("accepted_amount", { precision: 15, scale: 2, mode: "number" }),
+  status: varchar("status", { length: 32 }).notNull().default("نشطة"),
+  settledAt: timestamp("settled_at"),
+  notes: text("notes"),
+  createdByUserId: int("created_by_user_id"),
+  createdByName: varchar("created_by_name", { length: 160 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type Custody = typeof custodies.$inferSelect;
+export type InsertCustody = typeof custodies.$inferInsert;
+
+export const custodyExpenses = mysqlTable("custody_expenses", {
+  id: int("id").autoincrement().primaryKey(),
+  custodyId: int("custody_id").notNull(),
+  description: varchar("description", { length: 255 }).notNull(),
+  amount: decimal("amount", { precision: 15, scale: 2, mode: "number" }).notNull(),
+  expenseDate: varchar("expense_date", { length: 32 }).notNull(),
+  invoiceNumber: varchar("invoice_number", { length: 120 }),
+  invoiceDocName: varchar("invoice_doc_name", { length: 255 }),
+  invoiceDocUrl: mediumtext("invoice_doc_url"),
+  maintenanceRequestId: int("maintenance_request_id"),
+  vehicleId: int("vehicle_id"),
+  reportedByUserId: int("reported_by_user_id"),
+  reportedByName: varchar("reported_by_name", { length: 160 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type CustodyExpense = typeof custodyExpenses.$inferSelect;
+export type InsertCustodyExpense = typeof custodyExpenses.$inferInsert;
+
+export const payrollInquiries = mysqlTable("payroll_inquiries", {
+  id: int("id").autoincrement().primaryKey(),
+  payrollId: int("payroll_id").notNull(),
+  employeeOrDriverId: int("employee_or_driver_id").notNull(),
+  personType: varchar("person_type", { length: 32 }).notNull().default("driver"),
+  personName: varchar("person_name", { length: 255 }).notNull(),
+  deductionAmount: decimal("deduction_amount", { precision: 15, scale: 2, mode: "number" }).notNull().default(0),
+  inquiryText: text("inquiry_text").notNull(),
+  status: varchar("status", { length: 32 }).notNull().default("قيد المراجعة"),
+  financeResponse: text("finance_response"),
+  proofDocName: varchar("proof_doc_name", { length: 255 }),
+  proofDocUrl: mediumtext("proof_doc_url"),
+  respondedByUserId: int("responded_by_user_id"),
+  respondedByName: varchar("responded_by_name", { length: 160 }),
+  respondedAt: timestamp("responded_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type PayrollInquiry = typeof payrollInquiries.$inferSelect;
+export type InsertPayrollInquiry = typeof payrollInquiries.$inferInsert;
+

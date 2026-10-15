@@ -1,7 +1,7 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
-import { Modal } from "../common";
+import { Modal, toInputDate } from "../common";
 import type { AttendanceRow, EmployeeRow, Driver } from "../types";
 
 export function AttendanceModal({
@@ -25,11 +25,28 @@ export function AttendanceModal({
     if (attendance?.employeeCode) return `drv_${attendance.employeeCode}`;
     return "";
   });
-  const [date, setDate] = useState(attendance?.date || new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(() => toInputDate(attendance?.date) || new Date().toISOString().slice(0, 10));
   const [checkIn, setCheckIn] = useState(attendance?.checkIn || "08:00:00");
   const [checkOut, setCheckOut] = useState(attendance?.checkOut || "17:00:00");
   const [status, setStatus] = useState<any>(attendance?.status || "حاضر");
   const [notes, setNotes] = useState(attendance?.notes || "");
+
+  useEffect(() => {
+    if (attendance) {
+      setSelectedPerson(
+        attendance.employeeId
+          ? `emp_${attendance.employeeId}`
+          : attendance.employeeCode
+          ? `drv_${attendance.employeeCode}`
+          : ""
+      );
+      setDate(toInputDate(attendance.date) || new Date().toISOString().slice(0, 10));
+      setCheckIn(attendance.checkIn || "08:00:00");
+      setCheckOut(attendance.checkOut || "17:00:00");
+      setStatus(attendance.status || "حاضر");
+      setNotes(attendance.notes || "");
+    }
+  }, [attendance]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -55,9 +72,12 @@ export function AttendanceModal({
         let employeeName = "";
         let employeeCode = "—";
 
+        const emp = selectedPerson.startsWith("emp_")
+          ? employees.find((e) => e.id === Number(selectedPerson.slice(4)))
+          : null;
+
         if (selectedPerson.startsWith("emp_")) {
           const empId = Number(selectedPerson.slice(4));
-          const emp = employees.find((e) => e.id === empId);
           employeeId = empId;
           employeeName = emp?.name || "موظف";
           employeeCode = emp?.employeeNo || `EMP-${empId}`;
@@ -76,6 +96,9 @@ export function AttendanceModal({
           date,
           checkIn: checkIn || null,
           checkOut: checkOut || null,
+          shiftName: emp?.shiftName || "الدوام الافتراضي (08:00 - 17:00)",
+          shiftStart: emp?.shiftStart || "08:00",
+          shiftEnd: emp?.shiftEnd || "17:00",
           status,
           source: "يدوي",
           notes: notes.trim() || undefined,
@@ -89,6 +112,10 @@ export function AttendanceModal({
     }
   };
 
+  const selectedEmp = selectedPerson.startsWith("emp_")
+    ? employees.find((e) => e.id === Number(selectedPerson.slice(4)))
+    : null;
+
   return (
     <Modal title={attendance ? "تعديل سجل حضور وانصراف" : "تسجيل حركة حضور وانصراف يدوي"} onClose={onClose}>
       <form onSubmit={handleSubmit}>
@@ -98,7 +125,17 @@ export function AttendanceModal({
               <span>الموظف أو السائق *</span>
               <select
                 value={selectedPerson}
-                onChange={(e) => setSelectedPerson(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSelectedPerson(val);
+                  if (val.startsWith("emp_")) {
+                    const found = employees.find((x) => x.id === Number(val.slice(4)));
+                    if (found) {
+                      setCheckIn(found.shiftStart ? `${found.shiftStart}:00` : "08:00:00");
+                      setCheckOut(found.shiftEnd ? `${found.shiftEnd}:00` : "17:00:00");
+                    }
+                  }
+                }}
                 required
               >
                 <option value="">-- اختر الموظف أو السائق --</option>
@@ -117,6 +154,11 @@ export function AttendanceModal({
                   ))}
                 </optgroup>
               </select>
+              {selectedEmp && (
+                <div style={{ marginTop: 6, fontSize: 12, color: "var(--brand-primary, #25364c)", background: "#f0fdf4", padding: "4px 8px", borderRadius: 4, display: "inline-block" }}>
+                  ⏰ <strong>الوردية المعتمدة:</strong> {selectedEmp.shiftName || "الدوام الافتراضي"} ({selectedEmp.shiftStart || "08:00"} إلى {selectedEmp.shiftEnd || "17:00"}) · فترة سماح {selectedEmp.gracePeriodMinutes ?? 15} دقيقة
+                </div>
+              )}
             </label>
           )}
 

@@ -358,6 +358,41 @@
       "when": 1791720000000,
       "tag": "0050_add_attendance_and_biometrics",
       "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "5",
+      "when": 1791730000000,
+      "tag": "0051_add_employee_shifts",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "5",
+      "when": 1791740000000,
+      "tag": "0052_add_inspections_and_employee_requests",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "5",
+      "when": 1791750000000,
+      "tag": "0053_add_client_portal_requests",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "5",
+      "when": 1791760000000,
+      "tag": "0054_update_employees_status_enum",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "5",
+      "when": 1791770000000,
+      "tag": "0055_add_custodies_and_inquiries",
+      "breakpoints": true
     }
   ]
 }

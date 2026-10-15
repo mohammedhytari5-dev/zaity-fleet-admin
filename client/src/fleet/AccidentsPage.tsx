@@ -126,7 +126,7 @@ export function AccidentDetailModal({ accident, onClose }: { accident: Row; onCl
           fileName: stageFile.name,
           fileUrl,
         });
-        await utils.documents.list.invalidate();
+        void utils.documents.list.invalidate();
       }
 
       advance.mutate(
@@ -659,6 +659,9 @@ export function AccidentsPage({ vehicles, drivers }: { vehicles: Vehicle[]; driv
                   }}
                 >
                   <option value="">اختر مركبة</option>
+                  {form.vehicleId && !vehicles.some((row) => String(row.id) === String(form.vehicleId)) && (
+                    <option value={form.vehicleId}>{form.vehiclePlate ? `${form.vehiclePlate}` : `مركبة #${form.vehicleId}`}</option>
+                  )}
                   {vehicles.map((row) => (
                     <option key={row.id} value={row.id}>
                       {row.plate} · {row.brand} {row.model}
@@ -675,6 +678,9 @@ export function AccidentsPage({ vehicles, drivers }: { vehicles: Vehicle[]; driv
                   }
                 >
                   <option value="">غير محدد</option>
+                  {form.driverId && !drivers.some((row) => String(row.id) === String(form.driverId)) && (
+                    <option value={form.driverId}>{form.driverName ? `${form.driverName}` : `سائق #${form.driverId}`}</option>
+                  )}
                   {drivers.map((row) => (
                     <option key={row.id} value={row.id}>
                       {row.name}

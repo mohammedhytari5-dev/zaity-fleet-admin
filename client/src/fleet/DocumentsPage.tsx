@@ -79,7 +79,7 @@ const categoryMeta: Record<
     label: "العقود والمالية",
     icon: FileText,
     tone: "violet",
-    entityTypes: ["عقد", "عميل"],
+    entityTypes: ["عقد", "عميل", "قيد يومية"],
   },
 };
 
@@ -176,7 +176,7 @@ export function DocumentsPage({
     if (["مركبة"].includes(entityType)) return "أسطول";
     if (["سائق", "موظف"].includes(entityType)) return "كوادر";
     if (["صيانة", "مشروع"].includes(entityType)) return "صيانة وتشغيل";
-    if (["عقد", "عميل"].includes(entityType)) return "عقود ومالية";
+    if (["عقد", "عميل", "قيد يومية"].includes(entityType)) return "عقود ومالية";
     return entityType;
   };
 

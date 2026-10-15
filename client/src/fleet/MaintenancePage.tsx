@@ -17,8 +17,12 @@ import {
   MoreHorizontal,
   Pencil,
   Wrench,
+  Truck,
+  Smartphone,
 } from "lucide-react";
-import type { Row, Vehicle, Driver, Maintenance, Document, PayableRow } from "./types";
+import type { Row, Vehicle, Driver, Maintenance, Document, PayableRow, EmployeeRow } from "./types";
+import { InspectionsSection } from "./workforce/InspectionsSection";
+import { WorkforceSelfServiceModal } from "./workforce/WorkforceSelfServiceModal";
 import {
   Badge,
   PageHeader,
@@ -423,6 +427,8 @@ export function DriverVehiclesModal({
 
 export function MaintenancePage({
   maintenance,
+  vehicles: propVehicles,
+  drivers: propDrivers,
   onOpenForm,
   onAction,
   canApprove,
@@ -430,16 +436,38 @@ export function MaintenancePage({
   onRegisterInvoice,
 }: {
   maintenance: Maintenance[];
+  vehicles?: Vehicle[];
+  drivers?: Driver[];
   onOpenForm: (row?: Row) => void;
   onAction: (action: string, row: Row) => void;
   canApprove: boolean;
   canRecordInvoice: boolean;
   onRegisterInvoice: (request: Maintenance) => void;
 }) {
+  const [activeSection, setActiveSection] = useState<"requests" | "inspections">("requests");
+  const [selfServiceOpen, setSelfServiceOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState("الكل");
   const [menu, setMenu] = useState<number | null>(null);
   const today = formatCompanyDate();
+
+  const vehiclesQuery = trpc.vehicles.list.useQuery(undefined, {
+    enabled: !propVehicles,
+    staleTime: 30000,
+  });
+  const driversQuery = trpc.drivers.list.useQuery(undefined, {
+    enabled: !propDrivers,
+    staleTime: 30000,
+  });
+  const vehicles = (propVehicles || vehiclesQuery.data || []) as Vehicle[];
+  const drivers = (propDrivers || driversQuery.data || []) as Driver[];
+
+  const inspectionsQuery = trpc.inspections.list.useQuery(undefined, {
+    staleTime: 20000,
+  });
+  const inspectionsList = inspectionsQuery.data || [];
+  const inspectionIssuesCount = inspectionsList.filter((i) => i.hasIssue).length;
+
   const monthlyCostQuery = trpc.maintenance.costForPeriod.useQuery(
     { from: `${today.slice(0, 7)}-01`, to: today },
     { enabled: canApprove, staleTime: 15000 }
@@ -481,13 +509,115 @@ export function MaintenancePage({
     <>
       <PageHeader
         eyebrow="التشغيل / الورش"
-        title="حوكمة الصيانة"
-        description="تابع البلاغات والأولويات والاعتمادات والتنفيذ وسجل المركبات."
-        action="طلب صيانة جديد"
-        onAction={() => onOpenForm()}
+        title="حوكمة الصيانة والفحص الدوري"
+        description="تابع بلاغات الصيانة، الفحص الميداني اليومي للباصات، مستويات الزيت والماء، وسجل المركبات."
+        action={activeSection === "requests" ? "طلب صيانة جديد" : undefined}
+        onAction={activeSection === "requests" ? () => onOpenForm() : undefined}
       />
 
-      <div className="stats-banner">
+      {/* Sub-navigation tabs: Maintenance Work Orders vs Daily Bus Inspections */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: "0.75rem",
+          marginBottom: "1.25rem",
+          flexWrap: "wrap",
+        }}
+      >
+        <div
+          className="table-tabs"
+          style={{
+            background: "white",
+            padding: "0.35rem 0.75rem",
+            borderRadius: "10px",
+            border: "1px solid var(--border-color, #e5e7eb)",
+            display: "flex",
+            gap: "0.5rem",
+            flexWrap: "wrap",
+            margin: 0,
+          }}
+        >
+          <button
+            className={activeSection === "requests" ? "active" : ""}
+            onClick={() => setActiveSection("requests")}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "0.4rem",
+              padding: "0.5rem 0.85rem",
+            }}
+          >
+            <Wrench size={16} /> طلبات وبلاغات الصيانة ({maintenance.length})
+          </button>
+          <button
+            className={activeSection === "inspections" ? "active" : ""}
+            onClick={() => setActiveSection("inspections")}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "0.4rem",
+              padding: "0.5rem 0.85rem",
+            }}
+          >
+            <Truck size={16} /> تفقد وفحص الباصات اليومي{" "}
+            {inspectionIssuesCount > 0 ? (
+              <span
+                style={{
+                  background: "#fee2e2",
+                  color: "#991b1b",
+                  borderRadius: "999px",
+                  padding: "0.1rem 0.5rem",
+                  fontSize: "0.75rem",
+                  fontWeight: 700,
+                }}
+              >
+                {inspectionIssuesCount} ⚠️
+              </span>
+            ) : (
+              `(${inspectionsList.length})`
+            )}
+          </button>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setSelfServiceOpen(true)}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "0.5rem",
+            background: "linear-gradient(135deg, #1e3a8a, #2563eb)",
+            color: "white",
+            border: "none",
+            borderRadius: "10px",
+            padding: "0.55rem 1.1rem",
+            fontSize: "0.88rem",
+            fontWeight: 700,
+            cursor: "pointer",
+            boxShadow: "0 4px 12px rgba(37, 99, 235, 0.25)",
+            transition: "all 0.2s ease",
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.transform = "translateY(-1px)")}
+          onMouseLeave={(e) => (e.currentTarget.style.transform = "none")}
+        >
+          <Smartphone size={18} />
+          <span>تسجيل فحص يومي للباص 📱</span>
+        </button>
+      </div>
+
+      {activeSection === "inspections" && (
+        <InspectionsSection
+          vehicles={vehicles}
+          drivers={drivers}
+          onOpenSelfService={() => setSelfServiceOpen(true)}
+        />
+      )}
+
+      {activeSection === "requests" && (
+        <>
+          <div className="stats-banner">
         <div>
           <Wrench size={18} />
           <div className="stats-banner-info">
@@ -691,6 +821,20 @@ export function MaintenancePage({
           );
         })}
       </TableShell>
+        </>
+      )}
+
+      {/* MODAL: Unified Driver Bus Inspection Self-Service */}
+      {selfServiceOpen && (
+        <WorkforceSelfServiceModal
+          onClose={() => setSelfServiceOpen(false)}
+          employees={[]}
+          drivers={drivers}
+          vehicles={vehicles}
+          initialPersonType="driver"
+          mode="inspection"
+        />
+      )}
     </>
   );
 }

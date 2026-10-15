@@ -1166,7 +1166,7 @@ function PurchaseOrderPrintModal({
             {/* الترويسة الرسمية للشركة */}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderBottom: "2px solid #0f766e", paddingBottom: "1.25rem", marginBottom: "1.5rem" }}>
               <div>
-                <h2 style={{ margin: "0 0 .3rem", fontSize: "1.45rem", color: "#0f766e" }}>شركة أسطول زيتي للنقل والخدمات اللوجستية</h2>
+                <h2 style={{ margin: "0 0 .3rem", fontSize: "1.45rem", color: "#0f766e" }}>شركة ثقة التوصيل للنقل والخدمات اللوجستية</h2>
                 <div style={{ fontSize: ".85rem", color: "#64748b" }}>سجل تجاري: 1010000000 · المملكة العربية السعودية</div>
                 <div style={{ fontSize: ".85rem", color: "#64748b" }}>الرقم الضريبي الموحد: <strong>300000000000003</strong></div>
               </div>

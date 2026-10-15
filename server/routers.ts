@@ -18,7 +18,7 @@ import { driverRecordForViewer } from "./driver-access";
 import { projectRecordForViewer } from "./project-access";
 import { notificationModule, notificationsVisibleTo } from "./notification-access";
 import { claimRecordForViewer, contractRecordForViewer, paymentRecordForViewer } from "./contract-access";
-import { archiveClaim, archiveClient, archiveContract, archiveDocument, archiveDriver, archiveMaintenanceRequest, advanceMaintenanceRequest, decideMaintenanceApproval, settleMaintenanceAdvance, listMaintenanceEvents, archivePayment, archiveVehicleExpense, archiveVehicleRevenue, archiveProject, archiveSetting, deleteSetting, archiveVehicle, assignVehicleDriver, authenticateLocalUser, LastActiveAdminDemotionError, createLocalUser, createAuditLog, recordLoginAttempt, revokeUserSessions, createClaim, createClient, createContract, createDocument, createDriver, createEmployee, updateEmployee, archiveEmployee, listEmployees, linkEmployeeUser, createMaintenanceRequest, createNotification, createPayment, createProject, createPayable, registerPayablePayment, updatePayable, updatePayableStatus, listPayables, getPayableReceipt, createRepresentative, createTask, createVehicle, createVehicleExpense, createVehicleRevenue, getVehicleFinancialProfile, getVehicleReceipt, listVehicleFinancialSummaries, updateVehicleExpense, listAuditLogs, listClaims, listClients, listContracts, listDocuments, listDrivers, listMaintenanceRequests, listNotifications, getNotification, listPayments, listProjects, listRepresentatives, listSettings, listTasks, listTaskAssignees, listUsers, listVehicles, getCompanyReport, getMaintenanceCostForPeriod, getContractRelatedModuleAccess, markNotificationRead, updateClaim, updatePayment, updateSetting, updateClient, updateContract, updateContractStatus, updateProject, updateUserRole, updateUserAccess, updateDocument, updateDriver, updateMaintenanceRequest, updateTask, updateVehicle, upsertSetting, getDocument, listInventoryItems, listInventoryMovements, createInventoryItem, updateInventoryItem, recordInventoryMovement, archiveInventoryItem, listInventoryRequests, createInventoryRequest, decideInventoryRequest, issueInventoryRequest, listAccidents, getAccident, listAccidentEvents, createAccident, updateAccident, advanceAccident, listPurchaseRequests, getPurchaseRequest, createPurchaseRequest, updatePurchaseRequest, archivePurchaseRequest, listPurchaseQuotes, createPurchaseQuote, updatePurchaseQuote, selectPurchaseQuote, deletePurchaseQuote, issuePurchaseOrder, seedAccountsIfEmpty, listAccounts, createAccount, updateAccount, archiveAccount, listFiscalPeriods, createFiscalPeriod, closeFiscalPeriod, reopenFiscalPeriod, listJournalEntries, getJournalEntry, createJournalEntry, reverseJournalEntryRecord, getAccountLedger, getTrialBalance, getIncomeStatement, getBalanceSheet, createTaxInvoice, listTaxInvoices, getTaxInvoice, getVatDeclaration, listPayroll, createPayroll, updatePayroll, deletePayroll, generateMonthlyPayroll, listLeaves, createLeave, updateLeave, archiveLeave, listAttendance, createAttendance, updateAttendance, deleteAttendance, listBiometricDevices, createBiometricDevice, updateBiometricDevice, deleteBiometricDevice, syncBiometricDeviceLogs } from "./db";
+import { archiveClaim, archiveClient, archiveContract, archiveDocument, archiveDriver, archiveMaintenanceRequest, advanceMaintenanceRequest, decideMaintenanceApproval, settleMaintenanceAdvance, listMaintenanceEvents, archivePayment, archiveVehicleExpense, archiveVehicleRevenue, archiveProject, archiveSetting, deleteSetting, archiveVehicle, assignVehicleDriver, authenticateLocalUser, LastActiveAdminDemotionError, createLocalUser, createAuditLog, recordLoginAttempt, revokeUserSessions, createClaim, createClient, createContract, createDocument, createDriver, createEmployee, updateEmployee, archiveEmployee, listEmployees, linkEmployeeUser, createMaintenanceRequest, createNotification, createPayment, createProject, createPayable, registerPayablePayment, updatePayable, updatePayableStatus, listPayables, getPayableReceipt, createRepresentative, createTask, createVehicle, createVehicleExpense, createVehicleRevenue, getVehicleFinancialProfile, getVehicleReceipt, listVehicleFinancialSummaries, updateVehicleExpense, listAuditLogs, listClaims, listClients, listContracts, listDocuments, listDrivers, listMaintenanceRequests, listNotifications, getNotification, listPayments, listProjects, listRepresentatives, listSettings, listTasks, listTaskAssignees, listUsers, listVehicles, getCompanyReport, getMaintenanceCostForPeriod, getContractRelatedModuleAccess, markNotificationRead, updateClaim, updatePayment, updateSetting, updateClient, updateContract, updateContractStatus, updateProject, updateUserRole, updateUserAccess, updateDocument, updateDriver, updateMaintenanceRequest, updateTask, updateVehicle, upsertSetting, getDocument, listInventoryItems, listInventoryMovements, createInventoryItem, updateInventoryItem, recordInventoryMovement, archiveInventoryItem, listInventoryRequests, createInventoryRequest, decideInventoryRequest, issueInventoryRequest, listAccidents, getAccident, listAccidentEvents, createAccident, updateAccident, advanceAccident, listPurchaseRequests, getPurchaseRequest, createPurchaseRequest, updatePurchaseRequest, archivePurchaseRequest, listPurchaseQuotes, createPurchaseQuote, updatePurchaseQuote, selectPurchaseQuote, deletePurchaseQuote, issuePurchaseOrder, seedAccountsIfEmpty, listAccounts, createAccount, updateAccount, archiveAccount, listFiscalPeriods, createFiscalPeriod, closeFiscalPeriod, reopenFiscalPeriod, listJournalEntries, getJournalEntry, createJournalEntry, reverseJournalEntryRecord, getAccountLedger, getTrialBalance, getIncomeStatement, getBalanceSheet, createTaxInvoice, listTaxInvoices, getTaxInvoice, getVatDeclaration, listPayroll, createPayroll, updatePayroll, deletePayroll, generateMonthlyPayroll, listLeaves, createLeave, updateLeave, archiveLeave, listAttendance, createAttendance, updateAttendance, deleteAttendance, listBiometricDevices, createBiometricDevice, updateBiometricDevice, deleteBiometricDevice, syncBiometricDeviceLogs, listVehicleInspections, createVehicleInspection, updateVehicleInspection, deleteVehicleInspection, listEmployeeRequests, createEmployeeRequest, updateEmployeeRequest, deleteEmployeeRequest, listClientPortalRequests, createClientPortalRequest, updateClientPortalRequest, deleteClientPortalRequest, listCustodies, getCustody, createCustody, acceptCustody, recordCustodyExpense, settleCustody, listCustodyExpenses, listPayrollInquiries, createPayrollInquiry, respondPayrollInquiry, completeDriverMaintenance } from "./db";
 import { AttendanceCalculator, BiometricLogParser } from "./attendance-domain";
 import { canEditMaintenanceQuote, maintenanceStages, type MaintenanceStage } from "../shared/maintenance-domain";
 import { maintenanceEventForViewer, maintenanceRecordForViewer } from "./maintenance-access";
@@ -98,7 +98,7 @@ function scopeContractForUser<T extends object>(user: { role?: string; permissio
 const vehicleInput = z.object({
   plate: z.string().min(2).max(32),
   brand: z.string().min(1).max(80),
-  model: z.string().min(1).max(120),
+  model: z.string().max(120).default("—").transform(v => (v && v.trim() ? v.trim() : "—")),
   year: z.string().min(4).max(8),
   color: z.string().min(1).max(48),
   mileage: z.string().min(1).max(32),
@@ -161,6 +161,10 @@ const employeeFields = {
   transportAllowance: z.number().int().nonnegative().default(0),
   otherAllowance: z.number().int().nonnegative().default(0),
   contractType: z.string().max(80).default("دوام كامل"),
+  shiftName: z.string().max(80).default("الدوام الافتراضي (08:00 - 17:00)"),
+  shiftStart: z.string().max(16).default("08:00"),
+  shiftEnd: z.string().max(16).default("17:00"),
+  gracePeriodMinutes: z.number().int().nonnegative().default(15),
   residencyExpiry: z.string().max(32).default("—"),
   insuranceExpiry: z.string().max(32).default("—"),
   hireDate: z.string().max(32).default("—"), status: z.enum(["نشط", "إجازة", "موقوف", "منتهي الخدمة"]).default("نشط"), notes: z.string().max(4000).optional(),
@@ -218,12 +222,13 @@ const maintenanceInput = z.object({
   partsCost: moneyInput.optional(),
   warrantyUntil: z.string().max(32).default("—"),
   receiptName: z.string().max(255).nullable().optional(), receiptUrl: z.string().max(1200000).refine(isSafeFileReference, "مرجع ملف غير صالح").nullable().optional(),
+  damagePhotos: z.string().max(1200000).nullable().optional(),
 });
 const documentInput = z.object({
   name: z.string().min(2).max(160),
   entity: z.string().max(160).default("—"),
   entityId: z.number().int().positive().nullable().default(null),
-  entityType: z.enum(["مركبة", "سائق", "موظف", "مشروع", "عميل", "عقد", "مطالبة", "صيانة", "حادث"]).default("مركبة"),
+  entityType: z.enum(["مركبة", "سائق", "موظف", "مشروع", "عميل", "عقد", "مطالبة", "صيانة", "حادث", "قيد يومية"]).default("مركبة"),
   type: z.string().max(80).default("مركبة"),
   expiry: z.string().max(32).nullable().optional(),
   status: z.enum(["ساري", "قريبًا", "متأخر", "منتهي"]).default("ساري"),
@@ -513,21 +518,35 @@ export const appRouter = router({
       checkOut: z.string().max(32).nullable().optional(),
       workHours: z.number().nonnegative().optional(),
       delayMinutes: z.number().int().nonnegative().optional(),
+      earlyExitMinutes: z.number().int().nonnegative().optional(),
       overtimeHours: z.number().nonnegative().optional(),
       status: z.enum(["حاضر", "تأخير", "غياب", "إجازة", "استئذان", "عطلة"]).default("حاضر"),
       source: z.enum(["جهاز بصمة", "يدوي", "تطبيق", "ملف"]).default("يدوي"),
+      shiftName: z.string().max(80).optional(),
+      shiftStart: z.string().max(16).optional(),
+      shiftEnd: z.string().max(16).optional(),
       deviceIp: z.string().max(64).optional(),
       deviceName: z.string().max(120).optional(),
       notes: z.string().max(2000).optional(),
     })).mutation(async ({ input }) => {
-      const calc = new AttendanceCalculator();
+      const emp = input.employeeId ? (await listEmployees() ?? []).find(e => e.id === input.employeeId) : null;
+      const shiftStart = input.shiftStart || emp?.shiftStart || "08:00";
+      const shiftEnd = input.shiftEnd || emp?.shiftEnd || "17:00";
+      const gracePeriod = emp?.gracePeriodMinutes ?? 15;
+      const calc = new AttendanceCalculator(shiftStart, shiftEnd, gracePeriod);
+
       const delay = input.delayMinutes ?? calc.calculateDelay(input.checkIn);
+      const earlyExit = input.earlyExitMinutes ?? calc.calculateEarlyDeparture(input.checkOut);
       const workHours = input.workHours ?? calc.calculateWorkHours(input.checkIn, input.checkOut);
       const overtime = input.overtimeHours ?? calc.calculateOvertime(workHours);
       const status = input.status === "حاضر" && delay > 0 ? "تأخير" : input.status;
       return createAttendance({
         ...input,
+        shiftName: input.shiftName || emp?.shiftName || "الدوام الافتراضي (08:00 - 17:00)",
+        shiftStart,
+        shiftEnd,
         delayMinutes: delay,
+        earlyExitMinutes: earlyExit,
         workHours,
         overtimeHours: overtime,
         status,
@@ -540,8 +559,12 @@ export const appRouter = router({
         checkOut: z.string().max(32).nullable().optional(),
         workHours: z.number().nonnegative().optional(),
         delayMinutes: z.number().int().nonnegative().optional(),
+        earlyExitMinutes: z.number().int().nonnegative().optional(),
         overtimeHours: z.number().nonnegative().optional(),
         status: z.enum(["حاضر", "تأخير", "غياب", "إجازة", "استئذان", "عطلة"]).optional(),
+        shiftName: z.string().max(80).nullable().optional(),
+        shiftStart: z.string().max(16).nullable().optional(),
+        shiftEnd: z.string().max(16).nullable().optional(),
         notes: z.string().max(2000).optional(),
       }),
     })).mutation(async ({ input }) => {
@@ -560,22 +583,40 @@ export const appRouter = router({
       fileContent: z.string().min(5),
     })).mutation(async ({ input }) => {
       const parsed = BiometricLogParser.parseCsvOrDat(input.fileContent);
-      const calc = new AttendanceCalculator();
+      const allEmployees = await listEmployees() ?? [];
+      const empByCode = new Map<string, typeof allEmployees[0]>();
+      allEmployees.forEach(e => {
+        if (e.employeeNo) empByCode.set(e.employeeNo.trim(), e);
+        empByCode.set(String(e.id), e);
+      });
+
       let imported = 0;
       for (const item of parsed) {
+        const emp = empByCode.get(item.employeeCode.trim());
+        const shiftStart = emp?.shiftStart || "08:00";
+        const shiftEnd = emp?.shiftEnd || "17:00";
+        const gracePeriod = emp?.gracePeriodMinutes ?? 15;
+        const calc = new AttendanceCalculator(shiftStart, shiftEnd, gracePeriod);
+
         const delay = calc.calculateDelay(item.checkIn);
+        const earlyExit = calc.calculateEarlyDeparture(item.checkOut);
         const workHours = calc.calculateWorkHours(item.checkIn, item.checkOut);
         const overtime = calc.calculateOvertime(workHours);
         const status = calc.determineStatus(item.checkIn, delay);
         await createAttendance({
-          employeeName: item.employeeCode,
+          employeeId: emp?.id ?? null,
+          employeeName: emp?.name || item.employeeCode,
           employeeCode: item.employeeCode,
           date: item.date,
           checkIn: item.checkIn,
           checkOut: item.checkOut,
           delayMinutes: delay,
+          earlyExitMinutes: earlyExit,
           workHours,
           overtimeHours: overtime,
+          shiftName: emp?.shiftName || "الدوام الافتراضي (08:00 - 17:00)",
+          shiftStart,
+          shiftEnd,
           status,
           source: "ملف",
         });
@@ -613,6 +654,267 @@ export const appRouter = router({
       }),
     }),
   }),
+  inspections: router({
+    list: protectedProcedure
+      .input(
+        z.object({
+          driverId: z.number().int().positive().optional(),
+          vehicleId: z.number().int().positive().optional(),
+          hasIssue: z.number().int().optional(),
+        }).optional()
+      )
+      .query(async ({ input }) => (await listVehicleInspections(input)) ?? []),
+    create: protectedProcedure
+      .input(
+        z.object({
+          driverId: z.number().int().positive().nullable().optional(),
+          driverName: z.string().min(2).max(160),
+          vehicleId: z.number().int().positive().nullable().optional(),
+          vehiclePlate: z.string().min(2).max(40),
+          odometer: z.number().int().nonnegative().default(0),
+          oilStatus: z.enum(["سليم", "ناقص", "يحتاج تغيير"]).default("سليم"),
+          waterStatus: z.enum(["سليم", "ناقص"]).default("سليم"),
+          tiresStatus: z.enum(["ممتاز", "يحتاج هواء", "متضرر"]).default("ممتاز"),
+          cleanlinessStatus: z.enum(["نظيف", "متوسط", "يحتاج غسيل"]).default("نظيف"),
+          lightsStatus: z.enum(["سليم", "عطلان"]).default("سليم"),
+          brakesStatus: z.enum(["سليم", "يحتاج فحص"]).default("سليم"),
+          acStatus: z.enum(["سليم", "ضعيف", "عطلان"]).default("سليم"),
+          safetyKitStatus: z.enum(["متوفر", "ناقص"]).default("متوفر"),
+          oilPhotoUrl: z.string().nullable().optional(),
+          waterPhotoUrl: z.string().nullable().optional(),
+          odometerPhotoUrl: z.string().nullable().optional(),
+          exteriorPhotoUrl: z.string().nullable().optional(),
+          hasIssue: z.number().int().default(0),
+          issueSummary: z.string().nullable().optional(),
+          notes: z.string().nullable().optional(),
+        })
+      )
+      .mutation(async ({ input }) => {
+        const hasIssue =
+          input.oilStatus !== "سليم" ||
+          input.waterStatus !== "سليم" ||
+          input.tiresStatus === "متضرر" ||
+          input.brakesStatus !== "سليم" ||
+          input.lightsStatus !== "سليم"
+            ? 1
+            : input.hasIssue || 0;
+        return requireRecord(
+          await createVehicleInspection({
+            ...input,
+            hasIssue,
+          }),
+          "تقرير الفحص اليومي"
+        );
+      }),
+    updateStatus: protectedProcedure
+      .input(
+        z.object({
+          id: z.number().int().positive(),
+          status: z.enum(["جديد", "تمت المراجعة", "تم تحويله للصيانة"]),
+          reviewedBy: z.string().optional(),
+          notes: z.string().optional(),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        return requireRecord(
+          await updateVehicleInspection(input.id, {
+            status: input.status,
+            reviewedBy: input.reviewedBy || ctx.user?.name || "المشرف",
+            reviewedAt: new Date().toISOString().slice(0, 10),
+            ...(input.notes ? { notes: input.notes } : {}),
+          }),
+          "تحديث تقرير الفحص"
+        );
+      }),
+    delete: permissionProcedure("maintenance")
+      .input(z.object({ id: z.number().int().positive() }))
+      .mutation(async ({ input }) => ({
+        success: await deleteVehicleInspection(input.id),
+      })),
+  }),
+  employeeRequests: router({
+    list: protectedProcedure
+      .input(
+        z.object({
+          employeeId: z.number().int().positive().optional(),
+          driverId: z.number().int().positive().optional(),
+          status: z.string().optional(),
+        }).optional()
+      )
+      .query(async ({ input }) => (await listEmployeeRequests(input)) ?? []),
+    create: protectedProcedure
+      .input(
+        z.object({
+          employeeId: z.number().int().positive().nullable().optional(),
+          driverId: z.number().int().positive().nullable().optional(),
+          personName: z.string().min(2).max(160),
+          personRole: z.enum(["سائق", "موظف"]).default("موظف"),
+          department: z.string().max(120).default("—"),
+          requestType: z.enum(["إجازة", "نقل كفالة", "خروج نهائي", "خروج وعودة", "سلفة راتب", "تعريف بالراتب", "أخرى"]),
+          title: z.string().min(2).max(200),
+          startDate: z.string().nullable().optional(),
+          endDate: z.string().nullable().optional(),
+          days: z.number().int().nonnegative().default(0),
+          amount: z.number().nonnegative().default(0),
+          reason: z.string().nullable().optional(),
+          attachmentUrl: z.string().nullable().optional(),
+          attachmentName: z.string().max(255).nullable().optional(),
+        })
+      )
+      .mutation(async ({ input }) => {
+        return requireRecord(
+          await createEmployeeRequest(input),
+          "طلب الخدمة الذاتية"
+        );
+      }),
+    updateStatus: permissionProcedure("employees")
+      .input(
+        z.object({
+          id: z.number().int().positive(),
+          status: z.enum(["قيد المراجعة", "معتمدة", "مرفوضة", "ملغاة"]),
+          approvedBy: z.string().optional(),
+          rejectionReason: z.string().optional(),
+          notes: z.string().optional(),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        return requireRecord(
+          await updateEmployeeRequest(input.id, {
+            status: input.status,
+            approvedBy: input.approvedBy || ctx.user?.name || "الموارد البشرية",
+            approvedAt: new Date().toISOString().slice(0, 10),
+            ...(input.rejectionReason ? { rejectionReason: input.rejectionReason } : {}),
+            ...(input.notes ? { notes: input.notes } : {}),
+          }),
+          "تحديث حالة الطلب"
+        );
+      }),
+    delete: permissionProcedure("employees")
+      .input(z.object({ id: z.number().int().positive() }))
+      .mutation(async ({ input }) => ({
+        success: await deleteEmployeeRequest(input.id),
+      })),
+  }),
+  clientPortal: router({
+    submit: publicProcedure
+      .input(
+        z.object({
+          requestType: z.string().min(2).max(100),
+          clientType: z.string().max(50).default("عميل جديد"),
+          companyName: z.string().min(2).max(255),
+          contactPerson: z.string().min(2).max(160),
+          phone: z.string().min(7).max(40),
+          email: z.string().max(160).nullable().optional(),
+          city: z.string().max(100).optional().default("غير محدد").transform((val) => (val && val.trim().length >= 2 ? val.trim() : "غير محدد")),
+          busType: z.string().max(100).nullable().optional(),
+          busesCount: z.number().int().positive().default(1),
+          duration: z.string().max(100).nullable().optional(),
+          startDate: z.string().max(30).nullable().optional(),
+          workNature: z.string().max(255).nullable().optional(),
+          dailyEstimatedKm: z.number().int().nonnegative().nullable().optional(),
+          withDriver: z.number().int().default(1),
+          withFuel: z.number().int().default(1),
+          currentContractNo: z.string().max(100).nullable().optional(),
+          busPlateNumber: z.string().max(40).nullable().optional(),
+          driverName: z.string().max(160).nullable().optional(),
+          details: z.string().max(4000).nullable().optional(),
+        })
+      )
+      .mutation(async ({ input }) => {
+        return requireRecord(
+          await createClientPortalRequest({
+            ...input,
+            status: "جديد",
+          }),
+          "طلب بوابة العملاء"
+        );
+      }),
+    list: permissionProcedure("clients")
+      .input(
+        z
+          .object({
+            requestType: z.string().optional(),
+            status: z.string().optional(),
+            clientType: z.string().optional(),
+          })
+          .optional()
+      )
+      .query(async ({ input }) => (await listClientPortalRequests(input)) ?? []),
+    updateStatus: permissionProcedure("clients")
+      .input(
+        z.object({
+          id: z.number().int().positive(),
+          status: z.enum(["جديد", "قيد التواصل", "تم الاتفاق والتنفيذ", "مرفوض", "ملغى"]),
+          assignedTo: z.string().optional(),
+          responseNotes: z.string().optional(),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        return requireRecord(
+          await updateClientPortalRequest(input.id, {
+            status: input.status,
+            assignedTo: input.assignedTo || ctx.user?.name || "مختص العملاء",
+            ...(input.responseNotes ? { responseNotes: input.responseNotes } : {}),
+          }),
+          "تحديث طلب العميل"
+        );
+      }),
+    delete: permissionProcedure("clients")
+      .input(z.object({ id: z.number().int().positive() }))
+      .mutation(async ({ input }) => ({
+        success: await deleteClientPortalRequest(input.id),
+      })),
+  }),
+  selfService: router({
+    options: protectedProcedure.query(async ({ ctx }) => {
+      const [allEmployees, allDrivers, allVehicles] = await Promise.all([
+        listEmployees(),
+        listDrivers(),
+        listVehicles(),
+      ]);
+
+      const linkedEmployee = (allEmployees ?? []).find(e => e.userId === ctx.user.id);
+      const linkedDriver = linkedEmployee?.driverId
+        ? (allDrivers ?? []).find(d => d.id === linkedEmployee.driverId)
+        : (allDrivers ?? []).find(d => d.name === ctx.user.name);
+
+      return {
+        employees: (allEmployees ?? []).map(e => ({
+          id: e.id,
+          name: e.name,
+          employeeNo: e.employeeNo,
+          department: e.department,
+          jobTitle: e.jobTitle,
+          driverId: e.driverId,
+          userId: e.userId,
+        })),
+        drivers: (allDrivers ?? []).map(d => ({
+          id: d.id,
+          name: d.name,
+          phone: d.phone,
+          vehicleId: d.vehicleId,
+          vehicle: d.vehicle,
+        })),
+        vehicles: (allVehicles ?? []).map(v => ({
+          id: v.id,
+          plate: v.plate,
+          brand: v.brand,
+          model: v.model,
+          mileage: v.mileage,
+          driverId: v.driverId,
+          driver: v.driver,
+        })),
+        currentUser: {
+          id: ctx.user.id,
+          name: ctx.user.name || ctx.user.username || "مستخدم",
+          username: ctx.user.username,
+          linkedEmployeeId: linkedEmployee?.id ?? null,
+          linkedDriverId: linkedDriver?.id ?? null,
+          isDriver: Boolean(linkedDriver),
+        },
+      };
+    }),
+  }),
   maintenance: router({
     list: permissionProcedure("maintenance").query(async ({ ctx }) => (await listMaintenanceRequests() ?? []).map(row => maintenanceRecordForViewer(row, hasModulePermission(ctx.user, "finance"), hasModulePermission(ctx.user, "vehicles")))),
     costForPeriod: permissionProcedure("maintenance").input(z.object({ from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) })).query(async ({ ctx, input }) => {
@@ -643,6 +945,10 @@ export const appRouter = router({
     settleAdvance: permissionProcedure("finance").input(z.object({ id: z.number().int().positive(), reference: z.string().min(1).max(120) })).mutation(async ({ ctx, input }) => { const record = requireRecord(await settleMaintenanceAdvance(input.id, input.reference, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }), "تسوية العهدة"); return hasModulePermission(ctx.user, "maintenance") ? maintenanceRecordForViewer(record, true, hasModulePermission(ctx.user, "vehicles")) : { success: true }; }),
     history: permissionProcedure("maintenance").input(z.object({ id: z.number().int().positive() })).query(async ({ ctx, input }) => (await listMaintenanceEvents(input.id) ?? []).map(event => maintenanceEventForViewer(event, hasModulePermission(ctx.user, "finance")))),
     archive: permissionProcedure("maintenance").input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => { requireReferencePermission(ctx.user, "vehicles"); return { success: await archiveMaintenanceRequest(input.id, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }) }; }),
+    completeDriver: protectedProcedure.input(z.object({ id: z.number().int().positive(), invoiceUrl: z.string().min(1, "صورة الفاتورة إلزامية"), notes: z.string().optional() })).mutation(async ({ ctx, input }) => {
+      const record = requireRecord(await completeDriverMaintenance(input.id, input.invoiceUrl, input.notes, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }), "إنجاز الصيانة وإرفاق الفاتورة");
+      return maintenanceRecordForViewer(record, hasModulePermission(ctx.user, "finance"), hasModulePermission(ctx.user, "vehicles"));
+    }),
   }),
   documents: router({
     list: permissionProcedure("documents").query(async ({ ctx }) => documentsVisibleTo((await listDocuments()) ?? [], module => hasModulePermission(ctx.user, module)).map(documentMetadata)),
@@ -947,11 +1253,34 @@ export const appRouter = router({
         driverId: z.number().int().positive().nullable().optional(),
         clientId: z.number().int().positive().nullable().optional(),
       })).min(2),
+      document: z.object({
+        name: z.string().max(160).optional(),
+        type: z.string().max(80).default("سند قيد"),
+        fileName: z.string().max(255),
+        fileUrl: z.string().max(3000000).refine(isSafeFileReference, "مرجع ملف غير صالح"),
+      }).optional(),
     })).mutation(async ({ ctx, input }) => {
-      return requireRecord(await createJournalEntry({
-        ...input,
+      const { document: docInput, ...entryInput } = input;
+      const createdEntry = requireRecord(await createJournalEntry({
+        ...entryInput,
         createdBy: ctx.user.id,
       }), "قيد اليومية");
+
+      if (docInput) {
+        await createDocument({
+          name: docInput.name?.trim() || `مستند قيد ${createdEntry.entry.entryNumber}`,
+          entity: `قيد #${createdEntry.entry.entryNumber}`,
+          entityType: "قيد يومية",
+          entityId: createdEntry.entry.id,
+          type: docInput.type || "سند قيد",
+          status: "ساري",
+          fileName: docInput.fileName,
+          fileUrl: docInput.fileUrl,
+          owner: ctx.user.name || ctx.user.username || "النظام",
+        });
+      }
+
+      return createdEntry;
     }),
 
     reverseEntry: permissionProcedure("finance").input(z.object({
@@ -1063,6 +1392,103 @@ export const appRouter = router({
       branchId: z.number().int().positive().optional(),
     })).query(async ({ input }) => {
       return requireRecord(await getVatDeclaration(input), "إقرار ضريبة القيمة المضافة");
+    }),
+  }),
+
+  custody: router({
+    list: protectedProcedure.input(z.object({
+      custodianId: z.number().int().optional(),
+      custodianType: z.string().optional(),
+      status: z.string().optional(),
+      custodyType: z.string().optional(),
+    }).optional()).query(async ({ input }) => {
+      return (await listCustodies(input)) ?? [];
+    }),
+
+    expenses: protectedProcedure.input(z.object({
+      custodyId: z.number().int().positive(),
+    })).query(async ({ input }) => {
+      return (await listCustodyExpenses(input.custodyId)) ?? [];
+    }),
+
+    create: permissionProcedure("finance").input(z.object({
+      title: z.string().min(1, "عنوان العهدة إلزامي"),
+      custodyType: z.string().min(1, "نوع العهدة إلزامي"),
+      custodianType: z.enum(["employee", "driver"]).default("employee"),
+      custodianId: z.number().int().positive("اختر المستلم"),
+      custodianName: z.string().min(1, "اسم المستلم إلزامي"),
+      paymentMethod: z.string().default("تحويل بنكي"),
+      referenceNumber: z.string().optional(),
+      receiptDocName: z.string().optional(),
+      receiptDocUrl: z.string().optional(),
+      totalAmount: positiveMoneyInput,
+      notes: z.string().optional(),
+    })).mutation(async ({ ctx, input }) => {
+      const created = await createCustody(input as any, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" });
+      return requireRecord(created, "العهدة");
+    }),
+
+    accept: protectedProcedure.input(z.object({
+      id: z.number().int().positive(),
+      amount: positiveMoneyInput,
+    })).mutation(async ({ ctx, input }) => {
+      const updated = await acceptCustody(input.id, input.amount, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" });
+      return requireRecord(updated, "تأكيد استلام العهدة");
+    }),
+
+    addExpense: protectedProcedure.input(z.object({
+      custodyId: z.number().int().positive(),
+      description: z.string().min(1, "بيان المصروف إلزامي"),
+      amount: positiveMoneyInput,
+      expenseDate: z.string().min(1, "تاريخ المصروف إلزامي"),
+      invoiceNumber: z.string().optional(),
+      invoiceDocName: z.string().optional(),
+      invoiceDocUrl: z.string().optional(),
+      maintenanceRequestId: z.number().int().optional(),
+      vehicleId: z.number().int().optional(),
+    })).mutation(async ({ ctx, input }) => {
+      const created = await recordCustodyExpense(input as any, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" });
+      return requireRecord(created, "مصروف العهدة");
+    }),
+
+    settle: permissionProcedure("finance").input(z.object({
+      id: z.number().int().positive(),
+      notes: z.string().optional(),
+    })).mutation(async ({ ctx, input }) => {
+      const settled = await settleCustody(input.id, input.notes, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" });
+      return requireRecord(settled, "تسوية العهدة");
+    }),
+  }),
+
+  payrollInquiry: router({
+    list: protectedProcedure.input(z.object({
+      payrollId: z.number().int().optional(),
+      employeeOrDriverId: z.number().int().optional(),
+      personType: z.string().optional(),
+    }).optional()).query(async ({ input }) => {
+      return (await listPayrollInquiries(input)) ?? [];
+    }),
+
+    create: protectedProcedure.input(z.object({
+      payrollId: z.number().int().positive(),
+      employeeOrDriverId: z.number().int().positive(),
+      personType: z.enum(["driver", "employee"]).default("driver"),
+      personName: z.string().min(1),
+      deductionAmount: moneyInput.default(0),
+      inquiryText: z.string().min(1, "اكتب نص الاستفسار أو الاعتراض"),
+    })).mutation(async ({ ctx, input }) => {
+      const created = await createPayrollInquiry(input as any, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" });
+      return requireRecord(created, "الاستفسار عن الراتب");
+    }),
+
+    respond: permissionProcedure("finance").input(z.object({
+      id: z.number().int().positive(),
+      financeResponse: z.string().min(1, "رد وتوضيح المالية إلزامي"),
+      proofDocName: z.string().optional(),
+      proofDocUrl: z.string().optional(),
+    })).mutation(async ({ ctx, input }) => {
+      const updated = await respondPayrollInquiry(input.id, input.financeResponse, input.proofDocName, input.proofDocUrl, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" });
+      return requireRecord(updated, "الرد على استفسار الراتب");
     }),
   }),
 });

@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { TableShell, Badge, exportCsv, formatSAR } from "../common";
 import {
   DollarSign,
@@ -7,10 +7,13 @@ import {
   Check,
   Pencil,
   Trash,
+  HelpCircle,
 } from "lucide-react";
 import type { PayrollRow } from "../types";
 import { formatCompanyDate } from "@shared/date-utils";
 import { matchesQuickSearch } from "@/lib/quick-search";
+import { trpc } from "@/lib/trpc";
+import { FinanceInquiriesModal } from "./FinanceInquiriesModal";
 
 interface PayrollSectionProps {
   payrollList: PayrollRow[];
@@ -47,6 +50,12 @@ export const PayrollSection: React.FC<PayrollSectionProps> = ({
   onApprove,
   onDisburse,
 }) => {
+  const [inquiriesModalOpen, setInquiriesModalOpen] = useState(false);
+  const inquiriesQuery = trpc.payrollInquiry.list.useQuery();
+  const pendingInquiriesCount = (inquiriesQuery.data ?? []).filter(
+    (i) => i.status === "بانتظار الرد"
+  ).length;
+
   const filtered = payrollList.filter((item) => {
     const match = matchesQuickSearch(item, search);
     if (!match) return false;
@@ -112,7 +121,35 @@ export const PayrollSection: React.FC<PayrollSectionProps> = ({
             <RefreshCw size={14} />
           </button>
         </div>
-        <div style={{ display: "flex", gap: "0.5rem" }}>
+        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+          <button
+            className="btn outline"
+            onClick={() => setInquiriesModalOpen(true)}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "0.4rem",
+              borderColor: pendingInquiriesCount > 0 ? "#f59e0b" : undefined,
+              background: pendingInquiriesCount > 0 ? "#fffbeb" : undefined,
+            }}
+          >
+            <HelpCircle size={15} color={pendingInquiriesCount > 0 ? "#d97706" : undefined} />
+            <span>اعتراضات الخصومات</span>
+            {pendingInquiriesCount > 0 && (
+              <span
+                style={{
+                  background: "#dc2626",
+                  color: "white",
+                  borderRadius: "999px",
+                  fontSize: "0.72rem",
+                  padding: "0.1rem 0.45rem",
+                  fontWeight: 700,
+                }}
+              >
+                {pendingInquiriesCount}
+              </span>
+            )}
+          </button>
           <button
             className="btn primary"
             onClick={onGenerate}
@@ -226,6 +263,12 @@ export const PayrollSection: React.FC<PayrollSectionProps> = ({
           </tr>
         ))}
       </TableShell>
+
+      <FinanceInquiriesModal
+        isOpen={inquiriesModalOpen}
+        onClose={() => setInquiriesModalOpen(false)}
+        currentUser={null}
+      />
     </>
   );
 };

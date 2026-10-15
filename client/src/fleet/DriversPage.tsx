@@ -1,8 +1,8 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { trpc } from "@/lib/trpc";
 import { matchesQuickSearch } from "@/lib/quick-search";
 import { resolveRenewalStatus } from "@shared/date-utils";
-import { MoreHorizontal, Upload } from "lucide-react";
+import { MoreHorizontal, Upload, AlertTriangle } from "lucide-react";
 import type { Row, Driver, ImportConfig } from "./types";
 import {
   Badge,
@@ -26,6 +26,33 @@ export function DriversPage({
 }) {
   const utils = trpc.useUtils();
   const createDriver = trpc.drivers.create.useMutation();
+  const { data: accidentsList = [] } = trpc.accidents.list.useQuery();
+
+  // Aggregate accident counts by driver ID
+  const accidentsByDriver = useMemo(() => {
+    const map = new Map<number, number>();
+    (accidentsList || []).forEach((acc) => {
+      if (acc.driverId) {
+        map.set(acc.driverId, (map.get(acc.driverId) || 0) + 1);
+      }
+    });
+    return map;
+  }, [accidentsList]);
+
+  // Identify driver with the most accidents
+  const topAccidentDriver = useMemo<{ driver: Driver; count: number } | null>(() => {
+    let max = 0;
+    let top: Driver | null = null;
+    for (const d of drivers) {
+      const count = accidentsByDriver.get(d.id) || 0;
+      if (count > max) {
+        max = count;
+        top = d;
+      }
+    }
+    return top && max > 0 ? { driver: top, count: max } : null;
+  }, [drivers, accidentsByDriver]);
+
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState("الكل");
   const [menu, setMenu] = useState<number | null>(null);
@@ -84,6 +111,8 @@ export function DriversPage({
         description="إدارة ملفات السائقين والرخص والتوزيع والحالة التشغيلية."
         action="إضافة سائق"
         onAction={() => onOpenForm()}
+        secondaryAction="استيراد السائقين من إكسل"
+        onSecondaryAction={() => setImportOpen(true)}
       />
 
       <div className="quick-metrics">
@@ -113,6 +142,16 @@ export function DriversPage({
             }
           </strong>
         </div>
+        <div>
+          <span>الأكثر تسجيلاً للحوادث</span>
+          {topAccidentDriver ? (
+            <strong style={{ color: "#d9534f", display: "inline-flex", alignItems: "center", gap: "5px" }}>
+              <AlertTriangle size={15} /> {topAccidentDriver.driver.name} ({topAccidentDriver.count} {topAccidentDriver.count === 1 ? "حادث" : "حوادث"})
+            </strong>
+          ) : (
+            <strong className="green-text">لا توجد حوادث مسجلة</strong>
+          )}
+        </div>
       </div>
 
       <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: ".5rem" }}>
@@ -129,6 +168,7 @@ export function DriversPage({
           "نوع الرخصة",
           "المركبة الحالية",
           "حالة السائق",
+          "سجل الحوادث",
           "تاريخ انتهاء الرخصة",
           "حالة الرخصة",
         ]}
@@ -136,9 +176,10 @@ export function DriversPage({
           exportCsv(
             filtered.map((driver) => ({
               ...driver,
+              accidentsCount: accidentsByDriver.get(driver.id) || 0,
               renewalStatus: resolveRenewalStatus(driver.renewal),
             })),
-            ["name", "phone", "idNo", "license", "vehicle", "status", "renewal", "renewalStatus"],
+            ["name", "phone", "idNo", "license", "vehicle", "status", "accidentsCount", "renewal", "renewalStatus"],
             "drivers",
             [
               "السائق",
@@ -147,6 +188,7 @@ export function DriversPage({
               "نوع الرخصة",
               "المركبة الحالية",
               "حالة السائق",
+              "سجل الحوادث",
               "تاريخ انتهاء الرخصة",
               "حالة الرخصة",
             ]
@@ -159,6 +201,8 @@ export function DriversPage({
         setActiveTab={setTab}
         addLabel="إضافة سائق"
         onAdd={() => onOpenForm()}
+        onImport={() => setImportOpen(true)}
+        importLabel="استيراد من إكسل"
       >
         {filtered.map((driver) => (
           <tr key={driver.id}>
@@ -177,6 +221,28 @@ export function DriversPage({
             <td>{driver.vehicle}</td>
             <td>
               <Badge>{driver.status}</Badge>
+            </td>
+            <td>
+              {(accidentsByDriver.get(driver.id) || 0) > 0 ? (
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "4px",
+                    padding: "2px 8px",
+                    borderRadius: "6px",
+                    backgroundColor: "#fee2e2",
+                    color: "#b91c1c",
+                    fontWeight: 600,
+                    fontSize: "11px",
+                  }}
+                >
+                  <AlertTriangle size={13} /> {accidentsByDriver.get(driver.id)}{" "}
+                  {accidentsByDriver.get(driver.id) === 1 ? "حادث" : "حوادث"}
+                </span>
+              ) : (
+                <span style={{ color: "var(--muted)", fontSize: "11px" }}>سجل سليم (0)</span>
+              )}
             </td>
             <td>{driver.renewal}</td>
             <td>
