@@ -34,6 +34,8 @@ function Router() {
       <Route path="/dashboard/invoices" component={FleetDashboard} />
       <Route path="/dashboard/invoices/:rest*" component={FleetDashboard} />
       <Route path="/dashboard/payables" component={FleetDashboard} />
+      <Route path="/dashboard/suppliers" component={FleetDashboard} />
+      <Route path="/suppliers" component={FleetDashboard} />
       <Route path="/dashboard/reports" component={FleetDashboard} />
       <Route path="/dashboard/settings/:rest*" component={FleetDashboard} />
       <Route path="/dashboard/settings" component={FleetDashboard} />

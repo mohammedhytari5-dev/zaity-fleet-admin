@@ -32,6 +32,7 @@ export function PayablesPage({
   const utils = trpc.useUtils();
   const [location] = useLocation();
   const { data: data = [] } = trpc.payables.list.useQuery(undefined, { staleTime: 15000 });
+  const { data: suppliersList = [] } = trpc.suppliers.list.useQuery(undefined, { staleTime: 30000 });
   const { data: maintenanceData = [] } = trpc.maintenance.list.useQuery(undefined, {
     staleTime: 15000,
     enabled: canAccess("maintenance"),
@@ -70,6 +71,7 @@ export function PayablesPage({
     id: Date.now(),
     ref: `AP-${formatCompanyDate().slice(0, 4)}-${Math.floor(1000 + Math.random() * 9000)}`,
     supplier: "",
+    supplierId: null,
     description: "",
     amount: 0,
     issueDate: formatCompanyDate(),
@@ -110,6 +112,8 @@ export function PayablesPage({
     utils.maintenance.list.invalidate();
     utils.maintenance.costForPeriod.invalidate();
     utils.reports.summary.invalidate();
+    utils.suppliers.statement.invalidate();
+    utils.suppliers.list.invalidate();
   };
 
   const openPayableReceipt = async (row: PayableRow) => {
@@ -139,6 +143,7 @@ export function PayablesPage({
     const payload = {
       ...raw,
       amount: Number(raw.amount),
+      supplierId: raw.supplierId ? Number(raw.supplierId) : null,
       vehicleId: raw.vehicleId ? Number(raw.vehicleId) : null,
       maintenanceRequestId: raw.maintenanceRequestId ? Number(raw.maintenanceRequestId) : null,
       vehicleCategory: raw.vehicleId ? raw.vehicleCategory : null,
@@ -382,11 +387,47 @@ export function PayablesPage({
                 value={bill.ref}
                 onChange={(value) => setBill((prev) => (prev ? { ...prev, ref: value } : prev))}
               />
-              <Field
-                label="اسم المورد *"
-                value={bill.supplier}
-                onChange={(value) => setBill((prev) => (prev ? { ...prev, supplier: value } : prev))}
-              />
+              <label className="field" style={{ gridColumn: "span 2" }}>
+                <span>المورد / الورشة *</span>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>
+                  <select
+                    value={bill.supplierId ? String(bill.supplierId) : ""}
+                    onChange={(e) => {
+                      const selId = Number(e.target.value);
+                      if (selId) {
+                        const found = suppliersList.find((s) => s.id === selId);
+                        setBill((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                supplierId: selId,
+                                supplier: found?.name || prev.supplier,
+                              }
+                            : prev
+                        );
+                      } else {
+                        setBill((prev) => (prev ? { ...prev, supplierId: null } : prev));
+                      }
+                    }}
+                  >
+                    <option value="">-- اختر من قائمة الموردين المعتمدين --</option>
+                    {suppliersList.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.code} · {s.name} ({s.category})
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="text"
+                    placeholder="أو أدخل اسم المورد كتابة..."
+                    value={bill.supplier || ""}
+                    onChange={(e) =>
+                      setBill((prev) => (prev ? { ...prev, supplier: e.target.value } : prev))
+                    }
+                    required
+                  />
+                </div>
+              </label>
               <Field
                 label="وصف الفاتورة *"
                 value={bill.description}

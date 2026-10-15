@@ -4,12 +4,13 @@ import { promisify } from "node:util";
 import { drizzle } from "drizzle-orm/mysql2";
 import { createPool } from "mysql2";
 import { getMysqlConnectionOptions } from "./db-connection";
-import { AuditLog, Claim, Client, Contract, ContractItem, Document, Driver, Employee, InsertEmployee, InsertClaim, InsertClient, InsertContract, InsertContractItem, InsertDocument, InsertDriver, InsertMaintenanceRequest, InsertUser, InsertVehicle, InsertVehicleExpense, VehicleExpense, InsertVehicleRevenue, VehicleRevenue, MaintenanceRequest, User, Vehicle, auditLogs, claims, clientRepresentatives, clients, contractItems, contracts, documents, drivers, employees, maintenanceEvents, maintenanceRequests, notifications, notificationReads, payments, vehicleExpenses, vehicleRevenues, settingCatalog, tasks, users, vehicles, InventoryItem, InsertInventoryItem, InventoryMovement, InsertInventoryMovement, inventoryItems, inventoryMovements, InventoryRequest, inventoryRequests, inventoryRequestItems, Accident, InsertAccident, accidents, AccidentEvent, accidentEvents, PurchaseRequest, InsertPurchaseRequest, PurchaseQuote, InsertPurchaseQuote, purchaseRequests, purchaseQuotes, Account, InsertAccount, FiscalPeriod, InsertFiscalPeriod, JournalEntry, InsertJournalEntry, JournalLine, InsertJournalLine, accounts, fiscalPeriods, journalEntries, journalLines, Payroll, InsertPayroll, Leave, InsertLeave, payroll, leaves, Attendance, InsertAttendance, BiometricDevice, InsertBiometricDevice, attendance, biometricDevices, VehicleInspection, InsertVehicleInspection, vehicleInspections, EmployeeRequest, InsertEmployeeRequest, employeeRequests, ClientPortalRequest, InsertClientPortalRequest, clientPortalRequests, Custody, InsertCustody, CustodyExpense, InsertCustodyExpense, PayrollInquiry, InsertPayrollInquiry, custodies, custodyExpenses, payrollInquiries } from "../drizzle/schema";
+import { AuditLog, Claim, Client, Contract, ContractItem, Document, Driver, Employee, InsertEmployee, InsertClaim, InsertClient, InsertContract, InsertContractItem, InsertDocument, InsertDriver, InsertMaintenanceRequest, InsertUser, InsertVehicle, InsertVehicleExpense, VehicleExpense, InsertVehicleRevenue, VehicleRevenue, MaintenanceRequest, User, Vehicle, auditLogs, claims, clientRepresentatives, clients, contractItems, contracts, documents, drivers, employees, maintenanceEvents, maintenanceRequests, notifications, notificationReads, payments, vehicleExpenses, vehicleRevenues, settingCatalog, tasks, users, vehicles, InventoryItem, InsertInventoryItem, InventoryMovement, InsertInventoryMovement, inventoryItems, inventoryMovements, InventoryRequest, inventoryRequests, inventoryRequestItems, Accident, InsertAccident, accidents, AccidentEvent, accidentEvents, PurchaseRequest, InsertPurchaseRequest, PurchaseQuote, InsertPurchaseQuote, purchaseRequests, purchaseQuotes, Account, InsertAccount, FiscalPeriod, InsertFiscalPeriod, JournalEntry, InsertJournalEntry, JournalLine, InsertJournalLine, accounts, fiscalPeriods, journalEntries, journalLines, Payroll, InsertPayroll, Leave, InsertLeave, payroll, leaves, Attendance, InsertAttendance, BiometricDevice, InsertBiometricDevice, attendance, biometricDevices, VehicleInspection, InsertVehicleInspection, vehicleInspections, EmployeeRequest, InsertEmployeeRequest, employeeRequests, ClientPortalRequest, InsertClientPortalRequest, clientPortalRequests, Custody, InsertCustody, CustodyExpense, InsertCustodyExpense, PayrollInquiry, InsertPayrollInquiry, custodies, custodyExpenses, payrollInquiries, Supplier, InsertSupplier, suppliers } from "../drizzle/schema";
 import { AttendanceCalculator, BiometricLogParser } from "./attendance-domain";
 import { canAdvanceMaintenance, canCloseMaintenance, canEditMaintenanceQuote, hasMaintenanceQuote, statusForMaintenanceStage, type MaintenanceStage } from "../shared/maintenance-domain";
 import { InsertProject, Project, projects } from "../drizzle/schema";
 import { InsertPayable, Payable, PayablePayment, InsertPayablePayment, payables, payablePayments } from "../drizzle/schema";
 import {
+  autoPostJournalEntry,
   createJournalEntryWithLines,
   getAccountLedgerReport,
   getBalanceSheetReport,
@@ -1183,7 +1184,7 @@ export async function archiveDriver(id: number): Promise<boolean> {
   });
 }
 
-export async function assignVehicleDriver(vehicleId: number, driverId: number | null): Promise<Vehicle | null> {
+export async function assignVehicleDriver(vehicleId: number, driverId: number | null, actor: LedgerActor = {}): Promise<Vehicle | null> {
   const db = await getDb();
   if (!db) return null;
   return db.transaction(async tx => {
@@ -1192,12 +1193,14 @@ export async function assignVehicleDriver(vehicleId: number, driverId: number | 
     if (vehicle.driverId && vehicle.driverId !== driverId) await tx.update(drivers).set({ vehicleId: null, vehicle: "—", status: "متاح" }).where(eq(drivers.id, vehicle.driverId));
     if (!driverId) {
       await tx.update(vehicles).set({ driverId: null, driver: "—" }).where(eq(vehicles.id, vehicleId));
+      await recordAuditInTransaction(tx, actor, "vehicles.assignDriver", "vehicle", vehicleId, `تم إلغاء إسناد السائق عن المركبة ${vehicle.plate}`);
     } else {
       const driver = (await tx.select().from(drivers).where(and(eq(drivers.id, driverId), isNull(drivers.archivedAt))).limit(1))[0];
       if (!driver) return null;
       if (driver.vehicleId && driver.vehicleId !== vehicleId) await tx.update(vehicles).set({ driverId: null, driver: "—" }).where(eq(vehicles.id, driver.vehicleId));
       await tx.update(vehicles).set({ driverId, driver: driver.name }).where(eq(vehicles.id, vehicleId));
       await tx.update(drivers).set({ vehicleId, vehicle: vehicle.plate, status: "مشغول" }).where(eq(drivers.id, driverId));
+      await recordAuditInTransaction(tx, actor, "vehicles.assignDriver", "vehicle", vehicleId, `تم إسناد المركبة ${vehicle.plate} إلى السائق ${driver.name}`);
     }
     return (await tx.select().from(vehicles).where(eq(vehicles.id, vehicleId)).limit(1))[0] ?? null;
   });
@@ -2082,7 +2085,21 @@ export async function registerPayablePayment(input: InsertPayablePayment, actor:
     await tx.update(payables).set({ paid, status: paid >= payable.amount ? "مدفوعة" : "مدفوعة جزئيًا" }).where(eq(payables.id, payable.id));
     const id = Number(result[0].insertId);
     const payment = (await tx.select().from(payablePayments).where(eq(payablePayments.id, id)).limit(1))[0] ?? null;
-    if (payment) await recordAuditInTransaction(tx, actor, "payables.registerPayment", "payables", payable.id, "تم تسجيل دفعة صادرة للمورد");
+    if (payment) {
+      await recordAuditInTransaction(tx, actor, "payables.registerPayment", "payables", payable.id, "تم تسجيل دفعة صادرة للمورد");
+      await autoPostJournalEntry(tx, {
+        type: "payable_payment",
+        id,
+        amount: input.amount,
+        date: input.paidAt || new Date().toISOString().slice(0, 10),
+        supplierName: payable.supplier,
+        reference: input.reference || payable.ref,
+        paymentMethod: input.method,
+        vehicleId: payable.vehicleId,
+        branchId: payable.branchId || 1,
+        actorId: actor.id,
+      });
+    }
     return payment;
   });
 }
@@ -2383,7 +2400,31 @@ export async function createPayment(input: typeof payments.$inferInsert, actor: 
     const paymentId = Number(result[0].insertId);
     await applyPaymentImpact(tx, normalized, 1);
     const payment = (await tx.select().from(payments).where(eq(payments.id, paymentId)).limit(1))[0] ?? null;
-    if (payment) await recordAuditInTransaction(tx, actor, "payments.create", "payments", paymentId, "تم تسجيل دفعة واردة");
+    if (payment) {
+      await recordAuditInTransaction(tx, actor, "payments.create", "payments", paymentId, "تم تسجيل دفعة واردة");
+      let clientName = "عميل نقدي";
+      let contractRef = "عام";
+      if (payment.clientId) {
+        const [c] = await tx.select({ name: clients.name }).from(clients).where(eq(clients.id, payment.clientId)).limit(1);
+        if (c?.name) clientName = c.name;
+      }
+      if (payment.contractId) {
+        const [ct] = await tx.select({ ref: contracts.ref, client: contracts.client }).from(contracts).where(eq(contracts.id, payment.contractId)).limit(1);
+        if (ct?.ref) contractRef = ct.ref;
+        if (ct?.client && clientName === "عميل نقدي") clientName = ct.client;
+      }
+      await autoPostJournalEntry(tx, {
+        type: "client_payment",
+        id: paymentId,
+        amount: Number(payment.amount),
+        date: payment.paidAt || new Date().toISOString().slice(0, 10),
+        contractRef,
+        clientName,
+        contractId: payment.contractId,
+        clientId: payment.clientId,
+        actorId: actor.id,
+      });
+    }
     return payment;
   });
 }
@@ -2495,7 +2536,7 @@ export async function listInventoryRequests(): Promise<Array<InventoryRequest & 
   for (const line of lines) grouped.set(line.requestId, [...(grouped.get(line.requestId) ?? []), line]);
   return requests.map(request => ({ ...request, items: grouped.get(request.id) ?? [] }));
 }
-export async function createInventoryRequest(input: { ref: string; purpose: string; items: Array<{ itemId: number; quantity: number }> }, actor: LedgerActor & { name: string }) {
+export async function createInventoryRequest(input: { ref: string; purpose: string; maintenanceRequestId?: number | null; items: Array<{ itemId: number; quantity: number }> }, actor: LedgerActor & { name: string }) {
   const db = await getDb();
   if (!db) return null;
   return db.transaction(async tx => {
@@ -2507,13 +2548,19 @@ export async function createInventoryRequest(input: { ref: string; purpose: stri
       selectedItems.push(item);
     }
     const byId = new Map(selectedItems.map(item => [item.id, item]));
-    const [inserted] = await tx.insert(inventoryRequests).values({ ref: input.ref, purpose: input.purpose, requestedByUserId: actor.id ?? null, requestedByName: actor.name });
+    const [inserted] = await tx.insert(inventoryRequests).values({
+      ref: input.ref,
+      purpose: input.purpose,
+      maintenanceRequestId: input.maintenanceRequestId ?? null,
+      requestedByUserId: actor.id ?? null,
+      requestedByName: actor.name,
+    });
     const id = Number(inserted.insertId);
     await tx.insert(inventoryRequestItems).values(input.items.map(line => {
       const item = byId.get(line.itemId)!;
       return { requestId: id, itemId: item.id, itemName: item.name, sku: item.sku, unit: item.unit, requestedQuantity: line.quantity };
     }));
-    await recordAuditInTransaction(tx, actor, "inventory.request.create", "inventory_request", id, `إنشاء طلب صرف ${input.ref} · ${input.items.length} أصناف`);
+    await recordAuditInTransaction(tx, actor, "inventory.request.create", "inventory_request", id, `إنشاء طلب صرف ${input.ref} · ${input.items.length} أصناف${input.maintenanceRequestId ? ` · مرتبط بأمر صيانة #${input.maintenanceRequestId}` : ""}`);
     const request = (await tx.select().from(inventoryRequests).where(eq(inventoryRequests.id, id)).limit(1))[0]!;
     const lines = await tx.select().from(inventoryRequestItems).where(eq(inventoryRequestItems.requestId, id));
     return { ...request, items: lines };
@@ -2560,7 +2607,51 @@ export async function issueInventoryRequest(id: number, actor: LedgerActor & { n
       item.onHand = resultingBalance;
     }
     await tx.update(inventoryRequests).set({ status: nextStatus, issuedAt: new Date() }).where(eq(inventoryRequests.id, id));
+    if (request.maintenanceRequestId) {
+      await tx.insert(maintenanceEvents).values({
+        maintenanceRequestId: request.maintenanceRequestId,
+        eventType: "صرف قطع غيار",
+        details: `تم صرف قطع الغيار من المستودع بموجب الطلب ${request.ref} (${lines.length} صنف)`,
+        actorUserId: actor.id ?? null,
+        actorName: actor.name || "—",
+      });
+    }
     await recordAuditInTransaction(tx, actor, "inventory.request.issue", "inventory_request", id, `صرف طلب ${request.ref} إلى ${request.requestedByName}`);
+
+    let totalCost = 0;
+    if (request.maintenanceRequestId) {
+      const [mr] = await tx
+        .select({ quotedPartsCost: maintenanceRequests.quotedPartsCost })
+        .from(maintenanceRequests)
+        .where(eq(maintenanceRequests.id, request.maintenanceRequestId))
+        .limit(1);
+      totalCost = Number(mr?.quotedPartsCost || 0);
+    }
+
+    if (totalCost > 0) {
+      let vehicleId: number | null = null;
+      let vehiclePlate: string | null = null;
+      if (request.maintenanceRequestId) {
+        const [mr] = await tx
+          .select({ vehicleId: maintenanceRequests.vehicleId, vehicle: maintenanceRequests.vehicle })
+          .from(maintenanceRequests)
+          .where(eq(maintenanceRequests.id, request.maintenanceRequestId))
+          .limit(1);
+        vehicleId = mr?.vehicleId ?? null;
+        vehiclePlate = mr?.vehicle ?? null;
+      }
+      await autoPostJournalEntry(tx, {
+        type: "inventory_issuance",
+        id,
+        totalCost,
+        date: new Date().toISOString().slice(0, 10),
+        ref: request.ref,
+        vehiclePlate,
+        vehicleId,
+        actorId: actor.id,
+      });
+    }
+
     const updated = (await tx.select().from(inventoryRequests).where(eq(inventoryRequests.id, id)).limit(1))[0]!;
     return { ...updated, items: await tx.select().from(inventoryRequestItems).where(eq(inventoryRequestItems.requestId, id)) };
   });
@@ -2865,6 +2956,7 @@ export async function issuePurchaseOrder(
       const [insertRes] = await tx.insert(payables).values({
         ref: payableRef,
         supplier: quote.supplierName,
+        supplierId: quote.supplierId || null,
         description: `أمر شراء ${req.ref} - ${req.purpose}`,
         amount: quote.totalAmount,
         paid: 0,
@@ -3206,6 +3298,47 @@ export async function recordCustodyExpense(input: InsertCustodyExpense, actor: L
       status: newRemaining <= 0 ? "مستنفذة" : custody.status,
     }).where(eq(custodies.id, input.custodyId));
 
+    // Link expense to vehicle expenses if associated with a vehicle
+    if (input.vehicleId) {
+      await tx.insert(vehicleExpenses).values({
+        vehicleId: input.vehicleId,
+        category: "أخرى",
+        description: input.description.slice(0, 300),
+        amount,
+        vendor: custody.custodianName,
+        spentAt: input.expenseDate || new Date().toISOString().slice(0, 10),
+        notes: `مصروف عهدة: ${input.description} (المستلم: ${custody.custodianName})`,
+        receiptUrl: input.invoiceDocUrl || null,
+        receiptName: input.invoiceDocName || null,
+      });
+    }
+
+    // Link to maintenance events if associated with a maintenance ticket
+    if (input.maintenanceRequestId) {
+      await tx.insert(maintenanceEvents).values({
+        maintenanceRequestId: input.maintenanceRequestId,
+        eventType: "صرف عهدة تشغيلية",
+        details: `تم صرف ${amount} ر.س من عهدة ${custody.custodianName} - ${input.description}`,
+        actorUserId: actor.id ?? null,
+        actorName: actor.name || "—",
+      });
+    }
+
+    // Auto-post double-entry journal entry to general ledger
+    await autoPostJournalEntry(tx, {
+      type: "custody_expense",
+      id: expenseId,
+      amount,
+      date: input.expenseDate,
+      description: input.description,
+      custodianName: custody.custodianName,
+      category: "عهدة تشغيلية",
+      vehicleId: input.vehicleId,
+      driverId: custody.custodianType === "driver" ? custody.custodianId : null,
+      branchId: custody.branchId || 1,
+      actorId: actor.id,
+    });
+
     const created = (await tx.select().from(custodyExpenses).where(eq(custodyExpenses.id, expenseId)).limit(1))[0];
     return created ?? null;
   });
@@ -3283,6 +3416,144 @@ export async function completeDriverMaintenance(id: number, invoiceUrl: string, 
   }).where(eq(maintenanceRequests.id, id));
   const rows = await db.select().from(maintenanceRequests).where(eq(maintenanceRequests.id, id)).limit(1);
   return rows[0] ?? null;
+}
+
+export async function listSuppliers(): Promise<Supplier[] | null> {
+  const db = await getDb();
+  if (!db) return null;
+  return db
+    .select()
+    .from(suppliers)
+    .where(isNull(suppliers.archivedAt))
+    .orderBy(desc(suppliers.createdAt));
+}
+
+export async function getSupplier(id: number): Promise<Supplier | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db
+    .select()
+    .from(suppliers)
+    .where(and(eq(suppliers.id, id), isNull(suppliers.archivedAt)))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+export async function createSupplier(input: Omit<InsertSupplier, "code"> & { code?: string }, actor: LedgerActor = {}): Promise<Supplier | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const code = input.code || `SUP-${Math.floor(1000 + Math.random() * 9000)}`;
+  const res = await db.insert(suppliers).values({
+    ...input,
+    code,
+  });
+  const id = Number((res as any)[0]?.insertId ?? 0);
+  if (!id) return null;
+  await recordAuditInTransaction(db as any, actor, "suppliers.create", "suppliers", id, `إضافة مورد جديد: ${input.name} (${code})`);
+  return getSupplier(id);
+}
+
+export async function updateSupplier(id: number, input: Partial<InsertSupplier>, actor: LedgerActor = {}): Promise<Supplier | null> {
+  const db = await getDb();
+  if (!db) return null;
+  await db.update(suppliers).set(input).where(eq(suppliers.id, id));
+  await recordAuditInTransaction(db as any, actor, "suppliers.update", "suppliers", id, `تعديل بيانات المورد: #${id}`);
+  return getSupplier(id);
+}
+
+export async function archiveSupplier(id: number, actor: LedgerActor = {}): Promise<Supplier | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const current = await getSupplier(id);
+  if (!current) return null;
+  await db.update(suppliers).set({ archivedAt: new Date() }).where(eq(suppliers.id, id));
+  await recordAuditInTransaction(db as any, actor, "suppliers.archive", "suppliers", id, `أرشفة المورد: ${current.name}`);
+  return current;
+}
+
+export async function getSupplierStatement(id: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const supplier = (await db.select().from(suppliers).where(eq(suppliers.id, id)).limit(1))[0];
+  if (!supplier) return null;
+
+  const linkedPayables = await db
+    .select()
+    .from(payables)
+    .where(
+      and(
+        or(eq(payables.supplierId, id), eq(payables.supplier, supplier.name)),
+        isNull(payables.archivedAt)
+      )
+    )
+    .orderBy(desc(payables.createdAt));
+
+  const payableIds = linkedPayables.map(p => p.id);
+  const payments = payableIds.length > 0
+    ? await db
+        .select()
+        .from(payablePayments)
+        .where(inArray(payablePayments.payableId, payableIds))
+        .orderBy(desc(payablePayments.paidAt))
+    : [];
+
+  const quotes = await db
+    .select()
+    .from(purchaseQuotes)
+    .where(
+      or(eq(purchaseQuotes.supplierId, id), eq(purchaseQuotes.supplierName, supplier.name))
+    )
+    .orderBy(desc(purchaseQuotes.createdAt));
+
+  const totalInvoiced = linkedPayables.reduce((acc, p) => acc + Number(p.amount || 0), 0);
+  const totalPaid = linkedPayables.reduce((acc, p) => acc + Number(p.paid || 0), 0);
+  const outstandingBalance = totalInvoiced - totalPaid;
+
+  const timeline: Array<{
+    date: string;
+    type: "فاتورة" | "دفعة مسددة";
+    reference: string;
+    description: string;
+    amount: number;
+    paymentMethod?: string;
+  }> = [];
+
+  for (const p of linkedPayables) {
+    timeline.push({
+      date: p.issueDate || (p.createdAt ? p.createdAt.toISOString().slice(0, 10) : "—"),
+      type: "فاتورة",
+      reference: p.ref,
+      description: p.description,
+      amount: Number(p.amount),
+    });
+  }
+
+  for (const pay of payments) {
+    const parentPayable = linkedPayables.find(p => p.id === pay.payableId);
+    timeline.push({
+      date: pay.paidAt || (pay.createdAt ? pay.createdAt.toISOString().slice(0, 10) : "—"),
+      type: "دفعة مسددة",
+      reference: pay.reference || `PAY-${pay.id}`,
+      description: `سداد فاتورة ${parentPayable?.ref || "مورد"}: ${pay.notes || "—"}`,
+      amount: Number(pay.amount),
+      paymentMethod: pay.method,
+    });
+  }
+
+  timeline.sort((a, b) => b.date.localeCompare(a.date));
+
+  return {
+    supplier,
+    totalInvoiced,
+    totalPaid,
+    outstandingBalance,
+    payablesCount: linkedPayables.length,
+    quotesCount: quotes.length,
+    payables: linkedPayables,
+    payments,
+    quotes,
+    timeline,
+  };
 }
 
 

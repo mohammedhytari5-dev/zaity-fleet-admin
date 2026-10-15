@@ -118,6 +118,200 @@ export function MaintenanceInvoicesSection({
   );
 }
 
+export function MaintenanceInventorySection({
+  request,
+  canAccessInventory = true,
+}: {
+  request: Maintenance;
+  canAccessInventory?: boolean;
+}) {
+  const utils = trpc.useUtils();
+  const requestsQuery = trpc.inventory.requests.useQuery(undefined, {
+    staleTime: 15000,
+    enabled: canAccessInventory,
+  });
+  const itemsQuery = trpc.inventory.list.useQuery(undefined, {
+    staleTime: 30000,
+    enabled: canAccessInventory,
+  });
+  const createRequestMutation = trpc.inventory.request.useMutation();
+
+  const [isOpenForm, setIsOpenForm] = useState(false);
+  const [selectedItemId, setSelectedItemId] = useState<number | null>(null);
+  const [quantity, setQuantity] = useState(1);
+  const [notes, setNotes] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const allRequests = (requestsQuery.data ?? []) as any[];
+  const linkedRequests = allRequests.filter((r) => r.maintenanceRequestId === request.id);
+  const items = (itemsQuery.data ?? []) as any[];
+
+  const handleCreateRequest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedItemId) {
+      toast.error("يرجى اختيار صنف أو قطعة الغيار من المستودع");
+      return;
+    }
+    if (quantity <= 0) {
+      toast.error("يرجى إدخال كمية صحيحة أكبر من صفر");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await createRequestMutation.mutateAsync({
+        ref: `REQ-MNT-${request.ref}-${Date.now().toString().slice(-4)}`,
+        purpose: notes || `طلب قطع غيار لصيانة مركبة ${request.vehicle} (طلب ${request.ref})`,
+        maintenanceRequestId: request.id,
+        items: [
+          {
+            itemId: selectedItemId,
+            quantity,
+          },
+        ],
+      });
+      toast.success("تم إرسال طلب صرف قطع الغيار إلى المستودع بنجاح!");
+      setIsOpenForm(false);
+      setSelectedItemId(null);
+      setQuantity(1);
+      setNotes("");
+      void utils.inventory.requests.invalidate();
+      void utils.maintenance.history.invalidate({ id: request.id });
+    } catch (err: any) {
+      toast.error(err.message || "تعذر إرسال طلب الصرف إلى المستودع");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <section className="surface" style={{ padding: "1rem", marginTop: "1rem" }}>
+      <div className="section-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div>
+          <h3>قطع الغيار وطلبات المستودع</h3>
+          <span>
+            {linkedRequests.length > 0
+              ? `${linkedRequests.length} طلب صرف مسجل لهذا البلاغ`
+              : "صرف وتخصيص قطع الغيار مباشرة من المستودع المركزي"}
+          </span>
+        </div>
+        <button
+          className="btn outline"
+          type="button"
+          onClick={() => setIsOpenForm(!isOpenForm)}
+          style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}
+        >
+          <Wrench size={15} />
+          {isOpenForm ? "إلغاء الطلب" : "+ طلب قطع غيار من المستودع"}
+        </button>
+      </div>
+
+      {isOpenForm && (
+        <form
+          onSubmit={handleCreateRequest}
+          style={{
+            background: "#f8fafc",
+            border: "1px solid #e2e8f0",
+            borderRadius: "8px",
+            padding: "1rem",
+            marginTop: "1rem",
+            display: "flex",
+            flexDirection: "column",
+            gap: "0.75rem",
+          }}
+        >
+          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "0.75rem" }}>
+            <label className="field">
+              <span>اختر قطعة الغيار من رصيد المستودع *</span>
+              <select
+                className="input"
+                value={selectedItemId ? String(selectedItemId) : ""}
+                onChange={(e) => setSelectedItemId(Number(e.target.value) || null)}
+                required
+              >
+                <option value="">-- اختر الصنف --</option>
+                {items.map((item) => (
+                  <option key={item.id} value={item.id} disabled={item.quantity <= 0}>
+                    {item.name} · كود {item.sku} (الرصيد: {item.quantity} {item.unit}) {item.quantity <= 0 ? " [نفذ]" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="field">
+              <span>الكمية المطلوبة *</span>
+              <input
+                type="number"
+                className="input"
+                min={1}
+                value={quantity}
+                onChange={(e) => setQuantity(Number(e.target.value) || 1)}
+                required
+              />
+            </label>
+          </div>
+
+          <label className="field">
+            <span>ملاحظات الصرف ومكان التركيب</span>
+            <input
+              type="text"
+              className="input"
+              placeholder="مثال: تركيب فحمات فرامل أمامية، استبدال فلتر زيت..."
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+            />
+          </label>
+
+          <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
+            <button
+              type="button"
+              className="btn ghost"
+              onClick={() => setIsOpenForm(false)}
+              disabled={submitting}
+            >
+              إلغاء
+            </button>
+            <button
+              type="submit"
+              className="btn primary"
+              disabled={submitting}
+            >
+              {submitting ? "جارٍ الإرسال..." : "إرسال طلب الصرف للمستودع"}
+            </button>
+          </div>
+        </form>
+      )}
+
+      {linkedRequests.length > 0 ? (
+        <div className="compact-list" style={{ marginTop: "1rem" }}>
+          {linkedRequests.map((req) => (
+            <div className="compact-row" key={req.id}>
+              <div className="compact-main">
+                <strong>{req.ref}</strong>
+                <small>
+                  {req.items?.map((it: any) => `${it.itemName} (${it.requestedQuantity} ${it.unit})`).join("، ")}
+                </small>
+                {req.reason && <small>{req.reason}</small>}
+              </div>
+              <Badge>{req.status}</Badge>
+              <div className="compact-main" style={{ textAlign: "left" }}>
+                <small>{new Date(req.createdAt).toLocaleDateString("en-US")}</small>
+                <small style={{ color: req.status === "صرف جزئي أو كلي" || req.status === "مكتمل" ? "#15803d" : "#64748b" }}>
+                  {req.status === "صرف جزئي أو كلي" || req.status === "مكتمل" ? "✓ تم صرف القطع للمركبة" : "بانتظار موافقة وصرف المستودع"}
+                </small>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="empty-state" style={{ padding: "1rem", marginTop: "0.5rem" }}>
+          لم يتم طلب أي قطع غيار من المستودع لهذا البلاغ بعد.
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function MaintenanceCostSummary({
   request,
   invoices,
@@ -183,6 +377,7 @@ export function MaintenanceDetailModal({
   canViewFinance,
   canViewPayables,
   canViewDocuments,
+  canAccessInventory = true,
   onOpenPayables,
   onClose,
   onEdit,
@@ -192,6 +387,7 @@ export function MaintenanceDetailModal({
   canViewFinance: boolean;
   canViewPayables: boolean;
   canViewDocuments: boolean;
+  canAccessInventory?: boolean;
   onOpenPayables: () => void;
   onClose: () => void;
   onEdit: () => void;
@@ -265,6 +461,10 @@ export function MaintenanceDetailModal({
         invoices={linkedInvoices}
         canViewPayables={canViewPayables}
         onOpenPayables={onOpenPayables}
+      />
+      <MaintenanceInventorySection
+        request={request}
+        canAccessInventory={canAccessInventory}
       />
       <section className="surface" style={{ padding: "1rem", marginTop: "1rem" }}>
         <div className="section-head">

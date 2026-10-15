@@ -393,6 +393,13 @@
       "when": 1791770000000,
       "tag": "0055_add_custodies_and_inquiries",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "5",
+      "when": 1791780000000,
+      "tag": "0056_add_suppliers",
+      "breakpoints": true
     }
   ]
 }

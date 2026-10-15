@@ -632,6 +632,9 @@ export const maintenanceRequests = mysqlTable(
     workDone: text("workDone"),
     parts: text("parts"),
     technician: varchar("technician", { length: 160 }).notNull().default("—"),
+    supplierId: int("supplierId").references(() => suppliers.id, {
+      onDelete: "set null",
+    }),
     workshop: varchar("workshop", { length: 200 }).notNull().default("—"),
     manager: varchar("manager", { length: 160 }).notNull().default("—"),
     start: date("start", { mode: "string" }),
@@ -1062,6 +1065,42 @@ export const vehicleRevenues = mysqlTable(
   ]
 );
 
+export const suppliers = mysqlTable(
+  "suppliers",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    branchId: int("branchId")
+      .notNull()
+      .default(1)
+      .references(() => branches.id, { onDelete: "restrict" }),
+    code: varchar("code", { length: 40 }).notNull().unique(),
+    name: varchar("name", { length: 200 }).notNull(),
+    category: varchar("category", { length: 64 }).notNull().default("قطع غيار"),
+    contactPerson: varchar("contactPerson", { length: 160 }),
+    phone: varchar("phone", { length: 64 }),
+    email: varchar("email", { length: 120 }),
+    vatNumber: varchar("vatNumber", { length: 64 }),
+    crNumber: varchar("crNumber", { length: 64 }),
+    address: varchar("address", { length: 255 }),
+    paymentTerms: varchar("paymentTerms", { length: 64 }).notNull().default("آجل 30 يوم"),
+    bankName: varchar("bankName", { length: 120 }),
+    iban: varchar("iban", { length: 64 }),
+    rating: int("rating").notNull().default(5),
+    status: mysqlEnum("status", ["نشط", "موقوف"]).notNull().default("نشط"),
+    notes: text("notes"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+    archivedAt: timestamp("archivedAt"),
+  },
+  table => [
+    index("suppliers_branch_idx").on(table.branchId, table.createdAt),
+    index("suppliers_status_idx").on(table.status, table.createdAt),
+  ]
+);
+
+export type Supplier = typeof suppliers.$inferSelect;
+export type InsertSupplier = typeof suppliers.$inferInsert;
+
 export const payables = mysqlTable(
   "payables",
   {
@@ -1074,6 +1113,9 @@ export const payables = mysqlTable(
       .default(1)
       .references(() => branches.id, { onDelete: "restrict" }),
     ref: varchar("ref", { length: 40 }).notNull().unique(),
+    supplierId: int("supplierId").references(() => suppliers.id, {
+      onDelete: "set null",
+    }),
     supplier: varchar("supplier", { length: 200 }).notNull(),
     description: varchar("description", { length: 300 }).notNull(),
     amount: decimal("amount", { precision: 15, scale: 2, mode: "number" })
@@ -1628,6 +1670,9 @@ export const purchaseQuotes = mysqlTable(
       .references((): AnyMySqlColumn => purchaseRequests.id, {
         onDelete: "cascade",
       }),
+    supplierId: int("supplierId").references(() => suppliers.id, {
+      onDelete: "set null",
+    }),
     supplierName: varchar("supplierName", { length: 200 }).notNull(),
     supplierVat: varchar("supplierVat", { length: 64 }),
     supplierPhone: varchar("supplierPhone", { length: 64 }),

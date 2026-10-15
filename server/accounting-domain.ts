@@ -645,3 +645,237 @@ export async function getBalanceSheetReport(
     isBalanced,
   };
 }
+
+export type AutoJournalPayload =
+  | {
+      type: "payable_payment";
+      id: number;
+      amount: number;
+      date: string;
+      supplierName: string;
+      reference: string;
+      paymentMethod?: string;
+      vehicleId?: number | null;
+      branchId?: number;
+      actorId?: number | null;
+    }
+  | {
+      type: "client_payment";
+      id: number;
+      amount: number;
+      date: string;
+      contractRef: string;
+      clientName: string;
+      contractId?: number | null;
+      clientId?: number | null;
+      branchId?: number;
+      actorId?: number | null;
+    }
+  | {
+      type: "inventory_issuance";
+      id: number;
+      totalCost: number;
+      date: string;
+      ref: string;
+      vehiclePlate?: string | null;
+      vehicleId?: number | null;
+      branchId?: number;
+      actorId?: number | null;
+    }
+  | {
+      type: "custody_expense";
+      id: number;
+      amount: number;
+      date: string;
+      description: string;
+      custodianName: string;
+      category?: string;
+      vehicleId?: number | null;
+      driverId?: number | null;
+      branchId?: number;
+      actorId?: number | null;
+    };
+
+/**
+ * Automatically creates balanced double-entry journal entries for operational transactions.
+ * Connects Operations & Procurement & Maintenance directly to the General Ledger.
+ */
+export async function autoPostJournalEntry(
+  db: any,
+  payload: AutoJournalPayload
+): Promise<{ entry: JournalEntry; lines: JournalLine[] } | null> {
+  try {
+    if ("amount" in payload && payload.amount <= 0) return null;
+    if ("totalCost" in payload && payload.totalCost <= 0) return null;
+
+    // Check if chart of accounts has entries; if empty, seed standard accounts
+    const existingCount = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(accounts)
+      .limit(1);
+
+    if (Number(existingCount[0]?.count || 0) === 0) {
+      await seedStandardAccountsIfEmpty(db);
+    }
+
+    const findAccount = async (code: string) => {
+      const [acc] = await db
+        .select()
+        .from(accounts)
+        .where(and(eq(accounts.code, code), isNull(accounts.archivedAt)))
+        .limit(1);
+      return acc;
+    };
+
+    let lines: JournalLineInput[] = [];
+    let description = "";
+    let reference = "";
+    const sourceType = payload.type;
+    const sourceId = payload.id;
+    const entryDate = payload.date || new Date().toISOString().slice(0, 10);
+    const branchId = payload.branchId || 1;
+
+    if (payload.type === "payable_payment") {
+      description = `سداد مستحقات مورد: ${payload.supplierName} - فاتورة ${payload.reference}`;
+      reference = payload.reference;
+
+      const apAccount = await findAccount("2101"); // الموردون والدائنون التجاريون
+      const bankAccount = payload.paymentMethod === "نقدي" ? await findAccount("1101") : await findAccount("1102"); // بنك أو صندوق
+
+      if (!apAccount || !bankAccount) return null;
+
+      lines = [
+        {
+          accountId: apAccount.id,
+          debit: payload.amount,
+          credit: 0,
+          description: `سداد مستحق للمورد ${payload.supplierName}`,
+          vehicleId: payload.vehicleId ?? null,
+          branchId,
+        },
+        {
+          accountId: bankAccount.id,
+          debit: 0,
+          credit: payload.amount,
+          description: `صرف بنكي للمورد ${payload.supplierName}`,
+          vehicleId: payload.vehicleId ?? null,
+          branchId,
+        },
+      ];
+    } else if (payload.type === "client_payment") {
+      description = `تحصيل دفعة من العميل: ${payload.clientName} - عقد ${payload.contractRef}`;
+      reference = `RCV-${payload.contractRef}`;
+
+      const bankAccount = await findAccount("1102"); // الحسابات البنكية الجارية
+      const arAccount = await findAccount("1103"); // العملاء والمدينون التجاريون
+
+      if (!bankAccount || !arAccount) return null;
+
+      lines = [
+        {
+          accountId: bankAccount.id,
+          debit: payload.amount,
+          credit: 0,
+          description: `إيداع تحصيل من العميل ${payload.clientName}`,
+          contractId: payload.contractId ?? null,
+          clientId: payload.clientId ?? null,
+          branchId,
+        },
+        {
+          accountId: arAccount.id,
+          debit: 0,
+          credit: payload.amount,
+          description: `تسوية حساب العميل ${payload.clientName} - عقد ${payload.contractRef}`,
+          contractId: payload.contractId ?? null,
+          clientId: payload.clientId ?? null,
+          branchId,
+        },
+      ];
+    } else if (payload.type === "inventory_issuance") {
+      description = `صرف قطع غيار من المستودع طلب ${payload.ref}${payload.vehiclePlate ? ` لمركبة ${payload.vehiclePlate}` : ""}`;
+      reference = payload.ref;
+
+      const expenseAccount = await findAccount("5104"); // قطع غيار ومستهلكات الورشة
+      const inventoryAccount = await findAccount("1104"); // مخزون قطع الغيار والزيوت
+
+      if (!expenseAccount || !inventoryAccount) return null;
+
+      lines = [
+        {
+          accountId: expenseAccount.id,
+          debit: payload.totalCost,
+          credit: 0,
+          description: `مصروف قطع غيار - طلب ${payload.ref}`,
+          vehicleId: payload.vehicleId ?? null,
+          branchId,
+        },
+        {
+          accountId: inventoryAccount.id,
+          debit: 0,
+          credit: payload.totalCost,
+          description: `صرف من رصيد المستودع - طلب ${payload.ref}`,
+          vehicleId: payload.vehicleId ?? null,
+          branchId,
+        },
+      ];
+    } else if (payload.type === "custody_expense") {
+      description = `صرف عهدة تشغيلية: ${payload.description} (المستلم: ${payload.custodianName})`;
+      reference = `CUST-EXP-${payload.id}`;
+
+      let expenseCode = "5102"; // محروقات ووقود
+      if (/صيانة|ورشة|إصلاح|قطع/i.test(payload.category || payload.description)) {
+        expenseCode = "5101"; // صيانة وإصلاح
+      } else if (/غسيل|نظافة/i.test(payload.category || payload.description)) {
+        expenseCode = "5105"; // غسيل ونظافة
+      } else if (/زيت|فلتر/i.test(payload.category || payload.description)) {
+        expenseCode = "5104"; // قطع ومستهلكات
+      } else if (/رسوم|فحص|بلدية|مخالفة/i.test(payload.category || payload.description)) {
+        expenseCode = "5106"; // رسوم وفحص
+      }
+
+      const expAccount = (await findAccount(expenseCode)) || (await findAccount("5101"));
+      const custodyAccount = await findAccount("1101"); // الصندوق والعهد النقدية
+
+      if (!expAccount || !custodyAccount) return null;
+
+      lines = [
+        {
+          accountId: expAccount.id,
+          debit: payload.amount,
+          credit: 0,
+          description: payload.description,
+          vehicleId: payload.vehicleId ?? null,
+          driverId: payload.driverId ?? null,
+          branchId,
+        },
+        {
+          accountId: custodyAccount.id,
+          debit: 0,
+          credit: payload.amount,
+          description: `صرف من العهدة النقدية - ${payload.custodianName}`,
+          vehicleId: payload.vehicleId ?? null,
+          driverId: payload.driverId ?? null,
+          branchId,
+        },
+      ];
+    }
+
+    if (lines.length === 0) return null;
+
+    return await createJournalEntryWithLines(db, {
+      entryDate,
+      description,
+      reference,
+      sourceType,
+      sourceId,
+      branchId,
+      createdBy: payload.actorId ?? null,
+      status: "posted",
+      lines,
+    });
+  } catch (err) {
+    // Fail-safe: log warning without interrupting operational workflow
+    console.warn(`[AutoAccounting] Failed to auto-post entry for ${payload.type} #${payload.id}:`, err);
+    return null;
+  }
+}

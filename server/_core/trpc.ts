@@ -75,7 +75,7 @@ export const protectedProcedure = t.procedure
   .use(requireUser)
   .use(auditSuccessfulMutation);
 
-export const permissionProcedure = (permission: string) =>
+export const permissionProcedure = (permission: string | string[]) =>
   t.procedure
     .use(
       t.middleware(async opts => {
@@ -95,7 +95,9 @@ export const permissionProcedure = (permission: string) =>
           permissions = [];
         }
 
-        if (ctx.user.role !== "admin" && !permissions.includes(permission)) {
+        const required = Array.isArray(permission) ? permission : [permission];
+        const hasPerm = ctx.user.role === "admin" || required.some(p => permissions.includes(p));
+        if (!hasPerm) {
           throw new TRPCError({
             code: "FORBIDDEN",
             message: NOT_ADMIN_ERR_MSG,

@@ -162,3 +162,36 @@ describe("Accounting Domain - Standard Chart of Accounts Integrity", () => {
     expect(NORMAL_BALANCE_FOR_TYPE.revenue).toBe("credit");
   });
 });
+
+describe("Accounting Domain - Automated Journal Posting Validation", () => {
+  it("validates that operational entries produce balanced double-entry lines", () => {
+    // 1. Payable payment: Dr Accounts Payable, Cr Bank
+    const apLines: JournalLineInput[] = [
+      { accountId: 101, debit: 4500, credit: 0, description: "سداد مستحق للمورد" },
+      { accountId: 102, debit: 0, credit: 4500, description: "صرف بنكي" },
+    ];
+    expect(validateJournalLines(apLines).valid).toBe(true);
+
+    // 2. Client collection: Dr Bank, Cr Accounts Receivable
+    const arLines: JournalLineInput[] = [
+      { accountId: 102, debit: 12000, credit: 0, description: "إيداع تحصيل من عميل" },
+      { accountId: 103, debit: 0, credit: 12000, description: "تسوية حساب عميل" },
+    ];
+    expect(validateJournalLines(arLines).valid).toBe(true);
+
+    // 3. Custody expense: Dr Fleet Fuel / Maintenance, Cr Cash Custody
+    const custodyLines: JournalLineInput[] = [
+      { accountId: 104, debit: 350.75, credit: 0, description: "محروقات ووقود" },
+      { accountId: 105, debit: 0, credit: 350.75, description: "صرف من العهدة النقدية" },
+    ];
+    expect(validateJournalLines(custodyLines).valid).toBe(true);
+
+    // 4. Inventory issuance: Dr Maintenance Parts Expense, Cr Inventory Asset
+    const invLines: JournalLineInput[] = [
+      { accountId: 106, debit: 1850, credit: 0, description: "مصروف قطع غيار للمركبة" },
+      { accountId: 107, debit: 0, credit: 1850, description: "صرف من رصيد المستودع" },
+    ];
+    expect(validateJournalLines(invLines).valid).toBe(true);
+  });
+});
+

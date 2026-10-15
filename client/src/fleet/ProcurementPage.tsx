@@ -476,6 +476,7 @@ function QuoteComparisonModal({
 }) {
   const utils = trpc.useUtils();
   const quotesQuery = trpc.procurement.listQuotes.useQuery({ requestId: request.id });
+  const suppliersQuery = trpc.suppliers.list.useQuery(undefined, { staleTime: 30000 });
   const createQuoteMutation = trpc.procurement.createQuote.useMutation();
   const selectQuoteMutation = trpc.procurement.selectQuote.useMutation();
   const deleteQuoteMutation = trpc.procurement.deleteQuote.useMutation();
@@ -505,6 +506,7 @@ function QuoteComparisonModal({
   };
 
   const [quoteForm, setQuoteForm] = useState({
+    supplierId: null as number | null,
     supplierName: "",
     supplierPhone: "",
     supplierVat: "",
@@ -540,6 +542,7 @@ function QuoteComparisonModal({
     try {
       await createQuoteMutation.mutateAsync({
         requestId: request.id,
+        supplierId: quoteForm.supplierId || undefined,
         supplierName: quoteForm.supplierName,
         supplierPhone: quoteForm.supplierPhone || "—",
         supplierVat: quoteForm.supplierVat || "—",
@@ -558,6 +561,7 @@ function QuoteComparisonModal({
       toast.success("تمت إضافة عرض السعر للمحضر");
       setAddQuoteOpen(false);
       setQuoteForm({
+        supplierId: null,
         supplierName: "",
         supplierPhone: "",
         supplierVat: "",
@@ -713,15 +717,45 @@ function QuoteComparisonModal({
               <h4 style={{ marginBottom: ".75rem" }}>تسجيل عرض سعر من مورد</h4>
               <form onSubmit={handleAddQuote}>
                 <div className="form-grid">
-                  <label className="field">
-                    <span>اسم المورد / الشركة *</span>
-                    <input
-                      type="text"
-                      placeholder="مثال: شركة الرضا لقطع الغيار"
-                      value={quoteForm.supplierName}
-                      onChange={e => setQuoteForm({ ...quoteForm, supplierName: e.target.value })}
-                      required
-                    />
+                  <label className="field" style={{ gridColumn: "span 2" }}>
+                    <span>المورد / الورشة *</span>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>
+                      <select
+                        value={quoteForm.supplierId ? String(quoteForm.supplierId) : ""}
+                        onChange={(e) => {
+                          const selId = Number(e.target.value);
+                          if (selId) {
+                            const found = ((suppliersQuery.data ?? []) as any[]).find((s) => s.id === selId);
+                            if (found) {
+                              setQuoteForm((prev) => ({
+                                ...prev,
+                                supplierId: selId,
+                                supplierName: found.name,
+                                supplierPhone: found.phone || prev.supplierPhone,
+                                supplierVat: found.vatNumber || prev.supplierVat,
+                                supplierRating: found.rating || prev.supplierRating,
+                              }));
+                            }
+                          } else {
+                            setQuoteForm((prev) => ({ ...prev, supplierId: null }));
+                          }
+                        }}
+                      >
+                        <option value="">-- اختر من قائمة الموردين المعتمدين --</option>
+                        {((suppliersQuery.data ?? []) as any[]).map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.code} · {s.name} ({s.category})
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        type="text"
+                        placeholder="أو أدخل اسم المورد كتابة..."
+                        value={quoteForm.supplierName}
+                        onChange={(e) => setQuoteForm({ ...quoteForm, supplierName: e.target.value })}
+                        required
+                      />
+                    </div>
                   </label>
                   <label className="field">
                     <span>هاتف التواصل</span>

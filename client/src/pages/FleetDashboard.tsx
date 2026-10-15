@@ -31,6 +31,7 @@ import {
   Wallet,
   Activity,
   Settings2,
+  Building2,
 } from "lucide-react";
 import { formatCompanyDate } from "@shared/date-utils";
 import { filterQuickSearch, searchableRecordText } from "@/lib/quick-search";
@@ -87,6 +88,7 @@ import { ReportsPage } from "@/fleet/ReportsPage";
 import { SettingsPage } from "@/fleet/SettingsPage";
 import { SelfServicePortalPage } from "@/fleet/SelfServicePortalPage";
 import { CustodyPage } from "@/fleet/CustodyPage";
+import { SuppliersPage } from "@/fleet/SuppliersPage";
 
 export { AccidentsPage, InventoryPage };
 
@@ -97,6 +99,7 @@ function moduleForLocation(location: string): ModuleKey {
   if (path.startsWith("/dashboard/accounting")) return "accounting";
   if (path.startsWith("/dashboard/invoices")) return "invoices";
   if (path.startsWith("/dashboard/custody")) return "custody";
+  if (path.startsWith("/dashboard/suppliers")) return "suppliers";
   if (path.startsWith("/dashboard/self-service")) return "self_service";
   const segment = path.slice("/dashboard/".length).split("/")[0];
   return (
@@ -115,6 +118,8 @@ function moduleForLocation(location: string): ModuleKey {
       "clients",
       "finance",
       "payables",
+      "suppliers",
+      "custody",
       "reports",
       "settings",
       "self_service",
@@ -144,6 +149,11 @@ const navGroups: {
         key: "procurement",
         label: "المشتريات وعروض الأسعار",
         icon: ShoppingCart,
+      },
+      {
+        key: "suppliers",
+        label: "الموردون ومراكز الصيانة",
+        icon: Building2,
       },
       { key: "documents", label: "المستندات", icon: FileCheck2 },
       { key: "employees", label: "الموارد البشرية (HR)", icon: UsersRound },
@@ -206,6 +216,7 @@ export default function FleetDashboard() {
           "clients",
           "finance",
           "payables",
+          "suppliers",
           "reports",
           "settings",
         ]
@@ -225,6 +236,14 @@ export default function FleetDashboard() {
     }
     if (key === "procurement") {
       return userPermissions.has("finance") || userPermissions.has("procurement");
+    }
+    if (key === "suppliers") {
+      return (
+        userPermissions.has("payables") ||
+        userPermissions.has("finance") ||
+        userPermissions.has("procurement") ||
+        userPermissions.has("suppliers")
+      );
     }
     if (key === "self_service") {
       return (
@@ -1848,6 +1867,8 @@ export default function FleetDashboard() {
       <ReportsPage canAccess={canAccess} />
     ) : active === "payables" ? (
       payablesContent
+    ) : active === "suppliers" ? (
+      <SuppliersPage canManage={canAccess("payables")} />
     ) : active === "custody" ? (
       <CustodyPage
         canApprove={canAccess("finance")}
@@ -2154,6 +2175,7 @@ export default function FleetDashboard() {
           canViewFinance={canAccess("finance")}
           canViewPayables={canAccess("payables")}
           canViewDocuments={canAccess("documents")}
+          canAccessInventory={canAccess("inventory")}
           onOpenPayables={() => {
             setMaintenanceDetail(null);
             onNavigate("payables");

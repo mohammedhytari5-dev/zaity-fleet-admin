@@ -17,6 +17,7 @@ export type ModuleKey =
   | "clients"
   | "finance"
   | "payables"
+  | "suppliers"
   | "custody"
   | "inventory"
   | "reports"
@@ -166,6 +167,7 @@ export type PaymentRow = Row & {
 export type PayableRow = Row & {
   ref: string;
   supplier: string;
+  supplierId?: number | null;
   description: string;
   amount: number;
   paid: number;
@@ -207,6 +209,25 @@ export type EmployeeRow = Row & {
   shiftStart?: string;
   shiftEnd?: string;
   gracePeriodMinutes?: number;
+};
+
+export type SupplierRow = Row & {
+  code: string;
+  name: string;
+  category: string;
+  contactPerson?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  vatNumber?: string | null;
+  crNumber?: string | null;
+  address?: string | null;
+  paymentTerms: string;
+  bankName?: string | null;
+  iban?: string | null;
+  rating: number;
+  status: "نشط" | "موقوف";
+  notes?: string | null;
+  createdAt: string | Date;
 };
 
 export type PayrollRow = Row & {

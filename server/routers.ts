@@ -18,7 +18,7 @@ import { driverRecordForViewer } from "./driver-access";
 import { projectRecordForViewer } from "./project-access";
 import { notificationModule, notificationsVisibleTo } from "./notification-access";
 import { claimRecordForViewer, contractRecordForViewer, paymentRecordForViewer } from "./contract-access";
-import { archiveClaim, archiveClient, archiveContract, archiveDocument, archiveDriver, archiveMaintenanceRequest, advanceMaintenanceRequest, decideMaintenanceApproval, settleMaintenanceAdvance, listMaintenanceEvents, archivePayment, archiveVehicleExpense, archiveVehicleRevenue, archiveProject, archiveSetting, deleteSetting, archiveVehicle, assignVehicleDriver, authenticateLocalUser, LastActiveAdminDemotionError, createLocalUser, createAuditLog, recordLoginAttempt, revokeUserSessions, createClaim, createClient, createContract, createDocument, createDriver, createEmployee, updateEmployee, archiveEmployee, listEmployees, linkEmployeeUser, createMaintenanceRequest, createNotification, createPayment, createProject, createPayable, registerPayablePayment, updatePayable, updatePayableStatus, listPayables, getPayableReceipt, createRepresentative, createTask, createVehicle, createVehicleExpense, createVehicleRevenue, getVehicleFinancialProfile, getVehicleReceipt, listVehicleFinancialSummaries, updateVehicleExpense, listAuditLogs, listClaims, listClients, listContracts, listDocuments, listDrivers, listMaintenanceRequests, listNotifications, getNotification, listPayments, listProjects, listRepresentatives, listSettings, listTasks, listTaskAssignees, listUsers, listVehicles, getCompanyReport, getMaintenanceCostForPeriod, getContractRelatedModuleAccess, markNotificationRead, updateClaim, updatePayment, updateSetting, updateClient, updateContract, updateContractStatus, updateProject, updateUserRole, updateUserAccess, updateDocument, updateDriver, updateMaintenanceRequest, updateTask, updateVehicle, upsertSetting, getDocument, listInventoryItems, listInventoryMovements, createInventoryItem, updateInventoryItem, recordInventoryMovement, archiveInventoryItem, listInventoryRequests, createInventoryRequest, decideInventoryRequest, issueInventoryRequest, listAccidents, getAccident, listAccidentEvents, createAccident, updateAccident, advanceAccident, listPurchaseRequests, getPurchaseRequest, createPurchaseRequest, updatePurchaseRequest, archivePurchaseRequest, listPurchaseQuotes, createPurchaseQuote, updatePurchaseQuote, selectPurchaseQuote, deletePurchaseQuote, issuePurchaseOrder, seedAccountsIfEmpty, listAccounts, createAccount, updateAccount, archiveAccount, listFiscalPeriods, createFiscalPeriod, closeFiscalPeriod, reopenFiscalPeriod, listJournalEntries, getJournalEntry, createJournalEntry, reverseJournalEntryRecord, getAccountLedger, getTrialBalance, getIncomeStatement, getBalanceSheet, createTaxInvoice, listTaxInvoices, getTaxInvoice, getVatDeclaration, listPayroll, createPayroll, updatePayroll, deletePayroll, generateMonthlyPayroll, listLeaves, createLeave, updateLeave, archiveLeave, listAttendance, createAttendance, updateAttendance, deleteAttendance, listBiometricDevices, createBiometricDevice, updateBiometricDevice, deleteBiometricDevice, syncBiometricDeviceLogs, listVehicleInspections, createVehicleInspection, updateVehicleInspection, deleteVehicleInspection, listEmployeeRequests, createEmployeeRequest, updateEmployeeRequest, deleteEmployeeRequest, listClientPortalRequests, createClientPortalRequest, updateClientPortalRequest, deleteClientPortalRequest, listCustodies, getCustody, createCustody, acceptCustody, recordCustodyExpense, settleCustody, listCustodyExpenses, listPayrollInquiries, createPayrollInquiry, respondPayrollInquiry, completeDriverMaintenance } from "./db";
+import { archiveClaim, archiveClient, archiveContract, archiveDocument, archiveDriver, archiveMaintenanceRequest, advanceMaintenanceRequest, decideMaintenanceApproval, settleMaintenanceAdvance, listMaintenanceEvents, archivePayment, archiveVehicleExpense, archiveVehicleRevenue, archiveProject, archiveSetting, deleteSetting, archiveVehicle, assignVehicleDriver, authenticateLocalUser, LastActiveAdminDemotionError, createLocalUser, createAuditLog, recordLoginAttempt, revokeUserSessions, createClaim, createClient, createContract, createDocument, createDriver, createEmployee, updateEmployee, archiveEmployee, listEmployees, linkEmployeeUser, createMaintenanceRequest, createNotification, createPayment, createProject, createPayable, registerPayablePayment, updatePayable, updatePayableStatus, listPayables, getPayableReceipt, createRepresentative, createTask, createVehicle, createVehicleExpense, createVehicleRevenue, getVehicleFinancialProfile, getVehicleReceipt, listVehicleFinancialSummaries, updateVehicleExpense, listAuditLogs, listClaims, listClients, listContracts, listDocuments, listDrivers, listMaintenanceRequests, listNotifications, getNotification, listPayments, listProjects, listRepresentatives, listSettings, listTasks, listTaskAssignees, listUsers, listVehicles, getCompanyReport, getMaintenanceCostForPeriod, getContractRelatedModuleAccess, markNotificationRead, updateClaim, updatePayment, updateSetting, updateClient, updateContract, updateContractStatus, updateProject, updateUserRole, updateUserAccess, updateDocument, updateDriver, updateMaintenanceRequest, updateTask, updateVehicle, upsertSetting, getDocument, listInventoryItems, listInventoryMovements, createInventoryItem, updateInventoryItem, recordInventoryMovement, archiveInventoryItem, listInventoryRequests, createInventoryRequest, decideInventoryRequest, issueInventoryRequest, listAccidents, getAccident, listAccidentEvents, createAccident, updateAccident, advanceAccident, listPurchaseRequests, getPurchaseRequest, createPurchaseRequest, updatePurchaseRequest, archivePurchaseRequest, listPurchaseQuotes, createPurchaseQuote, updatePurchaseQuote, selectPurchaseQuote, deletePurchaseQuote, issuePurchaseOrder, seedAccountsIfEmpty, listAccounts, createAccount, updateAccount, archiveAccount, listFiscalPeriods, createFiscalPeriod, closeFiscalPeriod, reopenFiscalPeriod, listJournalEntries, getJournalEntry, createJournalEntry, reverseJournalEntryRecord, getAccountLedger, getTrialBalance, getIncomeStatement, getBalanceSheet, createTaxInvoice, listTaxInvoices, getTaxInvoice, getVatDeclaration, listPayroll, createPayroll, updatePayroll, deletePayroll, generateMonthlyPayroll, listLeaves, createLeave, updateLeave, archiveLeave, listAttendance, createAttendance, updateAttendance, deleteAttendance, listBiometricDevices, createBiometricDevice, updateBiometricDevice, deleteBiometricDevice, syncBiometricDeviceLogs, listVehicleInspections, createVehicleInspection, updateVehicleInspection, deleteVehicleInspection, listEmployeeRequests, createEmployeeRequest, updateEmployeeRequest, deleteEmployeeRequest, listClientPortalRequests, createClientPortalRequest, updateClientPortalRequest, deleteClientPortalRequest, listCustodies, getCustody, createCustody, acceptCustody, recordCustodyExpense, settleCustody, listCustodyExpenses, listPayrollInquiries, createPayrollInquiry, respondPayrollInquiry, completeDriverMaintenance, listSuppliers, getSupplier, createSupplier, updateSupplier, archiveSupplier, getSupplierStatement } from "./db";
 import { AttendanceCalculator, BiometricLogParser } from "./attendance-domain";
 import { canEditMaintenanceQuote, maintenanceStages, type MaintenanceStage } from "../shared/maintenance-domain";
 import { maintenanceEventForViewer, maintenanceRecordForViewer } from "./maintenance-access";
@@ -208,6 +208,7 @@ const maintenanceInput = z.object({
   workDone: z.string().max(4000).nullable().optional(),
   parts: z.string().max(4000).nullable().optional(),
   technician: z.string().max(160).default("—"),
+  supplierId: z.number().int().positive().nullable().optional(),
   workshop: z.string().max(200).default("—"),
   manager: z.string().max(160).default("—"),
   start: z.string().max(32).default("—"),
@@ -272,7 +273,10 @@ const vehicleRevenueInput = z.object({
 });
 
 const payableInput = z.object({
-  ref: z.string().min(2).max(40), supplier: z.string().min(2).max(200), description: z.string().min(2).max(300),
+  ref: z.string().min(2).max(40),
+  supplierId: z.number().int().positive().nullable().optional(),
+  supplier: z.string().min(2).max(200),
+  description: z.string().min(2).max(300),
   amount: positiveMoneyInput, issueDate: z.string().max(32).default("—"), dueDate: z.string().max(32).default("—"), notes: z.string().max(4000).optional(),
   vehicleId: z.number().int().positive().nullable().optional(), maintenanceRequestId: z.number().int().positive().nullable().optional(), vehicleCategory: z.enum(["صيانة", "قطع غيار", "زيوت وفلاتر", "إطارات", "إصلاحات وأعطال", "تأمين", "فحص واستمارة", "مخالفات", "أخرى"]).nullable().optional(),
   receiptName: z.string().max(255).optional(), receiptUrl: z.string().max(1200000).refine(isSafeFileReference, "مرجع ملف غير صالح").optional(),
@@ -285,7 +289,12 @@ const userCreateInput = z.object({ name: z.string().min(2).max(160), username: z
 const settingInput = z.object({ category: z.string().min(2).max(80), key: z.string().min(2).max(80), label: z.string().min(2).max(160), value: z.string().min(1).max(255), active: z.number().int().min(0).max(1).default(1) });
 const inventoryItemInput = z.object({ sku: z.string().trim().min(2).max(64), name: z.string().trim().min(2).max(180), category: z.string().trim().min(2).max(100), unit: z.string().trim().min(1).max(40).default("قطعة"), reorderLevel: z.number().int().nonnegative().default(0), location: z.string().max(160).default("—"), notes: z.string().max(4000).optional() });
 const inventoryMovementInput = z.object({ itemId: z.number().int().positive(), direction: z.literal("استلام"), quantity: z.number().int().positive(), reference: z.string().max(120).default("—"), recipient: z.string().max(160).default("—"), notes: z.string().max(4000).optional() });
-const inventoryRequestInput = z.object({ ref: z.string().min(3).max(48), purpose: z.string().trim().min(3).max(500), items: z.array(z.object({ itemId: z.number().int().positive(), quantity: z.number().int().positive() })).min(1).max(40) }).refine(value => new Set(value.items.map(item => item.itemId)).size === value.items.length, { message: "لا تكرر الصنف نفسه في الطلب" });
+const inventoryRequestInput = z.object({
+  ref: z.string().min(3).max(48),
+  purpose: z.string().trim().min(3).max(500),
+  maintenanceRequestId: z.number().int().positive().nullable().optional(),
+  items: z.array(z.object({ itemId: z.number().int().positive(), quantity: z.number().int().positive() })).min(1).max(40)
+}).refine(value => new Set(value.items.map(item => item.itemId)).size === value.items.length, { message: "لا تكرر الصنف نفسه في الطلب" });
 const accidentInput = z.object({ ref: z.string().trim().min(3).max(48), vehicleId: z.number().int().positive().nullable(), vehiclePlate: z.string().min(2).max(32), driverId: z.number().int().positive().nullable().default(null), driverName: z.string().max(160).default("—"), occurredAt: z.string().min(8).max(40), location: z.string().max(240).default("—"), description: z.string().trim().min(5, "وصف الحادث يجب ألا يقل عن 5 أحرف").max(4000), najmReportNo: z.string().max(120).nullable().default(null), najmReportName: z.string().max(255).nullable().optional(), najmReportUrl: z.string().max(3000000).refine(isSafeFileReference, "مرجع ملف غير صالح").nullable().optional(), faultPercent: z.number().int().min(0).max(100).nullable().optional(), estimatedRepairCost: moneyInput.nullable().optional(), insurerName: z.string().max(180).nullable().optional(), insurerClaimRef: z.string().max(120).nullable().optional(), insurerClaimStatus: z.enum(["غير مرفوعة", "مرفوعة", "مقبولة", "مرفوضة", "مصروفة"]).optional(), settlementAmount: moneyInput.nullable().optional(), resolutionNotes: z.string().max(4000).nullable().optional() });
 
 const purchaseRequestInput = z.object({
@@ -299,6 +308,7 @@ const purchaseRequestInput = z.object({
 
 const purchaseQuoteInput = z.object({
   requestId: z.number().int().positive(),
+  supplierId: z.number().int().positive().nullable().optional(),
   supplierName: z.string().min(2).max(200),
   supplierVat: z.string().max(64).optional(),
   supplierPhone: z.string().max(64).optional(),
@@ -315,15 +325,33 @@ const purchaseQuoteInput = z.object({
   notes: z.string().max(2000).optional(),
 });
 
+const supplierInput = z.object({
+  code: z.string().trim().min(2).max(40).optional(),
+  name: z.string().trim().min(2).max(200),
+  category: z.string().trim().max(64).default("قطع غيار"),
+  contactPerson: z.string().max(160).optional(),
+  phone: z.string().max(64).optional(),
+  email: z.string().max(120).optional(),
+  vatNumber: z.string().max(64).optional(),
+  crNumber: z.string().max(64).optional(),
+  address: z.string().max(255).optional(),
+  paymentTerms: z.string().max(64).default("آجل 30 يوم"),
+  bankName: z.string().max(120).optional(),
+  iban: z.string().max(64).optional(),
+  rating: z.number().int().min(1).max(5).default(5),
+  status: z.enum(["نشط", "موقوف"]).default("نشط"),
+  notes: z.string().max(4000).optional(),
+});
+
 
 export const appRouter = router({
   inventory: router({
-    list: permissionProcedure("inventory").query(async () => listInventoryItems()),
+    list: permissionProcedure(["inventory", "maintenance"]).query(async () => listInventoryItems()),
     movements: permissionProcedure("inventory").input(z.object({ itemId: z.number().int().positive().optional() }).optional()).query(async ({ input }) => listInventoryMovements(input?.itemId)),
-    requests: permissionProcedure("inventory").query(async () => listInventoryRequests()),
+    requests: permissionProcedure(["inventory", "maintenance"]).query(async () => listInventoryRequests()),
     create: permissionProcedure("inventory").input(inventoryItemInput).mutation(async ({ ctx, input }) => requireRecord(await createInventoryItem(input, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }), "صنف المخزون")),
     update: permissionProcedure("inventory").input(z.object({ id: z.number().int().positive(), data: inventoryItemInput.partial() })).mutation(async ({ ctx, input }) => requireRecord(await updateInventoryItem(input.id, input.data, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }), "صنف المخزون")),
-    request: permissionProcedure("inventory").input(inventoryRequestInput).mutation(async ({ ctx, input }) => { try { return requireRecord(await createInventoryRequest(input, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }), "طلب الصرف"); } catch (error) { if (error instanceof Error && error.message.includes("صنف")) throw new TRPCError({ code: "BAD_REQUEST", message: error.message }); throw error; } }),
+    request: permissionProcedure(["inventory", "maintenance"]).input(inventoryRequestInput).mutation(async ({ ctx, input }) => { try { return requireRecord(await createInventoryRequest(input, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }), "طلب الصرف"); } catch (error) { if (error instanceof Error && error.message.includes("صنف")) throw new TRPCError({ code: "BAD_REQUEST", message: error.message }); throw error; } }),
     decideRequest: permissionProcedure("finance").input(z.object({ id: z.number().int().positive(), approved: z.boolean(), notes: z.string().max(4000).optional() })).mutation(async ({ ctx, input }) => { try { return requireRecord(await decideInventoryRequest(input.id, input.approved, input.notes, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }), "قرار طلب الصرف"); } catch (error) { if (error instanceof Error && error.message.includes("مسبقًا")) throw new TRPCError({ code: "CONFLICT", message: error.message }); throw error; } }),
     issueRequest: permissionProcedure("inventory").input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => { try { return requireRecord(await issueInventoryRequest(input.id, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }), "صرف الطلب"); } catch (error) { if (error instanceof Error && /رصيد|صرف|صنف/.test(error.message)) throw new TRPCError({ code: "PRECONDITION_FAILED", message: error.message }); throw error; } }),
     move: permissionProcedure("inventory").input(inventoryMovementInput).mutation(async ({ ctx, input }) => { try { return requireRecord(await recordInventoryMovement(input, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }), "حركة المخزون"); } catch (error) { if (error instanceof Error && /رصيد|كمية|الحد المدعوم/.test(error.message)) throw new TRPCError({ code: "BAD_REQUEST", message: error.message }); throw error; } }),
@@ -420,7 +448,7 @@ export const appRouter = router({
     expenseArchive: permissionProcedure("vehicles").input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => { requireReferencePermission(ctx.user, "finance"); return { success: await archiveVehicleExpense(input.id, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }) }; }),
     create: permissionProcedure("vehicles").input(vehicleInput).mutation(async ({ ctx, input }) => { if (input.employeeId) requireReferencePermission(ctx.user, "employees"); if (input.projectId !== null) requireReferencePermission(ctx.user, "projects"); if (input.driverId !== null) requireReferencePermission(ctx.user, "drivers"); if (input.clientId !== null) requireReferencePermission(ctx.user, "clients"); if (input.contractId !== null || input.purchasePrice !== undefined || input.purchaseDate !== undefined || input.inServiceDate !== undefined) requireReferencePermission(ctx.user, "finance"); return scopeVehicleForUser(ctx.user, requireRecord(await createVehicle(input), "المركبة")); }),
     update: permissionProcedure("vehicles").input(z.object({ id: z.number().int().positive(), data: vehicleInput.partial() })).mutation(async ({ ctx, input }) => { if (input.data.employeeId !== undefined) requireReferencePermission(ctx.user, "employees"); if (input.data.projectId !== undefined) requireReferencePermission(ctx.user, "projects"); if (input.data.driverId !== undefined) requireReferencePermission(ctx.user, "drivers"); if (input.data.clientId !== undefined) requireReferencePermission(ctx.user, "clients"); if (input.data.contractId !== undefined || input.data.purchasePrice !== undefined || input.data.purchaseDate !== undefined || input.data.inServiceDate !== undefined) requireReferencePermission(ctx.user, "finance"); return scopeVehicleForUser(ctx.user, requireRecord(await updateVehicle(input.id, input.data), "المركبة")); }),
-    assignDriver: permissionProcedure("vehicles").input(z.object({ vehicleId: z.number().int().positive(), driverId: z.number().int().positive().nullable() })).mutation(async ({ ctx, input }) => { requireReferencePermission(ctx.user, "drivers"); return scopeVehicleForUser(ctx.user, requireRecord(await assignVehicleDriver(input.vehicleId, input.driverId), "إسناد السائق")); }),
+    assignDriver: permissionProcedure("vehicles").input(z.object({ vehicleId: z.number().int().positive(), driverId: z.number().int().positive().nullable() })).mutation(async ({ ctx, input }) => { requireReferencePermission(ctx.user, "drivers"); return scopeVehicleForUser(ctx.user, requireRecord(await assignVehicleDriver(input.vehicleId, input.driverId, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }), "إسناد السائق")); }),
     archive: permissionProcedure("vehicles").input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => ({ success: await archiveVehicle(input.id) })),
   }),
   drivers: router({
@@ -989,6 +1017,28 @@ export const appRouter = router({
     update: permissionProcedure("payables").input(z.object({ id: z.number().int().positive(), data: payableInput.partial() })).mutation(async ({ ctx, input }) => { const current = (await listPayables() ?? []).find(row => row.id === input.id); requirePayableLinkAccess(ctx.user, current ?? {}); requirePayableLinkAccess(ctx.user, input.data); if (input.data.vehicleId && !(input.data.vehicleCategory ?? current?.vehicleCategory)) throw new TRPCError({ code: "BAD_REQUEST", message: "اختر فئة مصروف الباص المرتبط بالفاتورة" }); return requireRecord(await updatePayable(input.id, input.data, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }), "فاتورة المورد"); }),
     updateStatus: permissionProcedure("payables").input(z.object({ id: z.number().int().positive(), status: z.enum(["معتمدة", "ملغاة"]) })).mutation(async ({ ctx, input }) => { const current = (await listPayables() ?? []).find(row => row.id === input.id); if (current) requirePayableLinkAccess(ctx.user, current); return requireRecord(await updatePayableStatus(input.id, input.status, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }), "فاتورة المورد"); }),
     registerPayment: permissionProcedure("payables").input(payablePaymentInput).mutation(async ({ ctx, input }) => { const current = (await listPayables() ?? []).find(row => row.id === input.payableId); if (current) requirePayableLinkAccess(ctx.user, current); return requireRecord(await registerPayablePayment(input, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }), "الدفعة الصادرة"); }),
+  }),
+  suppliers: router({
+    list: permissionProcedure("payables").query(async () => (await listSuppliers()) ?? []),
+    detail: permissionProcedure("payables").input(z.object({ id: z.number().int().positive() })).query(async ({ input }) => {
+      const s = await getSupplier(input.id);
+      if (!s) throw new TRPCError({ code: "NOT_FOUND", message: "المورد غير موجود" });
+      return s;
+    }),
+    statement: permissionProcedure("payables").input(z.object({ id: z.number().int().positive() })).query(async ({ input }) => {
+      const statement = await getSupplierStatement(input.id);
+      if (!statement) throw new TRPCError({ code: "NOT_FOUND", message: "المورد غير موجود" });
+      return statement;
+    }),
+    create: permissionProcedure("payables").input(supplierInput).mutation(async ({ ctx, input }) => {
+      return requireRecord(await createSupplier(input, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }), "المورد");
+    }),
+    update: permissionProcedure("payables").input(z.object({ id: z.number().int().positive(), data: supplierInput.partial() })).mutation(async ({ ctx, input }) => {
+      return requireRecord(await updateSupplier(input.id, input.data, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }), "المورد");
+    }),
+    archive: permissionProcedure("payables").input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+      return requireRecord(await archiveSupplier(input.id, { id: ctx.user.id, name: ctx.user.name || ctx.user.username || "—" }), "المورد");
+    }),
   }),
   reports: router({
     summary: permissionProcedure("reports").input(z.object({ from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) })).query(async ({ ctx, input }) => {
